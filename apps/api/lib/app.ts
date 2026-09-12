@@ -14,8 +14,11 @@ import {
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { Hono } from "hono";
 import { adminRouter } from "../routers/admin.js";
+import { mcpRouter } from "../routers/mcp.js";
 import { publicAuthRoutes } from "../routers/public-auth.js";
 import { userRouter } from "../routers/user.js";
+import { createMcpGatewayRoutes } from "./mcp-gateway.js";
+import { createPlatformMcpRoutes } from "./mcp-platform.js";
 import type { AppContext } from "./context.js";
 import { getTrustedRequestId } from "./middleware.js";
 import {
@@ -75,6 +78,7 @@ function shouldCaptureTrpcError(error: TRPCError): boolean {
 // tRPC API router
 const appRouter = router({
   admin: adminRouter,
+  mcp: mcpRouter,
   user: userRouter,
 });
 
@@ -91,6 +95,8 @@ app.get("/api", (c) => {
     endpoints: {
       trpc: "/api/trpc",
       auth: "/api/auth",
+      mcp: "/mcp/:serverId",
+      platformMcp: "/api/platform-mcp",
       health: "/health",
     },
     documentation: {
@@ -106,6 +112,8 @@ app.get("/health", (c) => {
 });
 
 app.route("/api/auth", publicAuthRoutes);
+app.route("/mcp", createMcpGatewayRoutes());
+app.route("/api/platform-mcp", createPlatformMcpRoutes());
 
 // Authentication routes
 app.on(["GET", "POST", "OPTIONS"], "/api/auth/*", (c) => {

@@ -12,6 +12,10 @@ export const envSchema = z.object({
   APP_ORIGIN: z.url(),
   DATABASE_URL: z.url(),
   BETTER_AUTH_SECRET: z.string().min(32),
+  /** AES-256-GCM key material for upstream MCP credentials. Do not reuse BETTER_AUTH_SECRET. */
+  MCP_CREDENTIAL_SECRET: z.string().min(32),
+  /** Public API origin for MCP connection snippets. Falls back to the request origin. */
+  API_ORIGIN: z.url().optional(),
 
   POSTHOG_KEY: z.string().optional(),
   POSTHOG_HOST: z.url().default("https://us.i.posthog.com"),

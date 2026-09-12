@@ -14,6 +14,13 @@ export { default as app, appRouter } from "./lib/app.js";
 // Type exports
 export type { AppRouter } from "./lib/app.js";
 export type { AppContext } from "./lib/context.js";
+export type { ExecuteMappedToolResult } from "./services/mcp-executor-service.js";
+export type {
+  McpCredentialScheme,
+  McpServerWithMeta,
+  McpValueLocation,
+  TrafficLight,
+} from "./services/mcp-studio-service.js";
 // Re-export context type to fix TypeScript portability issues
 export type * from "./lib/context.js";
 
