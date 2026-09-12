@@ -64,6 +64,25 @@ export const enErrors = {
       [APP_ERROR_CODES.STORAGE_ACCESS_DENIED]:
         "You do not have access to this object.",
 
+      [APP_ERROR_CODES.MCP_SERVER_NOT_FOUND]: "MCP server not found.",
+      [APP_ERROR_CODES.MCP_TOOL_NOT_FOUND]: "MCP tool not found.",
+      [APP_ERROR_CODES.MCP_CREDENTIAL_REQUIRED]:
+        "This tool requires an upstream credential.",
+      [APP_ERROR_CODES.MCP_HOST_NOT_ALLOWED]:
+        "The request target is not on the allowed host list.",
+      [APP_ERROR_CODES.MCP_MUTATION_NOT_ALLOWED]:
+        "Mutating this tool is not allowed until you enable it.",
+      [APP_ERROR_CODES.MCP_AGENT_TOKEN_INVALID]:
+        "This agent token is invalid or revoked.",
+      [APP_ERROR_CODES.MCP_UPSTREAM_ERROR]:
+        "The upstream API returned an error.",
+      [APP_ERROR_CODES.MCP_CURL_INVALID]:
+        "That curl command could not be parsed.",
+      [APP_ERROR_CODES.MCP_TOOL_NAME_CONFLICT]:
+        "A tool with this name already exists on the server.",
+      [APP_ERROR_CODES.MCP_SERVER_SLUG_CONFLICT]:
+        "A server with this slug already exists on your account.",
+
       [APP_ERROR_CODES.ROUTE_NOT_FOUND]: "This API route does not exist.",
       [APP_ERROR_CODES.INTERNAL_ERROR]:
         "An unexpected error occurred. Please try again.",

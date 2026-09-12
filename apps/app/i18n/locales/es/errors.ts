@@ -72,6 +72,27 @@ export const esErrors = {
       [APP_ERROR_CODES.STORAGE_ACCESS_DENIED]:
         "No tienes acceso a este objeto.",
 
+      [APP_ERROR_CODES.MCP_SERVER_NOT_FOUND]:
+        "No se encontr\u00f3 el servidor MCP.",
+      [APP_ERROR_CODES.MCP_TOOL_NOT_FOUND]:
+        "No se encontr\u00f3 la herramienta MCP.",
+      [APP_ERROR_CODES.MCP_CREDENTIAL_REQUIRED]:
+        "Esta herramienta requiere una credencial de origen.",
+      [APP_ERROR_CODES.MCP_HOST_NOT_ALLOWED]:
+        "El destino de la petici\u00f3n no est\u00e1 en la lista de hosts permitidos.",
+      [APP_ERROR_CODES.MCP_MUTATION_NOT_ALLOWED]:
+        "No puedes mutar esta herramienta hasta que la habilites.",
+      [APP_ERROR_CODES.MCP_AGENT_TOKEN_INVALID]:
+        "Este token de agente no es v\u00e1lido o fue revocado.",
+      [APP_ERROR_CODES.MCP_UPSTREAM_ERROR]:
+        "La API de origen devolvi\u00f3 un error.",
+      [APP_ERROR_CODES.MCP_CURL_INVALID]:
+        "No se pudo analizar ese comando curl.",
+      [APP_ERROR_CODES.MCP_TOOL_NAME_CONFLICT]:
+        "Ya existe una herramienta con este nombre en el servidor.",
+      [APP_ERROR_CODES.MCP_SERVER_SLUG_CONFLICT]:
+        "Ya existe un servidor con este slug en tu cuenta.",
+
       [APP_ERROR_CODES.ROUTE_NOT_FOUND]: "Esta ruta de API no existe.",
       [APP_ERROR_CODES.INTERNAL_ERROR]:
         "Ocurri\u00f3 un error inesperado. Int\u00e9ntalo de nuevo.",
