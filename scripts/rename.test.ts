@@ -31,9 +31,7 @@ describe("rename utility", () => {
   });
 
   it("counts non-overlapping matches", () => {
-    expect(countMatches("rest2mcp and rest2mcp", "rest2mcp")).toBe(
-      2,
-    );
+    expect(countMatches("rest2mcp and rest2mcp", "rest2mcp")).toBe(2);
     expect(countMatches("no matches here", "rest2mcp")).toBe(0);
   });
 
