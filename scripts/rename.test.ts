@@ -10,8 +10,8 @@ import {
 } from "./rename";
 
 describe("rename utility", () => {
-  it("uses Charro Stack as the default search pattern", () => {
-    expect(DEFAULT_SEARCH_PATTERN).toBe("Charro Stack");
+  it("uses rest2mcp as the default search pattern", () => {
+    expect(DEFAULT_SEARCH_PATTERN).toBe("rest2mcp");
   });
 
   it("excludes template-layer files from rename", () => {
@@ -31,10 +31,10 @@ describe("rename utility", () => {
   });
 
   it("counts non-overlapping matches", () => {
-    expect(countMatches("Charro Stack and Charro Stack", "Charro Stack")).toBe(
+    expect(countMatches("rest2mcp and rest2mcp", "rest2mcp")).toBe(
       2,
     );
-    expect(countMatches("no matches here", "Charro Stack")).toBe(0);
+    expect(countMatches("no matches here", "rest2mcp")).toBe(0);
   });
 
   it("excludes template-layer files from rename targets", async () => {

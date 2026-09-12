@@ -14,7 +14,7 @@ async function generateAuthSchema() {
   // Create the auth instance to get the configuration
   const auth = createAuth(mockDb, {
     ENVIRONMENT: env.ENVIRONMENT || "development",
-    APP_NAME: env.APP_NAME || "Charro Stack",
+    APP_NAME: env.APP_NAME || "rest2mcp",
     APP_ORIGIN: env.APP_ORIGIN || "http://localhost:3000",
     BETTER_AUTH_SECRET: env.BETTER_AUTH_SECRET || "mock-secret",
     RESEND_API_KEY: env.RESEND_API_KEY || "mock-resend-key",

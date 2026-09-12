@@ -6,7 +6,7 @@ export default function OTPVerificationPreview() {
     <OTPEmail
       otp="789012"
       type="email-verification"
-      appName="Charro Stack"
+      appName="rest2mcp"
       appUrl="https://example.com"
       copy={getEmailCopy("en").otp}
     />

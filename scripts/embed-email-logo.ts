@@ -16,7 +16,7 @@ const height = png.readUInt32BE(20);
 writeFileSync(
   tsPath,
   [
-    "// Charro Stack logo for transactional emails (dark badge, embedded base64).",
+    "// rest2mcp logo for transactional emails (dark badge, embedded base64).",
     "// Regenerate: bun email:embed-logo (after editing apps/email/assets/logo-email.png)",
     "",
     `export const EMAIL_LOGO_DATA_URI = "data:image/png;base64,${base64}";`,

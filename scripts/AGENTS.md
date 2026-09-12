@@ -17,7 +17,7 @@ Local guidance for the scripts workspace in `scripts/`. Read [../AGENTS.md](../A
 
 ## Existing Scripts
 
-- `rename.ts`: Renames the demo product from **Charro Stack** to a custom name across the codebase. Excludes template-layer files (`LICENSE`, `README.md`, `openspec/`). Supports `--dry-run`.
+- `rename.ts`: Renames the demo product from **rest2mcp** to a custom name across the codebase. Excludes template-layer files (`LICENSE`, `README.md`, `openspec/`). Supports `--dry-run`.
 - `post-install.ts`: Creates `.env.local` and other Git-ignored files after `bun install`.
 - `typecheck-staged.ts`: Typechecks only staged TypeScript files for faster pre-commit hooks.
 - `mcp.ts`: Example MCP server stub (not a production integration).

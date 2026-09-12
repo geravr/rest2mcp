@@ -6,7 +6,7 @@ export const enLayout = {
     },
 
     topbar: {
-      logoAlt: "Charro Stack",
+      logoAlt: "rest2mcp",
       primaryNavigation: "Primary navigation",
       openNavigationMenu: "Open navigation menu",
       openUserMenu: "Open user menu",
@@ -24,7 +24,7 @@ export const enLayout = {
     },
 
     sidebar: {
-      logoAlt: "Charro Stack",
+      logoAlt: "rest2mcp",
     },
   },
 

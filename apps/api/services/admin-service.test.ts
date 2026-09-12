@@ -142,7 +142,7 @@ function makeDb(options?: {
 }
 
 const env = {
-  APP_NAME: "Charro Stack",
+  APP_NAME: "rest2mcp",
   APP_ORIGIN: "http://localhost:5173",
   RESEND_API_KEY: "re_test",
   RESEND_EMAIL_FROM: "hello@example.com",

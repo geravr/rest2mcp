@@ -6,7 +6,7 @@ export default function OTPSignInEsPreview() {
     <OTPEmail
       otp="123456"
       type="sign-in"
-      appName="Charro Stack"
+      appName="rest2mcp"
       appUrl="https://example.com"
       copy={getEmailCopy("es").otp}
     />

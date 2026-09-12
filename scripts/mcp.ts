@@ -14,7 +14,7 @@ const $ = execa({ cwd: rootDir });
  * @see https://code.visualstudio.com/docs/copilot/chat/mcp-servers
  */
 const server = new McpServer({
-  name: "Charro Stack",
+  name: "rest2mcp",
   version: "0.0.0",
 });
 

@@ -1,7 +1,7 @@
 import { join, relative } from "path";
 import { readdir, readFile, writeFile, stat } from "fs/promises";
 
-export const DEFAULT_SEARCH_PATTERN = "Charro Stack";
+export const DEFAULT_SEARCH_PATTERN = "rest2mcp";
 
 /** Paths relative to repo root that must never be modified by rename. */
 export const EXCLUDE_FILE_PATHS = new Set(["LICENSE", "README.md"]);
@@ -98,7 +98,7 @@ export async function collectRenameTargets(
 async function main() {
   const dryRun = process.argv.includes("--dry-run");
 
-  console.log("\n🚀 Charro Stack Renaming Utility");
+  console.log("\n🚀 rest2mcp Renaming Utility");
   console.log(
     `This script finds occurrences of "${DEFAULT_SEARCH_PATTERN}" in the demo product layer and replaces them with your product name.\n`,
   );

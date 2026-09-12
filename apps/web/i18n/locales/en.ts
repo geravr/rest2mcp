@@ -1,11 +1,11 @@
 export const en = {
   meta: {
-    title: "Charro Stack",
+    title: "rest2mcp",
     description:
       "Charro Digital's internal Bun-based monorepo template for building modern SaaS applications.",
   },
   header: {
-    logoAlt: "Charro Stack",
+    logoAlt: "rest2mcp",
     skipToContent: "Skip to content",
     login: "Log in",
     signup: "Sign up",
@@ -32,7 +32,7 @@ export const en = {
   hero: {
     title: "Charro Digital's stack for type-safe SaaS",
     subtitle:
-      "Charro Stack is our internal Bun monorepo: single-user email OTP auth, Hono + tRPC, Drizzle on PostgreSQL, S3 uploads, and a static marketing site.",
+      "rest2mcp is our internal Bun monorepo: single-user email OTP auth, Hono + tRPC, Drizzle on PostgreSQL, S3 uploads, and a static marketing site.",
     ctaStart: "Sign up",
     ctaDocs: "See what's included",
   },
@@ -116,7 +116,7 @@ packages/
 db/            # Drizzle schema, migrations & seed scripts`,
   },
   finalCta: {
-    title: "Start from Charro Stack",
+    title: "Start from rest2mcp",
     subtitle:
       "Clone the repo, run bun rename for your product name, and replace this site with your own.",
     cta: "Sign up",
@@ -125,8 +125,8 @@ db/            # Drizzle schema, migrations & seed scripts`,
     title: "Frequently Asked Questions",
     items: [
       {
-        q: "What is Charro Stack?",
-        a: "Charro Stack is Charro Digital's internal monorepo template for developers who want a solid architectural foundation for SaaS products.",
+        q: "What is rest2mcp?",
+        a: "rest2mcp is Charro Digital's internal monorepo template for developers who want a solid architectural foundation for SaaS products.",
       },
       {
         q: "Does it support user accounts?",

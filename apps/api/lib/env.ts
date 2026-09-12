@@ -8,7 +8,7 @@ import { z } from "zod";
  */
 export const envSchema = z.object({
   ENVIRONMENT: z.enum(["production", "staging", "preview", "development"]),
-  APP_NAME: z.string().default("Charro Stack"),
+  APP_NAME: z.string().default("rest2mcp"),
   APP_ORIGIN: z.url(),
   DATABASE_URL: z.url(),
   BETTER_AUTH_SECRET: z.string().min(32),

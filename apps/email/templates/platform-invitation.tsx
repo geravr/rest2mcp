@@ -26,7 +26,7 @@ export function PlatformInvitationEmail({
   expiresInDays = 7,
   copy,
 }: PlatformInvitationEmailProps) {
-  const resolvedAppName = appName || "Charro Stack";
+  const resolvedAppName = appName || "rest2mcp";
   const preview = interpolate(copy.preview, { appName: resolvedAppName });
 
   return (

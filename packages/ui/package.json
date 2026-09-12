@@ -1,7 +1,7 @@
 {
   "name": "@repo/ui",
   "version": "0.1.0",
-  "description": "Reusable UI components for Charro Stack (monorepo)",
+  "description": "Reusable UI components for rest2mcp (monorepo)",
   "type": "module",
   "main": "./index.ts",
   "types": "./index.d.ts",

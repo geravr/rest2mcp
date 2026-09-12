@@ -23,7 +23,7 @@ export const esDashboard = {
     gettingStarted: {
       title: "Primeros pasos",
       description:
-        "Charro Stack es la plantilla interna de Charro Digital. A\u00f1ade tu propio contenido de panel, m\u00e9tricas y flujos respaldados por datos reales. Edita rutas en",
+        "rest2mcp es la plantilla interna de Charro Digital. A\u00f1ade tu propio contenido de panel, m\u00e9tricas y flujos respaldados por datos reales. Edita rutas en",
       routesPath: "apps/app/routes/",
     },
   },

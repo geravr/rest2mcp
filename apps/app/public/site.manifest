@@ -1,6 +1,6 @@
 {
-  "short_name": "Charro Stack",
-  "name": "Charro Stack",
+  "short_name": "rest2mcp",
+  "name": "rest2mcp",
   "icons": [
     {
       "src": "favicon-32.png",

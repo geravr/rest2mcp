@@ -43,7 +43,7 @@ const colors = {
 export function BaseTemplate({
   preview,
   children,
-  appName = "Charro Stack",
+  appName = "rest2mcp",
   appUrl = "https://example.com",
 }: BaseTemplateProps) {
   return (

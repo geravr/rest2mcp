@@ -1,10 +1,10 @@
 # AGENTS.md
 
-Guidance for AI coding agents working in the **Charro Stack** monorepo. This root file is the portable monorepo layer. Domain-specific rules can live in local `AGENTS.md` files under each workspace.
+Guidance for AI coding agents working in the **rest2mcp** monorepo. This root file is the portable monorepo layer. Domain-specific rules can live in local `AGENTS.md` files under each workspace.
 
 ## Project Snapshot
 
-- **Charro Stack** is Charro Digital's internal Bun-based monorepo template for building modern, type-safe SaaS applications.
+- **rest2mcp** is Charro Digital's internal Bun-based monorepo template for building modern, type-safe SaaS applications.
 - **Two-layer identity:** The **template layer** (LICENSE, maintainer README, studio authorship) stays fixed. The **demo product layer** (`APP_NAME`, manifests, i18n product name, email fallbacks) is renamable via `bun rename` when cloning for a new product.
 - Workspaces:
   - [apps/api](apps/api) — Hono + tRPC backend, Better Auth, Drizzle, direct PostgreSQL access.

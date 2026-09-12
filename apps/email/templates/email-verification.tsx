@@ -21,7 +21,7 @@ export function EmailVerification({
   appUrl,
   copy,
 }: EmailVerificationProps) {
-  const resolvedAppName = appName || "Charro Stack";
+  const resolvedAppName = appName || "rest2mcp";
   const preview = interpolate(copy.preview, { appName: resolvedAppName });
   const greeting = copy.greeting.replace(
     "{userName}",

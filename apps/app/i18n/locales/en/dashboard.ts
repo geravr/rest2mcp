@@ -23,7 +23,7 @@ export const enDashboard = {
     gettingStarted: {
       title: "Getting started",
       description:
-        "Charro Stack is Charro Digital's internal template. Add your own dashboard content, metrics, and workflows backed by real data. Edit routes in",
+        "rest2mcp is Charro Digital's internal template. Add your own dashboard content, metrics, and workflows backed by real data. Edit routes in",
       routesPath: "apps/app/routes/",
     },
   },

@@ -6,7 +6,7 @@ export default function EmailVerificationEsPreview() {
     <EmailVerification
       userName="Mar\u00eda"
       verificationUrl="https://example.com/verify?token=abc123"
-      appName="Charro Stack"
+      appName="rest2mcp"
       appUrl="https://example.com"
       copy={getEmailCopy("es").emailVerification}
     />

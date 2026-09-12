@@ -6,7 +6,7 @@ export const esLayout = {
     },
 
     topbar: {
-      logoAlt: "Charro Stack",
+      logoAlt: "rest2mcp",
       primaryNavigation: "Navegaci\u00f3n principal",
       openNavigationMenu: "Abrir men\u00fa de navegaci\u00f3n",
       openUserMenu: "Abrir men\u00fa de usuario",
@@ -24,7 +24,7 @@ export const esLayout = {
     },
 
     sidebar: {
-      logoAlt: "Charro Stack",
+      logoAlt: "rest2mcp",
     },
   },
 
