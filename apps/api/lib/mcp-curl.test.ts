@@ -24,11 +24,15 @@ describe("parseCurlCommand", () => {
     expect(parsed.method).toBe("POST");
     expect(parsed.body).toBe('{"name":"foo"}');
     expect(parsed.headers).toEqual({ "Content-Type": "application/json" });
-    expect(JSON.stringify(parsed)).not.toContain("secret-token");
+    // Tool-bound parts stay secret-free; the suggestion carries the raw value
+    // so the service can store it as an encrypted variable.
+    expect(parsed.url).not.toContain("secret-token");
+    expect(JSON.stringify(parsed.headers)).not.toContain("secret-token");
+    expect(parsed.body).not.toContain("secret-token");
     expect(parsed.credentialSuggestion).toEqual({
       scheme: "bearer",
       headerName: "Authorization",
-      valueLocation: "header",
+      value: "secret-token",
     });
   });
 
@@ -38,7 +42,11 @@ describe("parseCurlCommand", () => {
     );
 
     expect(parsed.headers).toEqual({});
-    expect(parsed.credentialSuggestion?.scheme).toBe("api_key");
+    expect(parsed.credentialSuggestion).toEqual({
+      scheme: "api_key",
+      headerName: "X-API-Key",
+      value: "super-secret",
+    });
     expect(JSON.stringify(parsed.headers)).not.toContain("super-secret");
   });
 

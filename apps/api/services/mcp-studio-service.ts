@@ -5,19 +5,21 @@ import type { Paginated, PaginationInput } from "@repo/core";
 import {
   mcpAgentToken,
   mcpCallLog,
-  mcpCredential,
   mcpServer,
+  mcpServerVariable,
   mcpTool,
-  type McpParamMap,
+  type McpRequestTemplate,
   type McpServer,
+  type McpToolParam,
 } from "@repo/db";
 import { and, count, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { APP_ERROR_CODES, appError } from "../lib/app-error.js";
 import { generateAgentToken, hashAgentToken } from "../lib/mcp-agent-token.js";
 import { encryptCredential } from "../lib/mcp-crypto.js";
-import { parseCurlCommand } from "../lib/mcp-curl.js";
+import { isAuthHeaderName, parseCurlCommand } from "../lib/mcp-curl.js";
 import { MCP_MAX_TOOLS_PER_SERVER } from "../lib/mcp-redact.js";
+import { extractPlaceholders } from "../lib/mcp-template.js";
 import { paginate } from "../lib/paginate.js";
 import { isUserBanned } from "../lib/user-access.js";
 import { MUTATING_METHODS, READ_METHODS } from "./mcp-executor-service.js";
@@ -26,8 +28,6 @@ type DB = PostgresJsDatabase<Record<string, unknown>>;
 
 export type TrafficLight = "draft" | "green" | "yellow" | "red" | "paused";
 export type McpServerStatus = "draft" | "live" | "paused";
-export type McpCredentialScheme = "bearer" | "api_key" | "header";
-export type McpValueLocation = "header" | "query";
 export type McpToolSource = "manual" | "curl";
 export type McpHttpMethod =
   "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -45,6 +45,8 @@ export type UpdateServerInput = {
   baseUrl?: string;
   status?: McpServerStatus;
   allowedHosts?: string[];
+  defaultHeaders?: Record<string, string> | null;
+  defaultQuery?: Record<string, string> | null;
 };
 
 export type CreateToolInput = {
@@ -52,7 +54,8 @@ export type CreateToolInput = {
   description?: string | null;
   method: McpHttpMethod;
   pathTemplate: string;
-  paramMap?: McpParamMap;
+  requestTemplate?: McpRequestTemplate;
+  params?: McpToolParam[];
   allowMutation?: boolean;
   enabled?: boolean;
 };
@@ -62,17 +65,24 @@ export type UpdateToolInput = {
   description?: string | null;
   method?: McpHttpMethod;
   pathTemplate?: string;
-  paramMap?: McpParamMap;
+  requestTemplate?: McpRequestTemplate;
+  params?: McpToolParam[];
   allowMutation?: boolean;
   enabled?: boolean;
 };
 
-export type SetCredentialInput = {
-  scheme: McpCredentialScheme;
-  headerName?: string | null;
-  valueLocation: McpValueLocation;
-  secret?: string;
+export type TemplateWarning = {
+  type: "placeholder_without_param" | "param_without_placeholder";
+  name: string;
 };
+
+export type SetVariableInput = {
+  name: string;
+  isSecret: boolean;
+  value: string;
+};
+
+const VARIABLE_NAME_PATTERN = /^[a-z][a-z0-9_]*$/;
 
 function isUniqueViolation(error: unknown): boolean {
   return (
@@ -132,6 +142,12 @@ export function parseBaseUrl(raw: string): URL {
   url.hash = "";
   url.search = "";
   return url;
+}
+
+/** Origin plus any path prefix, without query, fragment, or trailing slashes. */
+export function formatBaseUrl(url: URL): string {
+  const path = url.pathname.replace(/\/+$/, "");
+  return `${url.origin}${path}`;
 }
 
 export function deriveAllowedHosts(
@@ -223,11 +239,16 @@ async function recentProductCallStatuses(
   return rows.map((row) => row.status);
 }
 
-async function hasCredential(db: DB, serverId: string): Promise<boolean> {
+async function hasSecretVariable(db: DB, serverId: string): Promise<boolean> {
   const [row] = await db
-    .select({ id: mcpCredential.id })
-    .from(mcpCredential)
-    .where(eq(mcpCredential.serverId, serverId))
+    .select({ id: mcpServerVariable.id })
+    .from(mcpServerVariable)
+    .where(
+      and(
+        eq(mcpServerVariable.serverId, serverId),
+        eq(mcpServerVariable.isSecret, true),
+      ),
+    )
     .limit(1);
   return Boolean(row);
 }
@@ -246,7 +267,7 @@ export async function attachTrafficLight(
       const [enabledToolCount, recentCallStatuses, secret] = await Promise.all([
         countEnabledTools(db, server.id),
         recentProductCallStatuses(db, server.id),
-        hasCredential(db, server.id),
+        hasSecretVariable(db, server.id),
       ]);
       return {
         ...server,
@@ -266,29 +287,30 @@ export function toRecipeTemplate(input: {
   description: string | null;
   baseUrl: string;
   allowedHosts: string[];
+  defaultHeaders: Record<string, string> | null;
+  defaultQuery: Record<string, string> | null;
   tools: Array<{
     name: string;
     description: string | null;
     method: string;
     pathTemplate: string;
-    paramMap: McpParamMap;
+    requestTemplate: McpRequestTemplate | null;
+    params: McpToolParam[] | null;
     allowMutation: boolean;
     enabled: boolean;
     source: string;
   }>;
-  credential: {
-    scheme: string;
-    headerName: string | null;
-    valueLocation: string;
-  } | null;
+  variables: Array<{ name: string; isSecret: boolean }>;
 }) {
   return {
     name: input.name,
     description: input.description,
     baseUrl: input.baseUrl,
     allowedHosts: input.allowedHosts,
+    defaultHeaders: input.defaultHeaders,
+    defaultQuery: input.defaultQuery,
     tools: input.tools,
-    credentialScheme: input.credential,
+    variables: input.variables,
   };
 }
 
@@ -330,8 +352,9 @@ export async function createServer(
   input: CreateServerInput,
 ) {
   const parsed = parseBaseUrl(input.baseUrl);
+  const baseUrl = formatBaseUrl(parsed);
   const slug = slugifyName(input.slug ?? input.name);
-  const allowedHosts = deriveAllowedHosts(parsed.origin);
+  const allowedHosts = deriveAllowedHosts(baseUrl);
 
   try {
     const [created] = await db
@@ -341,7 +364,7 @@ export async function createServer(
         name: input.name.trim(),
         slug,
         description: input.description?.trim() || null,
-        baseUrl: parsed.origin,
+        baseUrl,
         allowedHosts,
         status: "draft",
       })
@@ -369,36 +392,38 @@ export async function getServer(db: DB, userId: string, serverId: string) {
     .from(mcpTool)
     .where(eq(mcpTool.serverId, server.id))
     .orderBy(desc(mcpTool.createdAt));
-  const [credential] = await db
-    .select({
-      scheme: mcpCredential.scheme,
-      headerName: mcpCredential.headerName,
-      valueLocation: mcpCredential.valueLocation,
-    })
-    .from(mcpCredential)
-    .where(eq(mcpCredential.serverId, server.id))
-    .limit(1);
+  const variables = await listVariables(db, userId, server.id);
 
   return {
     ...withMeta,
     tools,
-    credential: credential
-      ? { ...credential, hasSecret: true }
-      : {
-          hasSecret: false,
-          scheme: null,
-          headerName: null,
-          valueLocation: null,
-        },
+    variables,
     recipe: toRecipeTemplate({
       name: server.name,
       description: server.description,
       baseUrl: server.baseUrl,
       allowedHosts: server.allowedHosts,
+      defaultHeaders: server.defaultHeaders,
+      defaultQuery: server.defaultQuery,
       tools,
-      credential,
+      variables: variables.map(({ name, isSecret }) => ({ name, isSecret })),
     }),
   };
+}
+
+/** Auth-ish headers must reference a variable; literal secrets are rejected. */
+export function assertNoPlaintextSecretHeaders(
+  headers: Record<string, string>,
+): void {
+  for (const [name, value] of Object.entries(headers)) {
+    if (isAuthHeaderName(name) && !value.includes("{{")) {
+      throw appError({
+        appCode: APP_ERROR_CODES.MCP_PLAINTEXT_SECRET,
+        message: `Header "${name}" looks auth-related. Store the secret in a secret variable and reference it with {{name}}.`,
+        status: 400,
+      });
+    }
+  }
 }
 
 export async function updateServer(
@@ -409,13 +434,17 @@ export async function updateServer(
 ) {
   const server = await requireOwnedServer(db, userId, serverId);
   const nextBaseUrl = input.baseUrl
-    ? parseBaseUrl(input.baseUrl).origin
+    ? formatBaseUrl(parseBaseUrl(input.baseUrl))
     : server.baseUrl;
   const allowedHosts = input.allowedHosts
     ? deriveAllowedHosts(nextBaseUrl, input.allowedHosts)
     : input.baseUrl
       ? deriveAllowedHosts(nextBaseUrl, server.allowedHosts)
       : server.allowedHosts;
+
+  if (input.defaultHeaders) {
+    assertNoPlaintextSecretHeaders(input.defaultHeaders);
+  }
 
   const [updated] = await db
     .update(mcpServer)
@@ -428,6 +457,14 @@ export async function updateServer(
       baseUrl: nextBaseUrl,
       allowedHosts,
       status: input.status ?? server.status,
+      defaultHeaders:
+        input.defaultHeaders === undefined
+          ? server.defaultHeaders
+          : input.defaultHeaders,
+      defaultQuery:
+        input.defaultQuery === undefined
+          ? server.defaultQuery
+          : input.defaultQuery,
     })
     .where(eq(mcpServer.id, server.id))
     .returning();
@@ -494,6 +531,57 @@ async function assertToolCapacity(db: DB, serverId: string) {
   }
 }
 
+async function listVariableNames(
+  db: DB,
+  serverId: string,
+): Promise<Set<string>> {
+  const rows = await db
+    .select({ name: mcpServerVariable.name })
+    .from(mcpServerVariable)
+    .where(eq(mcpServerVariable.serverId, serverId));
+  return new Set(rows.map((row) => row.name));
+}
+
+export function collectTemplateWarnings(input: {
+  pathTemplate: string;
+  requestTemplate: McpRequestTemplate;
+  params: McpToolParam[];
+  variableNames: Set<string>;
+}): TemplateWarning[] {
+  const placeholders = new Set<string>([
+    ...extractPlaceholders(input.pathTemplate),
+    ...Object.values(input.requestTemplate.query ?? {}).flatMap(
+      extractPlaceholders,
+    ),
+    ...Object.values(input.requestTemplate.headers ?? {}).flatMap(
+      extractPlaceholders,
+    ),
+    ...(input.requestTemplate.body
+      ? extractPlaceholders(input.requestTemplate.body)
+      : []),
+  ]);
+  const paramNames = new Set(input.params.map((param) => param.name));
+  const warnings: TemplateWarning[] = [];
+  for (const name of placeholders) {
+    if (!paramNames.has(name) && !input.variableNames.has(name)) {
+      warnings.push({ type: "placeholder_without_param", name });
+    }
+  }
+  for (const name of paramNames) {
+    if (!placeholders.has(name)) {
+      warnings.push({ type: "param_without_placeholder", name });
+    }
+  }
+  return warnings;
+}
+
+function validateToolTemplates(input: {
+  pathTemplate: string;
+  requestTemplate: McpRequestTemplate;
+}): void {
+  assertNoPlaintextSecretHeaders(input.requestTemplate.headers ?? {});
+}
+
 export async function createTool(
   db: DB,
   userId: string,
@@ -513,6 +601,18 @@ export async function createTool(
     });
   }
   const flags = mutationDefaults(method, input.allowMutation, input.enabled);
+  const pathTemplate = input.pathTemplate.startsWith("/")
+    ? input.pathTemplate
+    : `/${input.pathTemplate}`;
+  const requestTemplate = input.requestTemplate ?? {};
+  const params = input.params ?? [];
+  validateToolTemplates({ pathTemplate, requestTemplate });
+  const warnings = collectTemplateWarnings({
+    pathTemplate,
+    requestTemplate,
+    params,
+    variableNames: await listVariableNames(db, server.id),
+  });
 
   try {
     const [created] = await db
@@ -522,17 +622,16 @@ export async function createTool(
         name,
         description: input.description?.trim() || null,
         method,
-        pathTemplate: input.pathTemplate.startsWith("/")
-          ? input.pathTemplate
-          : `/${input.pathTemplate}`,
-        paramMap: input.paramMap ?? {},
+        pathTemplate,
+        requestTemplate,
+        params,
         allowMutation: flags.allowMutation,
         enabled: flags.enabled,
         source,
       })
       .returning();
     await promoteServerIfReady(db, server.id, server.status);
-    return created;
+    return { ...created, warnings };
   } catch (error) {
     if (isUniqueViolation(error)) {
       throw appError({
@@ -550,7 +649,7 @@ export function toolPathFromCurl(
   curlUrl: string,
 ): {
   pathTemplate: string;
-  staticQuery: Record<string, string>;
+  query: Record<string, string>;
 } {
   const target = new URL(curlUrl);
   const base = new URL(serverBaseUrl);
@@ -563,11 +662,73 @@ export function toolPathFromCurl(
     pathTemplate = pathTemplate.slice(base.pathname.length) || "/";
     if (!pathTemplate.startsWith("/")) pathTemplate = `/${pathTemplate}`;
   }
-  const staticQuery: Record<string, string> = {};
+  const query: Record<string, string> = {};
   target.searchParams.forEach((value, key) => {
-    staticQuery[key] = value;
+    query[key] = value;
   });
-  return { pathTemplate, staticQuery };
+  return { pathTemplate, query };
+}
+
+function inferBodyType(
+  headers: Record<string, string>,
+  body: string | null,
+): "json" | "form" | "raw" | undefined {
+  if (body === null) return undefined;
+  const contentType = Object.entries(headers).find(
+    ([name]) => name.toLowerCase() === "content-type",
+  )?.[1];
+  if (contentType?.includes("application/x-www-form-urlencoded")) return "form";
+  if (contentType?.toLowerCase().includes("json")) return "json";
+  return "raw";
+}
+
+/** Deterministic variable name for a credential captured from curl. */
+export function capturedVariableName(
+  scheme: "bearer" | "api_key" | "header",
+  headerName: string,
+): string {
+  if (scheme === "bearer") return "api_token";
+  if (scheme === "api_key") return "api_key";
+  const slug = headerName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return VARIABLE_NAME_PATTERN.test(slug) ? slug : "auth_secret";
+}
+
+async function upsertSecretVariable(
+  db: DB,
+  serverId: string,
+  name: string,
+  plaintext: string,
+  credentialSecret: string,
+): Promise<void> {
+  const ciphertext = encryptCredential(plaintext, credentialSecret);
+  const [existing] = await db
+    .select({ id: mcpServerVariable.id })
+    .from(mcpServerVariable)
+    .where(
+      and(
+        eq(mcpServerVariable.serverId, serverId),
+        eq(mcpServerVariable.name, name),
+      ),
+    )
+    .limit(1);
+
+  if (existing) {
+    await db
+      .update(mcpServerVariable)
+      .set({ isSecret: true, value: null, ciphertext })
+      .where(eq(mcpServerVariable.id, existing.id));
+    return;
+  }
+  await db.insert(mcpServerVariable).values({
+    serverId,
+    name,
+    isSecret: true,
+    value: null,
+    ciphertext,
+  });
 }
 
 export async function createToolFromCurl(
@@ -575,13 +736,11 @@ export async function createToolFromCurl(
   userId: string,
   serverId: string,
   input: { curl: string; name?: string; description?: string | null },
+  credentialSecret: string,
 ) {
   const server = await requireOwnedServer(db, userId, serverId);
   const parsed = parseCurlCommand(input.curl);
-  const { pathTemplate, staticQuery } = toolPathFromCurl(
-    server.baseUrl,
-    parsed.url,
-  );
+  const { pathTemplate, query } = toolPathFromCurl(server.baseUrl, parsed.url);
   const method = parsed.method.toUpperCase() as McpHttpMethod;
   const inferredName =
     input.name ??
@@ -592,7 +751,46 @@ export async function createToolFromCurl(
         .replace(/^_+|_+$/g, "") || "request"
     }`;
 
-  return createTool(
+  const bodyType = inferBodyType(parsed.headers, parsed.body);
+  const requestTemplate: McpRequestTemplate = {
+    ...(Object.keys(query).length > 0 ? { query } : {}),
+    ...(Object.keys(parsed.headers).length > 0
+      ? { headers: parsed.headers }
+      : {}),
+    ...(parsed.body !== null ? { body: parsed.body, bodyType } : {}),
+  };
+
+  let capturedVariable: string | null = null;
+  let capturedHeader: string | null = null;
+  if (parsed.credentialSuggestion) {
+    const suggestion = parsed.credentialSuggestion;
+    capturedVariable = capturedVariableName(
+      suggestion.scheme,
+      suggestion.headerName,
+    );
+    capturedHeader = suggestion.headerName;
+    await upsertSecretVariable(
+      db,
+      server.id,
+      capturedVariable,
+      suggestion.value,
+      credentialSecret,
+    );
+    const headerValue =
+      suggestion.scheme === "bearer"
+        ? `Bearer {{${capturedVariable}}}`
+        : `{{${capturedVariable}}}`;
+    const defaultHeaders = {
+      ...(server.defaultHeaders ?? {}),
+      [suggestion.headerName]: headerValue,
+    };
+    await db
+      .update(mcpServer)
+      .set({ defaultHeaders })
+      .where(eq(mcpServer.id, server.id));
+  }
+
+  const tool = await createTool(
     db,
     userId,
     serverId,
@@ -601,14 +799,12 @@ export async function createToolFromCurl(
       description: input.description ?? null,
       method,
       pathTemplate,
-      paramMap: {
-        staticQuery,
-        staticHeaders: parsed.headers,
-        staticBody: parsed.body,
-      },
+      requestTemplate,
     },
     "curl",
   );
+
+  return { ...tool, capturedVariable, capturedHeader };
 }
 
 export async function updateTool(
@@ -640,6 +836,17 @@ export async function updateTool(
     input.allowMutation ?? existing.allowMutation,
     input.enabled ?? existing.enabled,
   );
+  const pathTemplate = input.pathTemplate ?? existing.pathTemplate;
+  const requestTemplate =
+    input.requestTemplate ?? existing.requestTemplate ?? {};
+  const params = input.params ?? existing.params ?? [];
+  validateToolTemplates({ pathTemplate, requestTemplate });
+  const warnings = collectTemplateWarnings({
+    pathTemplate,
+    requestTemplate,
+    params,
+    variableNames: await listVariableNames(db, serverId),
+  });
 
   try {
     const [updated] = await db
@@ -651,14 +858,15 @@ export async function updateTool(
             ? existing.description
             : input.description?.trim() || null,
         method,
-        pathTemplate: input.pathTemplate ?? existing.pathTemplate,
-        paramMap: input.paramMap ?? existing.paramMap,
+        pathTemplate,
+        requestTemplate,
+        params,
         allowMutation: flags.allowMutation,
         enabled: flags.enabled,
       })
       .where(eq(mcpTool.id, existing.id))
       .returning();
-    return updated;
+    return { ...updated, warnings };
   } catch (error) {
     if (isUniqueViolation(error)) {
       throw appError({
@@ -671,61 +879,176 @@ export async function updateTool(
   }
 }
 
-export async function setCredential(
+export async function listVariables(db: DB, userId: string, serverId: string) {
+  await requireOwnedServer(db, userId, serverId);
+  const rows = await db
+    .select()
+    .from(mcpServerVariable)
+    .where(eq(mcpServerVariable.serverId, serverId))
+    .orderBy(desc(mcpServerVariable.createdAt));
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    isSecret: row.isSecret,
+    hasValue: row.isSecret ? Boolean(row.ciphertext) : row.value !== null,
+    ...(row.isSecret ? {} : { value: row.value }),
+  }));
+}
+
+export async function createVariable(
   db: DB,
   userId: string,
   serverId: string,
-  input: SetCredentialInput,
+  input: SetVariableInput,
   credentialSecret: string,
 ) {
   await requireOwnedServer(db, userId, serverId);
-  const headerName =
-    input.headerName ??
-    (input.scheme === "bearer" ? "Authorization" : "X-API-Key");
-  const nextSecret = input.secret?.trim() ?? "";
-
-  const [existing] = await db
-    .select({ id: mcpCredential.id, ciphertext: mcpCredential.ciphertext })
-    .from(mcpCredential)
-    .where(eq(mcpCredential.serverId, serverId))
-    .limit(1);
-
-  if (!existing && !nextSecret) {
+  const name = input.name.trim();
+  if (!VARIABLE_NAME_PATTERN.test(name)) {
     throw appError({
-      appCode: APP_ERROR_CODES.MCP_CREDENTIAL_REQUIRED,
-      message: "An upstream credential is required.",
+      appCode: APP_ERROR_CODES.INVALID_INPUT,
+      message:
+        "Variable name must start with a letter and use lowercase letters, numbers, or underscores.",
       status: 400,
     });
   }
 
-  if (existing) {
-    await db
-      .update(mcpCredential)
-      .set({
-        scheme: input.scheme,
-        headerName,
-        valueLocation: input.valueLocation,
-        ciphertext: nextSecret
-          ? encryptCredential(nextSecret, credentialSecret)
-          : existing.ciphertext,
+  try {
+    const [created] = await db
+      .insert(mcpServerVariable)
+      .values({
+        serverId,
+        name,
+        isSecret: input.isSecret,
+        value: input.isSecret ? null : input.value,
+        ciphertext: input.isSecret
+          ? encryptCredential(input.value, credentialSecret)
+          : null,
       })
-      .where(eq(mcpCredential.id, existing.id));
-  } else {
-    await db.insert(mcpCredential).values({
-      serverId,
-      scheme: input.scheme,
-      headerName,
-      valueLocation: input.valueLocation,
-      ciphertext: encryptCredential(nextSecret, credentialSecret),
+      .returning();
+    return {
+      id: created.id,
+      name: created.name,
+      isSecret: created.isSecret,
+      hasValue: true,
+      ...(created.isSecret ? {} : { value: created.value }),
+    };
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw appError({
+        appCode: APP_ERROR_CODES.MCP_VARIABLE_NAME_CONFLICT,
+        message: "A variable with this name already exists on the server.",
+        status: 409,
+      });
+    }
+    throw error;
+  }
+}
+
+/**
+ * Write-only value rotation; the stored value is never read back. Passing
+ * `isSecret` (upsert path) also transitions the storage mode.
+ */
+export async function updateVariable(
+  db: DB,
+  userId: string,
+  serverId: string,
+  name: string,
+  input: { value: string; isSecret?: boolean },
+  credentialSecret: string,
+) {
+  await requireOwnedServer(db, userId, serverId);
+  const [existing] = await db
+    .select()
+    .from(mcpServerVariable)
+    .where(
+      and(
+        eq(mcpServerVariable.serverId, serverId),
+        eq(mcpServerVariable.name, name),
+      ),
+    )
+    .limit(1);
+  if (!existing) {
+    throw appError({
+      appCode: APP_ERROR_CODES.INVALID_INPUT,
+      message: "Variable not found on this server.",
+      status: 404,
     });
   }
 
-  return {
-    hasSecret: true,
-    scheme: input.scheme,
-    headerName,
-    valueLocation: input.valueLocation,
-  };
+  const nextIsSecret = input.isSecret ?? existing.isSecret;
+  await db
+    .update(mcpServerVariable)
+    .set(
+      nextIsSecret
+        ? {
+            isSecret: true,
+            value: null,
+            ciphertext: encryptCredential(input.value, credentialSecret),
+          }
+        : { isSecret: false, value: input.value, ciphertext: null },
+    )
+    .where(eq(mcpServerVariable.id, existing.id));
+
+  return { name: existing.name, isSecret: nextIsSecret, hasValue: true };
+}
+
+/** Creates the variable or rotates its value when the name already exists. */
+export async function setVariable(
+  db: DB,
+  userId: string,
+  serverId: string,
+  input: SetVariableInput,
+  credentialSecret: string,
+) {
+  await requireOwnedServer(db, userId, serverId);
+  const [existing] = await db
+    .select({ name: mcpServerVariable.name })
+    .from(mcpServerVariable)
+    .where(
+      and(
+        eq(mcpServerVariable.serverId, serverId),
+        eq(mcpServerVariable.name, input.name.trim()),
+      ),
+    )
+    .limit(1);
+  if (existing) {
+    return updateVariable(
+      db,
+      userId,
+      serverId,
+      existing.name,
+      { value: input.value, isSecret: input.isSecret },
+      credentialSecret,
+    );
+  }
+  return createVariable(db, userId, serverId, input, credentialSecret);
+}
+
+export async function deleteVariable(
+  db: DB,
+  userId: string,
+  serverId: string,
+  name: string,
+) {
+  await requireOwnedServer(db, userId, serverId);
+  const [deleted] = await db
+    .delete(mcpServerVariable)
+    .where(
+      and(
+        eq(mcpServerVariable.serverId, serverId),
+        eq(mcpServerVariable.name, name),
+      ),
+    )
+    .returning({ id: mcpServerVariable.id });
+  if (!deleted) {
+    throw appError({
+      appCode: APP_ERROR_CODES.INVALID_INPUT,
+      message: "Variable not found on this server.",
+      status: 404,
+    });
+  }
+  return { name, deleted: true };
 }
 
 export function buildConnectionSnippet(apiOrigin: string, serverId: string) {

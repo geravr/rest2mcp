@@ -7,8 +7,9 @@ export type ParsedCurl = {
   body: string | null;
   credentialSuggestion: {
     scheme: "bearer" | "api_key" | "header";
-    headerName: string | null;
-    valueLocation: "header" | "query";
+    headerName: string;
+    /** Raw secret value detected in the auth header (token part for bearer). */
+    value: string;
   } | null;
 };
 
@@ -23,7 +24,7 @@ const AUTH_HEADER_NAMES = new Set([
   "x-access-token",
 ]);
 
-function isAuthHeaderName(name: string): boolean {
+export function isAuthHeaderName(name: string): boolean {
   const normalized = name.toLowerCase();
   if (AUTH_HEADER_NAMES.has(normalized)) return true;
   return /api[-_]?key/i.test(normalized);
@@ -130,20 +131,20 @@ function inferCredentialSuggestion(
       return {
         scheme: "bearer",
         headerName: "Authorization",
-        valueLocation: "header",
+        value: bearer[1],
       };
     }
     if (/api[-_]?key/i.test(name)) {
       return {
         scheme: "api_key",
         headerName: name,
-        valueLocation: "header",
+        value,
       };
     }
     return {
       scheme: "header",
       headerName: name,
-      valueLocation: "header",
+      value,
     };
   }
   return null;
@@ -305,8 +306,4 @@ export function parseCurlCommand(command: string): ParsedCurl {
     body,
     credentialSuggestion,
   };
-}
-
-export function isSafeToolHeaderName(name: string): boolean {
-  return !isAuthHeaderName(name);
 }

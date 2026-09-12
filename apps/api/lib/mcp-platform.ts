@@ -15,18 +15,36 @@ import {
   createServer,
   createTool,
   createToolFromCurl,
+  deleteVariable,
   getConnectionSnippet,
   listCallLogs,
   listServers,
   listTools,
+  listVariables,
   resolveApiOrigin,
-  setCredential,
+  setVariable,
 } from "../services/mcp-studio-service.js";
 
 const paginationShape = {
   page: z.number().int().min(1).optional(),
   pageSize: z.union([z.literal(10), z.literal(20), z.literal(50)]).optional(),
 };
+
+const requestTemplateSchema = z.object({
+  query: z.record(z.string(), z.string()).optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+  body: z.string().nullable().optional(),
+  bodyType: z.enum(["json", "form", "raw"]).optional(),
+});
+
+const paramsSchema = z.array(
+  z.object({
+    name: z.string().min(1),
+    description: z.string().optional(),
+    required: z.boolean(),
+    type: z.enum(["string", "number", "boolean", "json"]),
+  }),
+);
 
 function asToolResult<T>(run: (args: T) => Promise<unknown>) {
   return async (args: T) => {
@@ -128,13 +146,16 @@ export function createPlatformMcpRoutes() {
       mcp.registerTool(
         "add_tool",
         {
-          description: "Add a REST tool to a server you own.",
+          description:
+            "Add a REST tool to a server you own. pathTemplate and requestTemplate values support {{placeholder}} interpolation from agent arguments or server variables.",
           inputSchema: z.object({
             serverId: z.string().min(1),
             name: z.string().min(1),
             description: z.string().optional(),
             method: z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]),
             pathTemplate: z.string().min(1),
+            requestTemplate: requestTemplateSchema.optional(),
+            params: paramsSchema.optional(),
             allowMutation: z.boolean().optional(),
             enabled: z.boolean().optional(),
           }),
@@ -145,6 +166,8 @@ export function createPlatformMcpRoutes() {
             description: args.description,
             method: args.method,
             pathTemplate: args.pathTemplate,
+            requestTemplate: args.requestTemplate,
+            params: args.params,
             allowMutation: args.allowMutation,
             enabled: args.enabled,
           }),
@@ -154,7 +177,8 @@ export function createPlatformMcpRoutes() {
       mcp.registerTool(
         "add_tool_from_curl",
         {
-          description: "Add a tool by pasting a curl command.",
+          description:
+            "Add a tool by pasting a curl command. Detected auth headers are captured as secret variables plus a server default header.",
           inputSchema: z.object({
             serverId: z.string().min(1),
             curl: z.string().min(1),
@@ -163,30 +187,74 @@ export function createPlatformMcpRoutes() {
           }),
         },
         asToolResult((args) =>
-          createToolFromCurl(db, userId, args.serverId, args),
-        ),
-      );
-
-      mcp.registerTool(
-        "set_credential",
-        {
-          description: "Set or replace the encrypted upstream credential.",
-          inputSchema: z.object({
-            serverId: z.string().min(1),
-            scheme: z.enum(["bearer", "api_key", "header"]),
-            headerName: z.string().optional(),
-            valueLocation: z.enum(["header", "query"]),
-            secret: z.string().min(1),
-          }),
-        },
-        asToolResult((args) =>
-          setCredential(
+          createToolFromCurl(
             db,
             userId,
             args.serverId,
             args,
             env.MCP_CREDENTIAL_SECRET,
           ),
+        ),
+      );
+
+      mcp.registerTool(
+        "set_variable",
+        {
+          description:
+            "Create a server variable or rotate its value. Secret variables are encrypted at rest and never returned.",
+          inputSchema: z.object({
+            serverId: z.string().min(1),
+            name: z.string().min(1),
+            isSecret: z.boolean(),
+            value: z.string(),
+          }),
+        },
+        asToolResult((args) =>
+          setVariable(
+            db,
+            userId,
+            args.serverId,
+            {
+              name: args.name,
+              isSecret: args.isSecret,
+              value: args.value,
+            },
+            env.MCP_CREDENTIAL_SECRET,
+          ),
+        ),
+      );
+
+      mcp.registerTool(
+        "list_variables",
+        {
+          description:
+            "List server variables. Returns names, isSecret flags, and hasValue metadata only.",
+          inputSchema: z.object({
+            serverId: z.string().min(1),
+          }),
+        },
+        asToolResult(async (args: { serverId: string }) => {
+          const variables = await listVariables(db, userId, args.serverId);
+          return variables.map(({ id, name, isSecret, hasValue }) => ({
+            id,
+            name,
+            isSecret,
+            hasValue,
+          }));
+        }),
+      );
+
+      mcp.registerTool(
+        "delete_variable",
+        {
+          description: "Delete a server variable by name.",
+          inputSchema: z.object({
+            serverId: z.string().min(1),
+            name: z.string().min(1),
+          }),
+        },
+        asToolResult((args) =>
+          deleteVariable(db, userId, args.serverId, args.name),
         ),
       );
 

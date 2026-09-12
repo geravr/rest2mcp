@@ -1,4 +1,4 @@
-import { mcpServer, mcpTool } from "@repo/db";
+import { mcpServer, mcpTool, type McpToolParam } from "@repo/db";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
@@ -15,6 +15,29 @@ import { executeMappedTool } from "../services/mcp-executor-service.js";
 import { authenticateAgentToken } from "../services/mcp-studio-service.js";
 
 const argsSchema = z.record(z.string(), z.unknown()).optional();
+
+function paramToZod(type: McpToolParam["type"]): z.ZodType {
+  switch (type) {
+    case "number":
+      return z.number();
+    case "boolean":
+      return z.boolean();
+    case "json":
+      return z.unknown();
+    default:
+      return z.string();
+  }
+}
+
+export function deriveInputSchema(params: McpToolParam[] | null) {
+  const shape: Record<string, z.ZodType> = {};
+  for (const param of params ?? []) {
+    let field = paramToZod(param.type);
+    if (param.description) field = field.describe(param.description);
+    shape[param.name] = param.required ? field : field.optional();
+  }
+  return z.object(shape);
+}
 
 export function createMcpGatewayRoutes() {
   const routes = new Hono<AppContext>();
@@ -77,7 +100,7 @@ export function createMcpGatewayRoutes() {
           {
             description:
               tool.description ?? `${tool.method} ${tool.pathTemplate}`,
-            inputSchema: z.looseObject({}),
+            inputSchema: deriveInputSchema(tool.params),
           },
           async (args) => {
             try {

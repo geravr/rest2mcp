@@ -7,6 +7,8 @@ import {
   createServerToken,
   createTool,
   createToolFromCurl,
+  createVariable,
+  deleteVariable,
   getConnectionSnippet,
   getPlatformTokenMeta,
   getServer,
@@ -15,12 +17,13 @@ import {
   listServerTokens,
   listServers,
   listTools,
+  listVariables,
   resolveApiOrigin,
   revokePlatformToken,
   revokeServerToken,
-  setCredential,
   updateServer,
   updateTool,
+  updateVariable,
 } from "../services/mcp-studio-service.js";
 
 const httpMethodSchema = z.enum([
@@ -32,19 +35,30 @@ const httpMethodSchema = z.enum([
   "DELETE",
 ]);
 
-const paramMapSchema = z.object({
-  path: z.record(z.string(), z.string()).optional(),
+const requestTemplateSchema = z.object({
   query: z.record(z.string(), z.string()).optional(),
-  header: z.record(z.string(), z.string()).optional(),
-  body: z
-    .union([z.record(z.string(), z.string()), z.array(z.string()), z.null()])
-    .optional(),
-  staticQuery: z.record(z.string(), z.string()).optional(),
-  staticHeaders: z.record(z.string(), z.string()).optional(),
-  staticBody: z.string().nullable().optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+  body: z.string().nullable().optional(),
+  bodyType: z.enum(["json", "form", "raw"]).optional(),
 });
 
+const toolParamSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  description: z.string().trim().max(500).optional(),
+  required: z.boolean(),
+  type: z.enum(["string", "number", "boolean", "json"]),
+});
+
+const templateMapSchema = z.record(z.string(), z.string().max(8_000));
+
 const serverIdInput = z.object({ serverId: z.string().min(1) });
+
+const variableNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(100)
+  .regex(/^[a-z][a-z0-9_]*$/);
 
 export const mcpRouter = router({
   servers: protectedProcedure
@@ -82,6 +96,8 @@ export const mcpRouter = router({
         baseUrl: z.url().optional(),
         status: z.enum(["draft", "live", "paused"]).optional(),
         allowedHosts: z.array(z.string().min(1)).optional(),
+        defaultHeaders: templateMapSchema.nullable().optional(),
+        defaultQuery: templateMapSchema.nullable().optional(),
       }),
     )
     .mutation(({ ctx, input }) =>
@@ -101,7 +117,8 @@ export const mcpRouter = router({
         description: z.string().trim().max(2000).nullable().optional(),
         method: httpMethodSchema,
         pathTemplate: z.string().trim().min(1).max(500),
-        paramMap: paramMapSchema.optional(),
+        requestTemplate: requestTemplateSchema.optional(),
+        params: z.array(toolParamSchema).max(50).optional(),
         allowMutation: z.boolean().optional(),
         enabled: z.boolean().optional(),
       }),
@@ -119,7 +136,13 @@ export const mcpRouter = router({
       }),
     )
     .mutation(({ ctx, input }) =>
-      createToolFromCurl(ctx.dbDirect, ctx.user.id, input.serverId, input),
+      createToolFromCurl(
+        ctx.dbDirect,
+        ctx.user.id,
+        input.serverId,
+        input,
+        ctx.env.MCP_CREDENTIAL_SECRET,
+      ),
     ),
 
   updateTool: protectedProcedure
@@ -130,7 +153,8 @@ export const mcpRouter = router({
         description: z.string().trim().max(2000).nullable().optional(),
         method: httpMethodSchema.optional(),
         pathTemplate: z.string().trim().min(1).max(500).optional(),
-        paramMap: paramMapSchema.optional(),
+        requestTemplate: requestTemplateSchema.optional(),
+        params: z.array(toolParamSchema).max(50).optional(),
         allowMutation: z.boolean().optional(),
         enabled: z.boolean().optional(),
       }),
@@ -145,23 +169,52 @@ export const mcpRouter = router({
       ),
     ),
 
-  setCredential: protectedProcedure
+  variables: protectedProcedure
+    .input(serverIdInput)
+    .query(({ ctx, input }) =>
+      listVariables(ctx.db, ctx.user.id, input.serverId),
+    ),
+
+  createVariable: protectedProcedure
     .input(
       serverIdInput.extend({
-        scheme: z.enum(["bearer", "api_key", "header"]),
-        headerName: z.string().trim().min(1).max(100).nullable().optional(),
-        valueLocation: z.enum(["header", "query"]),
-        secret: z.string().max(8_000).optional(),
+        name: variableNameSchema,
+        isSecret: z.boolean(),
+        value: z.string().max(8_000),
       }),
     )
     .mutation(({ ctx, input }) =>
-      setCredential(
+      createVariable(
         ctx.dbDirect,
         ctx.user.id,
         input.serverId,
         input,
         ctx.env.MCP_CREDENTIAL_SECRET,
       ),
+    ),
+
+  updateVariable: protectedProcedure
+    .input(
+      serverIdInput.extend({
+        name: variableNameSchema,
+        value: z.string().max(8_000),
+      }),
+    )
+    .mutation(({ ctx, input }) =>
+      updateVariable(
+        ctx.dbDirect,
+        ctx.user.id,
+        input.serverId,
+        input.name,
+        { value: input.value },
+        ctx.env.MCP_CREDENTIAL_SECRET,
+      ),
+    ),
+
+  deleteVariable: protectedProcedure
+    .input(serverIdInput.extend({ name: variableNameSchema }))
+    .mutation(({ ctx, input }) =>
+      deleteVariable(ctx.dbDirect, ctx.user.id, input.serverId, input.name),
     ),
 
   tokens: protectedProcedure

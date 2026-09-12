@@ -1,7 +1,10 @@
 import { Hono } from "hono";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { APP_ERROR_CODES } from "@repo/core";
-import { AppError, appError } from "./app-error.js";
+import { appError } from "./app-error.js";
 import type { AppContext } from "./context.js";
 
 vi.mock("./posthog.js", () => ({
@@ -34,32 +37,59 @@ vi.mock("../services/mcp-executor-service.js", async () => {
   };
 });
 
-vi.mock("@repo/db", () => ({
+const tables = vi.hoisted(() => ({
   mcpServer: { id: "id" },
   mcpTool: { serverId: "serverId", enabled: "enabled" },
 }));
+
+vi.mock("@repo/db", () => tables);
 
 vi.mock("drizzle-orm", () => ({
   and: vi.fn((...args: unknown[]) => args),
   eq: vi.fn((...args: unknown[]) => args),
 }));
 
-import { createMcpGatewayRoutes } from "./mcp-gateway.js";
+import { createMcpGatewayRoutes, deriveInputSchema } from "./mcp-gateway.js";
 import { errorHandler } from "./middleware.js";
+
+const SERVER_ROW = { id: "mcs_1", name: "CRM" };
+const TOOL_ROWS = [
+  {
+    id: "mct_1",
+    name: "get_contact",
+    description: null,
+    method: "GET",
+    pathTemplate: "/contacts/{{id}}",
+    params: [
+      {
+        name: "id",
+        required: true,
+        type: "string",
+        description: "Contact id",
+      },
+    ],
+    enabled: true,
+  },
+];
+
+function gatewayDb() {
+  return {
+    select: () => ({
+      from: (table: unknown) => ({
+        where: () => {
+          if (table === tables.mcpTool) return Promise.resolve(TOOL_ROWS);
+          return { limit: async () => [SERVER_ROW] };
+        },
+      }),
+    }),
+  };
+}
 
 function createApp() {
   const app = new Hono<AppContext>();
   app.onError(errorHandler);
   app.use("*", async (c, next) => {
-    c.set("db", {
-      select: () => ({
-        from: () => ({
-          where: () => ({
-            limit: async () => [{ id: "mcs_1", name: "CRM" }],
-          }),
-        }),
-      }),
-    } as never);
+    c.set("db", gatewayDb() as never);
     c.set("dbDirect", c.get("db"));
     c.set("env", { MCP_CREDENTIAL_SECRET: "s".repeat(32) } as never);
     await next();
@@ -109,48 +139,159 @@ describe("product MCP gateway", () => {
     );
   });
 
-  it("maps executor AppErrors without echoing secrets", async () => {
-    authenticateAgentToken.mockResolvedValue({
-      id: "mtk_1",
-      kind: "server",
-      serverId: "mcs_1",
-      userId: "usr_1",
+  describe("MCP round-trip", () => {
+    async function connectClient() {
+      authenticateAgentToken.mockResolvedValue({
+        id: "mtk_1",
+        kind: "server",
+        serverId: "mcs_1",
+        userId: "usr_1",
+      });
+      const app = createApp();
+      const transport = new StreamableHTTPClientTransport(
+        new URL("http://test.local/mcp/mcs_1"),
+        {
+          fetch: (input, init) =>
+            app.request(input as string | URL, init) as Promise<Response>,
+          requestInit: {
+            headers: { Authorization: "Bearer server-token" },
+          },
+        },
+      );
+      const client = new Client({ name: "test-client", version: "0.0.1" });
+      await client.connect(transport);
+      return client;
+    }
+
+    it("lists tools with input schemas derived from params", async () => {
+      const client = await connectClient();
+      try {
+        const { tools } = await client.listTools();
+
+        expect(tools).toHaveLength(1);
+        const tool = tools[0];
+        expect(tool.name).toBe("get_contact");
+        expect(tool.description).toBe("GET /contacts/{{id}}");
+        expect(tool.inputSchema).toMatchObject({
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Contact id" },
+          },
+          required: ["id"],
+        });
+      } finally {
+        await client.close();
+      }
     });
 
-    const cases: Array<{ error: AppError; code: string }> = [
-      {
-        error: appError({
-          appCode: APP_ERROR_CODES.MCP_MUTATION_NOT_ALLOWED,
-          message: "Mutating this tool is not allowed.",
-          status: 403,
-        }),
-        code: APP_ERROR_CODES.MCP_MUTATION_NOT_ALLOWED,
-      },
-      {
-        error: appError({
-          appCode: APP_ERROR_CODES.MCP_HOST_NOT_ALLOWED,
-          message: "The request target is not allowed.",
-          status: 403,
-        }),
-        code: APP_ERROR_CODES.MCP_HOST_NOT_ALLOWED,
-      },
-      {
-        error: appError({
-          appCode: APP_ERROR_CODES.INVALID_INPUT,
-          message: "Server is paused.",
-          status: 400,
-        }),
-        code: APP_ERROR_CODES.INVALID_INPUT,
-      },
-    ];
+    it("executes tools and returns the upstream payload", async () => {
+      executeMappedTool.mockResolvedValue({
+        httpStatus: 200,
+        truncated: false,
+        body: '{"ok":true}',
+      });
+      const client = await connectClient();
+      try {
+        const result = await client.callTool({
+          name: "get_contact",
+          arguments: { id: "1" },
+        });
 
-    for (const testCase of cases) {
-      executeMappedTool.mockRejectedValueOnce(testCase.error);
-      const result = await executeMappedTool.mock.results;
-      expect(testCase.error.message).not.toContain("secret");
-      expect(testCase.error.appCode).toBe(testCase.code);
-      expect(JSON.stringify(testCase.error)).not.toContain("Bearer abc");
-      void result;
-    }
+        expect(result.isError).toBeFalsy();
+        const text = (
+          result.content as Array<{ type: string; text: string }>
+        )[0].text;
+        const payload = JSON.parse(text) as {
+          httpStatus: number;
+          truncated: boolean;
+          body: string;
+        };
+        expect(payload).toMatchObject({ httpStatus: 200, truncated: false });
+        expect(JSON.parse(payload.body)).toEqual({ ok: true });
+        expect(executeMappedTool).toHaveBeenCalledWith(expect.anything(), {
+          serverId: "mcs_1",
+          toolId: "mct_1",
+          args: { id: "1" },
+          source: "agent",
+          credentialSecret: "s".repeat(32),
+        });
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("maps executor AppErrors to tool errors with appCode", async () => {
+      executeMappedTool.mockRejectedValue(
+        appError({
+          appCode: APP_ERROR_CODES.MCP_UPSTREAM_ERROR,
+          message: "Upstream rejected the request.",
+          status: 502,
+        }),
+      );
+      const client = await connectClient();
+      try {
+        const result = await client.callTool({
+          name: "get_contact",
+          arguments: { id: "1" },
+        });
+
+        expect(result.isError).toBe(true);
+        const text = (
+          result.content as Array<{ type: string; text: string }>
+        )[0].text;
+        expect(text).toContain(APP_ERROR_CODES.MCP_UPSTREAM_ERROR);
+        expect(text).toContain("Upstream rejected the request.");
+      } finally {
+        await client.close();
+      }
+    });
+  });
+});
+
+describe("deriveInputSchema", () => {
+  it("advertises an empty object schema for a paramless tool", () => {
+    const schema = deriveInputSchema(null);
+
+    expect(schema.safeParse({}).success).toBe(true);
+    expect(z.toJSONSchema(schema)).toMatchObject({
+      type: "object",
+      properties: {},
+    });
+  });
+
+  it("maps param types, required flags, and descriptions", () => {
+    const schema = deriveInputSchema([
+      {
+        name: "query",
+        type: "string",
+        required: true,
+        description: "Search text",
+      },
+      { name: "limit", type: "number", required: false },
+      { name: "exact", type: "boolean", required: false },
+      { name: "payload", type: "json", required: true },
+    ]);
+
+    expect(schema.safeParse({ query: "acme", payload: { a: 1 } }).success).toBe(
+      true,
+    );
+    expect(schema.safeParse({ query: "acme", payload: null }).success).toBe(
+      true,
+    );
+    expect(schema.safeParse({ query: "acme" }).success).toBe(false);
+    expect(
+      schema.safeParse({ query: "acme", limit: "ten", payload: 1 }).success,
+    ).toBe(false);
+    expect(
+      schema.safeParse({ query: "acme", exact: "yes", payload: 1 }).success,
+    ).toBe(false);
+
+    const json = z.toJSONSchema(schema) as {
+      properties: Record<string, { description?: string }>;
+      required?: string[];
+    };
+    expect(json.properties.query.description).toBe("Search text");
+    expect(json.required).toEqual(expect.arrayContaining(["query", "payload"]));
+    expect(json.required).not.toContain("limit");
   });
 });

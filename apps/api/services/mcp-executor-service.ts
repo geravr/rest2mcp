@@ -1,18 +1,20 @@
 /**
  * @file Shared MCP tool executor used by the gateway, playground, and platform MCP.
+ * Builds upstream requests by rendering templates with args + server variables.
  */
 import {
   mcpCallLog,
-  mcpCredential,
   mcpServer,
+  mcpServerVariable,
   mcpTool,
-  type McpParamMap,
+  type McpRequestTemplate,
+  type McpServer,
+  type McpTool,
 } from "@repo/db";
 import { and, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { APP_ERROR_CODES, AppError, appError } from "../lib/app-error.js";
 import { decryptCredential } from "../lib/mcp-crypto.js";
-import { isSafeToolHeaderName } from "../lib/mcp-curl.js";
 import {
   capResponseBody,
   MCP_RESPONSE_LIMIT,
@@ -23,6 +25,11 @@ import {
   assertSameHostRedirect,
   assertUpstreamUrlSafe,
 } from "../lib/mcp-ssrf.js";
+import {
+  renderTemplate,
+  type RenderScope,
+  type TemplateVariable,
+} from "../lib/mcp-template.js";
 
 type DB = PostgresJsDatabase<Record<string, unknown>>;
 
@@ -57,141 +64,82 @@ function joinUrlPath(basePath: string, toolPath: string): string {
   return `${left}${right}`;
 }
 
-function readArg(
-  args: Record<string, unknown>,
-  key: string,
-): string | undefined {
-  const value = args[key];
-  if (value === undefined || value === null) return undefined;
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
+async function loadVariables(
+  db: DB,
+  serverId: string,
+  credentialSecret: string,
+): Promise<Record<string, TemplateVariable>> {
+  const rows = await db
+    .select()
+    .from(mcpServerVariable)
+    .where(eq(mcpServerVariable.serverId, serverId));
+  const variables: Record<string, TemplateVariable> = {};
+  for (const row of rows) {
+    if (row.isSecret) {
+      if (!row.ciphertext) continue;
+      variables[row.name] = {
+        value: decryptCredential(row.ciphertext, credentialSecret),
+        isSecret: true,
+      };
+    } else {
+      variables[row.name] = { value: row.value ?? "", isSecret: false };
+    }
   }
-  return JSON.stringify(value);
+  return variables;
 }
 
-export function applyPathTemplate(
-  pathTemplate: string,
-  args: Record<string, unknown>,
-  paramMap: McpParamMap,
-): string {
-  return pathTemplate.replace(
-    /\{([A-Za-z0-9_]+)\}/g,
-    (_, placeholder: string) => {
-      const argName = paramMap.path?.[placeholder] ?? placeholder;
-      const value = readArg(args, argName);
-      if (value === undefined) {
-        throw appError({
-          appCode: APP_ERROR_CODES.INVALID_INPUT,
-          message: `Missing path parameter "${placeholder}".`,
-          status: 400,
-        });
-      }
-      return encodeURIComponent(value);
-    },
-  );
-}
+function buildRequest(
+  server: McpServer,
+  tool: McpTool,
+  scope: RenderScope,
+): { url: URL; headers: Headers; body: string | undefined } {
+  const template: McpRequestTemplate = tool.requestTemplate ?? {};
+  const method = tool.method.toUpperCase();
 
-function buildUpstreamUrl(
-  baseUrl: string,
-  pathTemplate: string,
-  args: Record<string, unknown>,
-  paramMap: McpParamMap,
-): URL {
-  const base = new URL(baseUrl);
-  const path = applyPathTemplate(pathTemplate, args, paramMap);
+  const base = new URL(server.baseUrl);
   const url = new URL(base.toString());
-  url.pathname = joinUrlPath(base.pathname, path);
+  url.pathname = joinUrlPath(
+    base.pathname,
+    renderTemplate(tool.pathTemplate, "path", scope),
+  );
 
-  for (const [key, value] of Object.entries(paramMap.staticQuery ?? {})) {
-    url.searchParams.set(key, value);
+  const queryEntries: Record<string, string> = {
+    ...(server.defaultQuery ?? {}),
+    ...(template.query ?? {}),
+  };
+  const queryParts: string[] = [];
+  for (const [key, valueTemplate] of Object.entries(queryEntries)) {
+    const rendered = renderTemplate(valueTemplate, "query", scope);
+    queryParts.push(`${encodeURIComponent(key)}=${rendered}`);
   }
-  for (const [queryKey, argName] of Object.entries(paramMap.query ?? {})) {
-    const value = readArg(args, argName);
-    if (value !== undefined) {
-      url.searchParams.set(queryKey, value);
-    }
+  if (queryParts.length > 0) {
+    url.search = queryParts.join("&");
   }
-  return url;
-}
 
-function buildHeaders(
-  args: Record<string, unknown>,
-  paramMap: McpParamMap,
-): Headers {
   const headers = new Headers();
-  for (const [name, value] of Object.entries(paramMap.staticHeaders ?? {})) {
-    if (!isSafeToolHeaderName(name)) continue;
-    headers.set(name, value);
+  for (const [name, valueTemplate] of Object.entries(
+    server.defaultHeaders ?? {},
+  )) {
+    headers.set(name, renderTemplate(valueTemplate, "header", scope));
   }
-  for (const [headerName, argName] of Object.entries(paramMap.header ?? {})) {
-    if (!isSafeToolHeaderName(headerName)) continue;
-    const value = readArg(args, argName);
-    if (value !== undefined) {
-      headers.set(headerName, value);
+  for (const [name, valueTemplate] of Object.entries(template.headers ?? {})) {
+    headers.set(name, renderTemplate(valueTemplate, "header", scope));
+  }
+
+  let body: string | undefined;
+  if (method !== "GET" && method !== "HEAD" && template.body != null) {
+    const bodyType = template.bodyType ?? "json";
+    body = renderTemplate(template.body, bodyType, scope);
+    if (!headers.has("content-type")) {
+      if (bodyType === "json") {
+        headers.set("content-type", "application/json");
+      } else if (bodyType === "form") {
+        headers.set("content-type", "application/x-www-form-urlencoded");
+      }
     }
   }
-  return headers;
-}
 
-function buildBody(
-  method: string,
-  args: Record<string, unknown>,
-  paramMap: McpParamMap,
-): string | undefined {
-  if (method === "GET" || method === "HEAD") return undefined;
-  if (paramMap.staticBody) return paramMap.staticBody;
-  if (args.body !== undefined) {
-    return typeof args.body === "string"
-      ? args.body
-      : JSON.stringify(args.body);
-  }
-  if (Array.isArray(paramMap.body)) {
-    const payload: Record<string, unknown> = {};
-    for (const key of paramMap.body) {
-      if (args[key] !== undefined) payload[key] = args[key];
-    }
-    return Object.keys(payload).length > 0
-      ? JSON.stringify(payload)
-      : undefined;
-  }
-  if (paramMap.body && typeof paramMap.body === "object") {
-    const payload: Record<string, unknown> = {};
-    for (const [bodyKey, argName] of Object.entries(paramMap.body)) {
-      if (args[argName] !== undefined) payload[bodyKey] = args[argName];
-    }
-    return Object.keys(payload).length > 0
-      ? JSON.stringify(payload)
-      : undefined;
-  }
-  return undefined;
-}
-
-function injectCredential(
-  url: URL,
-  headers: Headers,
-  credential: {
-    scheme: string;
-    headerName: string | null;
-    valueLocation: string;
-    secret: string;
-  },
-): void {
-  const headerName =
-    credential.headerName ??
-    (credential.scheme === "bearer" ? "Authorization" : "X-API-Key");
-
-  if (credential.valueLocation === "query") {
-    url.searchParams.set(headerName, credential.secret);
-    return;
-  }
-
-  if (credential.scheme === "bearer") {
-    headers.set(headerName, `Bearer ${credential.secret}`);
-    return;
-  }
-
-  headers.set(headerName, credential.secret);
+  return { url, headers, body };
 }
 
 async function readCappedBody(response: Response): Promise<string> {
@@ -241,7 +189,11 @@ export async function executeMappedTool(
 ): Promise<ExecuteMappedToolResult> {
   const started = Date.now();
   const args = input.args ?? {};
-  const secrets: string[] = [];
+  const scope: RenderScope = {
+    args,
+    variables: {},
+    secretsUsed: new Set<string>(),
+  };
 
   const [server] = await db
     .select()
@@ -291,6 +243,8 @@ export async function executeMappedTool(
     });
   }
 
+  const secrets = () => [...scope.secretsUsed];
+
   const persistLog = async (entry: {
     status: string;
     httpStatus: number | null;
@@ -337,45 +291,12 @@ export async function executeMappedTool(
       });
     }
 
-    const paramMap = tool.paramMap ?? {};
-    const url = buildUpstreamUrl(
-      server.baseUrl,
-      tool.pathTemplate,
-      args,
-      paramMap,
+    scope.variables = await loadVariables(
+      db,
+      server.id,
+      input.credentialSecret,
     );
-    const headers = buildHeaders(args, paramMap);
-    const body = buildBody(method, args, paramMap);
-    if (body && !headers.has("content-type")) {
-      headers.set("content-type", "application/json");
-    }
-
-    const [credential] = await db
-      .select()
-      .from(mcpCredential)
-      .where(eq(mcpCredential.serverId, server.id))
-      .limit(1);
-
-    if (credential) {
-      if (!credential.ciphertext) {
-        throw appError({
-          appCode: APP_ERROR_CODES.MCP_CREDENTIAL_REQUIRED,
-          message: "This tool requires an upstream credential.",
-          status: 400,
-        });
-      }
-      const secret = decryptCredential(
-        credential.ciphertext,
-        input.credentialSecret,
-      );
-      secrets.push(secret);
-      injectCredential(url, headers, {
-        scheme: credential.scheme,
-        headerName: credential.headerName,
-        valueLocation: credential.valueLocation,
-        secret,
-      });
-    }
+    const { url, headers, body } = buildRequest(server, tool, scope);
 
     await assertUpstreamUrlSafe(url.toString(), server.allowedHosts);
 
@@ -386,7 +307,7 @@ export async function executeMappedTool(
         headers: Object.fromEntries(headers.entries()),
         body: body ?? null,
       }),
-      secrets,
+      secrets(),
     );
 
     const controller = new AbortController();
@@ -430,7 +351,7 @@ export async function executeMappedTool(
 
     const rawBody = await readCappedBody(response);
     const capped = capResponseBody(rawBody);
-    const responseSummary = summarizeForLog(capped.text, secrets);
+    const responseSummary = summarizeForLog(capped.text, secrets());
     const durationMs = Date.now() - started;
 
     if (!response.ok) {
@@ -473,7 +394,7 @@ export async function executeMappedTool(
           appCode: error.appCode,
           requestSummary: summarizeForLog(
             JSON.stringify({ serverId: server.id, tool: tool.name, args }),
-            secrets,
+            secrets(),
           ),
           responseSummary: null,
         });
@@ -487,7 +408,7 @@ export async function executeMappedTool(
       appCode: APP_ERROR_CODES.INTERNAL_ERROR,
       requestSummary: summarizeForLog(
         JSON.stringify({ serverId: server.id, tool: tool.name, args }),
-        secrets,
+        secrets(),
       ),
       responseSummary: null,
     });
