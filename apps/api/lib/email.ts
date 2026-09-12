@@ -1,0 +1,192 @@
+import {
+  EmailVerification,
+  getEmailCopy,
+  OTPEmail,
+  PlatformInvitationEmail,
+  renderEmailToHtml,
+  renderEmailToText,
+  type EmailLocale,
+} from "@repo/email";
+import { Resend } from "resend";
+import { z } from "zod";
+import type { Env } from "./env";
+
+export interface EmailOptions {
+  to: string | string[];
+  subject: string;
+  html?: string;
+  text?: string;
+  from?: string;
+}
+
+export function createResendClient(apiKey: string): Resend {
+  if (!apiKey) {
+    throw new Error("RESEND_API_KEY is required");
+  }
+  return new Resend(apiKey);
+}
+
+/**
+ * Send an email using the Resend client.
+ */
+export async function sendEmail(
+  env: Pick<Env, "RESEND_API_KEY" | "RESEND_EMAIL_FROM">,
+  options: EmailOptions,
+) {
+  const emailSchema = z.email();
+
+  const recipients = Array.isArray(options.to) ? options.to : [options.to];
+  for (const email of recipients) {
+    const result = emailSchema.safeParse(email);
+    if (!result.success) {
+      throw new Error(`Invalid email address: ${email}`);
+    }
+  }
+
+  if (!env.RESEND_EMAIL_FROM) {
+    throw new Error("RESEND_EMAIL_FROM environment variable is required");
+  }
+
+  const resend = createResendClient(env.RESEND_API_KEY);
+
+  if (!options.text && !options.html) {
+    throw new Error("Either text or html content is required");
+  }
+
+  if (options.html && !options.text) {
+    throw new Error(
+      "Plain text version required when sending HTML email. Use renderEmailToText() from @repo/email.",
+    );
+  }
+
+  try {
+    const result = await resend.emails.send({
+      from: options.from || env.RESEND_EMAIL_FROM,
+      to: options.to,
+      subject: options.subject,
+      html: options.html,
+      text: options.text as string,
+    });
+
+    if (result.error) {
+      throw new Error(
+        `Resend API error: ${result.error.message || result.error.name || "Unknown error"}`,
+      );
+    }
+
+    return result;
+  } catch (error) {
+    throw new Error(
+      `Failed to send email: ${error instanceof Error ? error.message : "Unknown error"}`,
+      { cause: error },
+    );
+  }
+}
+
+export async function sendVerificationEmail(
+  env: Pick<
+    Env,
+    "RESEND_API_KEY" | "RESEND_EMAIL_FROM" | "APP_NAME" | "APP_ORIGIN"
+  >,
+  options: {
+    user: { email: string; name?: string };
+    url: string;
+    locale?: EmailLocale;
+  },
+) {
+  const copy = getEmailCopy(options.locale).emailVerification;
+  const component = EmailVerification({
+    userName: options.user.name,
+    verificationUrl: options.url,
+    appName: env.APP_NAME,
+    appUrl: env.APP_ORIGIN,
+    copy,
+  });
+
+  const html = await renderEmailToHtml(component);
+  const text = await renderEmailToText(component);
+
+  return sendEmail(env, {
+    to: options.user.email,
+    subject: copy.subject,
+    html,
+    text,
+  });
+}
+
+export async function sendPlatformInvitation(
+  env: Pick<
+    Env,
+    "RESEND_API_KEY" | "RESEND_EMAIL_FROM" | "APP_NAME" | "APP_ORIGIN"
+  >,
+  options: {
+    email: string;
+    inviteUrl: string;
+    expiresInDays?: number;
+    locale?: EmailLocale;
+  },
+) {
+  const copy = getEmailCopy(options.locale).platformInvitation;
+  const component = PlatformInvitationEmail({
+    inviteUrl: options.inviteUrl,
+    expiresInDays: options.expiresInDays,
+    appName: env.APP_NAME,
+    appUrl: env.APP_ORIGIN,
+    copy,
+  });
+
+  const html = await renderEmailToHtml(component);
+  const text = await renderEmailToText(component);
+
+  return sendEmail(env, {
+    to: options.email,
+    subject: copy.subject.replace("{appName}", env.APP_NAME),
+    html,
+    text,
+  });
+}
+
+export async function sendOTP(
+  env: Pick<
+    Env,
+    | "ENVIRONMENT"
+    | "RESEND_API_KEY"
+    | "RESEND_EMAIL_FROM"
+    | "APP_NAME"
+    | "APP_ORIGIN"
+  >,
+  options: {
+    email: string;
+    otp: string;
+    type: "sign-in" | "email-verification";
+    locale?: EmailLocale;
+  },
+) {
+  if (env.ENVIRONMENT === "development") {
+    console.log(`OTP code for ${options.email}: ${options.otp}`);
+  }
+
+  const emailCopy = getEmailCopy(options.locale);
+  const component = OTPEmail({
+    otp: options.otp,
+    type: options.type,
+    appName: env.APP_NAME,
+    appUrl: env.APP_ORIGIN,
+    copy: emailCopy.otp,
+  });
+
+  const html = await renderEmailToHtml(component);
+  const text = await renderEmailToText(component);
+
+  const subject =
+    options.type === "sign-in"
+      ? emailCopy.otp.subjectSignIn
+      : emailCopy.otp.subjectEmailVerification;
+
+  return sendEmail(env, {
+    to: options.email,
+    subject,
+    html,
+    text,
+  });
+}

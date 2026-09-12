@@ -1,0 +1,13 @@
+@import "../tailwind.config.css";
+
+@layer base {
+  html {
+    @apply h-full;
+  }
+  body {
+    @apply min-h-full bg-background text-foreground antialiased;
+  }
+  #root {
+    @apply h-full overflow-hidden;
+  }
+}

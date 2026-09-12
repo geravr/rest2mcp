@@ -1,0 +1,43 @@
+---
+import type { UI } from "../../i18n";
+import { spaUrl } from "../../lib/spa-url";
+
+interface Props {
+  hero: UI["hero"];
+}
+
+const { hero } = Astro.props;
+---
+
+<section
+  class="border-b border-border bg-background py-16 text-center sm:py-24 md:py-32"
+>
+  <div class="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
+    <h1
+      class="mx-auto max-w-4xl text-balance text-3xl font-semibold tracking-tight text-foreground sm:text-5xl md:text-6xl"
+    >
+      {hero.title}
+    </h1>
+
+    <p
+      class="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground sm:text-xl"
+    >
+      {hero.subtitle}
+    </p>
+
+    <div class="mt-10 flex flex-col justify-center gap-4 sm:flex-row">
+      <a
+        href={spaUrl("/signup")}
+        class="flex items-center justify-center rounded-md bg-primary px-8 py-3 text-base font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+      >
+        {hero.ctaStart}
+      </a>
+      <a
+        href="#features"
+        class="flex items-center justify-center rounded-md border border-border bg-background px-8 py-3 text-base font-medium text-foreground transition-colors hover:bg-muted"
+      >
+        {hero.ctaDocs}
+      </a>
+    </div>
+  </div>
+</section>

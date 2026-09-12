@@ -1,0 +1,31 @@
+{
+  "short_name": "Charro Stack",
+  "name": "Charro Stack",
+  "icons": [
+    {
+      "src": "favicon-32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    },
+    {
+      "src": "favicon.png",
+      "sizes": "64x64",
+      "type": "image/png"
+    },
+    {
+      "src": "icon.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/?utm_source=homescreen",
+  "display": "standalone",
+  "background_color": "#090a0f",
+  "theme_color": "#090a0f"
+}

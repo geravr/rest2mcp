@@ -1,0 +1,35 @@
+---
+import type { UI } from "../../i18n";
+import { spaUrl } from "../../lib/spa-url";
+import { ArrowRight } from "lucide-react";
+
+interface Props {
+  finalCta: UI["finalCta"];
+}
+
+const { finalCta } = Astro.props;
+---
+
+<section class="bg-background py-24 text-center">
+  <div class="mx-auto w-full max-w-3xl px-4 sm:px-6 lg:px-8">
+    <h2
+      class="text-balance text-3xl font-semibold tracking-tight text-foreground sm:text-4xl"
+    >
+      {finalCta.title}
+    </h2>
+    <p
+      class="mx-auto mt-4 max-w-xl text-base text-muted-foreground sm:text-lg"
+    >
+      {finalCta.subtitle}
+    </p>
+
+    <div class="mt-8 flex justify-center">
+      <a
+        href={spaUrl("/signup")}
+        class="flex items-center justify-center rounded-md bg-primary px-8 py-3 text-base font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+      >
+        {finalCta.cta} <ArrowRight className="ml-2 h-4 w-4" />
+      </a>
+    </div>
+  </div>
+</section>

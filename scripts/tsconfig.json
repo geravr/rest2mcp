@@ -1,0 +1,10 @@
+{
+  "extends": "../packages/typescript-config/node.jsonc",
+  "compilerOptions": {
+    "composite": true,
+    "noEmit": true,
+    "tsBuildInfoFile": "../.cache/tsconfig/scripts.tsbuildinfo"
+  },
+  "include": ["**/*.ts", "**/*.js"],
+  "exclude": ["audit-app-i18n-keys.ts"]
+}

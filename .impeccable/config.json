@@ -1,0 +1,3 @@
+{
+  "projectRoots": ["apps/app", "apps/web", "apps/email"]
+}

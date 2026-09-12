@@ -1,0 +1,19 @@
+{
+  "extends": "../../packages/typescript-config/react.jsonc",
+  "compilerOptions": {
+    "composite": true,
+    "noEmit": true,
+    "tsBuildInfoFile": "../../.cache/tsconfig/app.tsbuildinfo",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx", "**/*.json", "./global.d.ts"],
+  "exclude": ["**/dist/**/*", "**/node_modules/**/*"],
+  "references": [
+    { "path": "../api" },
+    { "path": "../../packages/core" },
+    { "path": "../../packages/ui" }
+  ]
+}

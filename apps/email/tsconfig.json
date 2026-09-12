@@ -1,0 +1,14 @@
+{
+  "extends": "../../packages/typescript-config/react.jsonc",
+  "compilerOptions": {
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "outDir": "dist",
+    "rootDir": ".",
+    "tsBuildInfoFile": "../../.cache/tsconfig/email.tsbuildinfo",
+    "types": ["react"]
+  },
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["dist", "node_modules", ".email"]
+}

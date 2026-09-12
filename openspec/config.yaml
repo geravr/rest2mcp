@@ -1,0 +1,39 @@
+schema: spec-driven
+
+context: |
+  Tech stack: TypeScript, Bun, React 19, Hono, tRPC, Drizzle ORM, PostgreSQL, Tailwind CSS v4, shadcn/ui
+  Monorepo structure: apps/api (backend), apps/app (React SPA), apps/web (Astro marketing), apps/email (React Email), db (Drizzle), packages/ui (shadcn components), packages/core (guards, APP_ERROR_CODES, pagination, telemetry), packages/typescript-config, scripts
+  Key conventions:
+  - AGENTS.md = agent contracts (rules, invariants, anti-patterns)
+  - README.md = human onboarding (what, how to run, usage)
+  - package.json scripts are the single source of truth for commands
+  - Sub-path docs link to root README rather than duplicating command lists
+  - Code identifiers, comments, and API/log error identifiers are strictly in English
+  - User-visible copy is en/es with locale parity
+  - Single-user accounts (no Better Auth organizations or product tenancy)
+  - Thin routers: validate input, delegate to services, send response
+  - Services throw AppError; tRPC and Hono translate at the edge
+  - UI uses semantic theme tokens (--primary, --background, etc.)
+  - Database migrations via Drizzle Kit, never hand-edit migrations
+
+rules:
+  proposal:
+    - Keep proposals under 500 words
+    - Always include "Why", "What Changes", "Capabilities", and "Impact" sections
+    - State non-goals explicitly
+    - Use English for all content
+  design:
+    - Document decisions with rationale
+    - List risks and trade-offs
+    - Include migration plan if applicable
+    - Use English for all content
+  specs:
+    - Write requirements as "SHALL" statements
+    - Include concrete scenarios for each requirement
+    - Keep scenarios testable and specific
+    - Use English for all content
+  tasks:
+    - Break tasks into chunks of max 2 hours
+    - Order tasks by dependency (foundational changes first)
+    - Group related tasks into sections
+    - Use English for all task descriptions

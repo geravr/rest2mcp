@@ -1,0 +1,198 @@
+---
+import { LanguageSwitcher } from "./components/LanguageSwitcher";
+import { getTranslations } from "./i18n";
+import { spaUrl } from "./lib/spa-url";
+import "./styles/globals.css";
+
+export interface Props {
+  title?: string;
+  description?: string;
+  image?: string;
+}
+
+const t = getTranslations(Astro.currentLocale);
+
+const {
+  title = t.meta.title,
+  description = t.meta.description,
+  image = "/og.png",
+} = Astro.props;
+
+const canonicalUrl = new URL(Astro.url.pathname, Astro.site ?? Astro.url);
+const socialImageUrl = new URL(image, Astro.site ?? canonicalUrl);
+const ogLocale = Astro.currentLocale === "es" ? "es_ES" : "en_US";
+---
+
+<!doctype html>
+<html lang={Astro.currentLocale ?? "en"} class="scroll-smooth scroll-pt-16">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script is:inline>
+      (() => {
+        const cookieName = "saas-lang";
+
+        if (window.location.pathname !== "/") {
+          return;
+        }
+
+        const cookie = document.cookie
+          .split("; ")
+          .find((part) => part.startsWith(`${cookieName}=`));
+        const storedLocale = cookie?.split("=")[1];
+        const browserLocale = String(
+          (navigator.languages && navigator.languages[0]) ??
+            navigator.language ??
+            "en",
+        ).toLowerCase();
+        const detectedLocale = browserLocale.startsWith("es") ? "es" : "en";
+        const locale =
+          storedLocale === "es" || storedLocale === "en"
+            ? storedLocale
+            : detectedLocale;
+
+        if (storedLocale !== locale) {
+          document.cookie = `${cookieName}=${locale}; path=/; max-age=31536000; SameSite=Lax`;
+        }
+
+        if (locale === "es") {
+          window.location.replace(
+            `/es/${window.location.search}${window.location.hash}`,
+          );
+        }
+      })();
+    </script>
+    <script is:inline>
+      (() => {
+        const isDark = window.matchMedia(
+          "(prefers-color-scheme: dark)",
+        ).matches;
+        if (isDark) {
+          document.documentElement.classList.add("dark");
+        }
+        const themeColor = document.querySelector('meta[name="theme-color"]');
+        if (themeColor) {
+          themeColor.setAttribute("content", isDark ? "#09090b" : "#ffffff");
+        }
+      })();
+    </script>
+    <link rel="icon" type="image/png" href="/favicon.png" sizes="64x64" />
+    <link rel="icon" type="image/png" href="/favicon-32.png" sizes="32x32" />
+    <link
+      rel="apple-touch-icon"
+      href="/apple-touch-icon.png"
+      sizes="180x180"
+    />
+    <link rel="manifest" href="/site.manifest" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <meta name="generator" content={Astro.generator} />
+    <meta name="robots" content="index,follow" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#ffffff" />
+    <title>{title}</title>
+    <meta name="title" content={title} />
+    <meta name="description" content={description} />
+    <meta property="og:type" content="website" />
+    <link rel="canonical" href={canonicalUrl} />
+    <meta property="og:url" content={canonicalUrl} />
+    <meta property="og:site_name" content={t.header.logoAlt} />
+    <meta property="og:locale" content={ogLocale} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={socialImageUrl} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:url" content={canonicalUrl} />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={socialImageUrl} />
+  </head>
+  <body class="overflow-x-hidden">
+    <a
+      href="#main"
+      class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[60] focus:rounded-md focus:bg-background focus:px-3 focus:py-2 focus:text-sm focus:ring-2 focus:ring-ring"
+    >
+      {t.header.skipToContent}
+    </a>
+    <div class="flex min-h-screen flex-col">
+      <header
+        class="sticky top-0 z-50 border-b border-border bg-background/95 backdrop-blur"
+      >
+        <div class="mx-auto flex w-full max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
+          <div class="min-w-0 shrink">
+            <a href="/" class="flex items-center">
+              <img
+                src="/logo-light.png"
+                alt={t.header.logoAlt}
+                width="232"
+                height="43"
+                class="block h-8 w-auto max-w-[9.5rem] object-contain dark:hidden sm:h-12 sm:max-w-none"
+              />
+              <img
+                src="/logo-dark.png"
+                alt=""
+                aria-hidden="true"
+                width="232"
+                height="43"
+                class="hidden h-8 w-auto max-w-[9.5rem] object-contain dark:block sm:h-12 sm:max-w-none"
+              />
+            </a>
+          </div>
+
+          <div class="flex shrink-0 items-center gap-1.5 sm:gap-3">
+            <LanguageSwitcher
+              client:idle
+              locale={Astro.currentLocale ?? "en"}
+              labels={t.header.langSwitcher}
+            />
+            <a
+              href={spaUrl("/login")}
+              class="inline-flex whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground sm:px-4 sm:py-2 sm:text-sm"
+            >
+              {t.header.login}
+            </a>
+            <a
+              href={spaUrl("/signup")}
+              class="inline-flex whitespace-nowrap rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 sm:px-4 sm:py-2 sm:text-sm"
+            >
+              {t.header.signup}
+            </a>
+          </div>
+        </div>
+      </header>
+
+      <main id="main" class="flex-1">
+        <slot />
+      </main>
+
+      <footer class="border-t border-border bg-background">
+        <div class="mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+          <div class="grid gap-8 md:grid-cols-2">
+            <div class="max-w-xl">
+              <p class="text-sm font-medium text-foreground">
+                {t.footer.tagline}
+              </p>
+              <p class="mt-2 text-sm leading-6 text-muted-foreground">
+                {t.footer.description}
+              </p>
+            </div>
+            <nav class="flex flex-col gap-2" aria-label={t.footer.navLabel}>
+              <p class="text-sm font-medium text-foreground">
+                {t.footer.startHeading}
+              </p>
+              <a href={spaUrl("/signup")} class="text-sm text-muted-foreground transition-colors hover:text-foreground">{t.footer.links.signup}</a>
+              <a href={spaUrl("/login")} class="text-sm text-muted-foreground transition-colors hover:text-foreground">{t.footer.links.login}</a>
+            </nav>
+          </div>
+          <div class="mt-8 border-t border-border/60 pt-6 text-sm text-muted-foreground">
+            <p>&copy; {new Date().getFullYear()} {t.header.logoAlt}. {t.footer.copyright}</p>
+          </div>
+        </div>
+      </footer>
+    </div>
+  </body>
+</html>

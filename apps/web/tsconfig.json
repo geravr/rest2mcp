@@ -1,0 +1,24 @@
+{
+  "extends": "astro/tsconfigs/strict",
+  "compilerOptions": {
+    "composite": true,
+    "noEmit": true,
+    "tsBuildInfoFile": "../../.cache/tsconfig/web.tsbuildinfo",
+    "baseUrl": ".",
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "paths": {
+      "@/*": ["./*"]
+    },
+    "types": ["astro/client"]
+  },
+  "include": [
+    ".astro/types.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.json",
+    "**/*.astro"
+  ],
+  "exclude": ["**/dist/**/*", "**/node_modules/**/*"],
+  "references": [{ "path": "../../packages/ui" }]
+}

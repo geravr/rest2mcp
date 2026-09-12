@@ -1,0 +1,17 @@
+node_modules
+**/node_modules
+.git
+.github
+.vscode
+docs
+e2e
+infra
+plan
+test-results
+agent-docs
+.env.local
+.env.*.local
+**/dist
+**/*.tsbuildinfo
+bun.lock*
+!bun.lock

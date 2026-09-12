@@ -1,0 +1,36 @@
+{
+  "name": "@repo/email",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./templates/*": {
+      "types": "./dist/templates/*.d.ts",
+      "import": "./dist/templates/*.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "dev": "bunx react-email dev --port 3001",
+    "build": "tsc",
+    "export": "bunx react-email export",
+    "embed-logo": "bun ../../scripts/embed-email-logo.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@react-email/components": "^1.0.12",
+    "@react-email/render": "^2.1.0",
+    "react": "^19.3.0"
+  },
+  "devDependencies": {
+    "@react-email/preview-server": "^5.2.10",
+    "@repo/typescript-config": "workspace:*",
+    "@types/react": "^19.3.0",
+    "react-email": "^5.2.11",
+    "typescript": "~5.9.3"
+  }
+}
