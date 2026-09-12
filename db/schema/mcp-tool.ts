@@ -10,14 +10,22 @@ import {
 import { generateId } from "./id";
 import { mcpServer } from "./mcp-server";
 
-export type McpParamMap = {
-  path?: Record<string, string>;
+export type McpBodyType = "json" | "form" | "raw";
+
+export type McpRequestTemplate = {
   query?: Record<string, string>;
-  header?: Record<string, string>;
-  body?: Record<string, string> | string[] | null;
-  staticQuery?: Record<string, string>;
-  staticHeaders?: Record<string, string>;
-  staticBody?: string | null;
+  headers?: Record<string, string>;
+  body?: string | null;
+  bodyType?: McpBodyType;
+};
+
+export type McpToolParamType = "string" | "number" | "boolean" | "json";
+
+export type McpToolParam = {
+  name: string;
+  description?: string;
+  required: boolean;
+  type: McpToolParamType;
 };
 
 export const mcpTool = pgTable(
@@ -33,7 +41,10 @@ export const mcpTool = pgTable(
     description: text(),
     method: text().notNull(),
     pathTemplate: text().notNull(),
-    paramMap: jsonb().$type<McpParamMap>().notNull(),
+    /** Request template (query/headers/body) with {{placeholder}} interpolation. */
+    requestTemplate: jsonb().$type<McpRequestTemplate>(),
+    /** Declared agent params used to derive the gateway input schema. */
+    params: jsonb().$type<McpToolParam[]>(),
     allowMutation: boolean().notNull().default(false),
     enabled: boolean().notNull().default(true),
     /** "manual" | "curl" */

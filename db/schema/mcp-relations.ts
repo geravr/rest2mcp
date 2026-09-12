@@ -1,8 +1,8 @@
 import { relations } from "drizzle-orm";
 import { mcpAgentToken } from "./mcp-agent-token";
 import { mcpCallLog } from "./mcp-call-log";
-import { mcpCredential } from "./mcp-credential";
 import { mcpServer } from "./mcp-server";
+import { mcpServerVariable } from "./mcp-server-variable";
 import { mcpTool } from "./mcp-tool";
 import { user } from "./user";
 
@@ -12,7 +12,7 @@ export const mcpServerRelations = relations(mcpServer, ({ one, many }) => ({
     references: [user.id],
   }),
   tools: many(mcpTool),
-  credential: one(mcpCredential),
+  variables: many(mcpServerVariable),
   agentTokens: many(mcpAgentToken),
   callLogs: many(mcpCallLog),
 }));
@@ -25,12 +25,15 @@ export const mcpToolRelations = relations(mcpTool, ({ one, many }) => ({
   callLogs: many(mcpCallLog),
 }));
 
-export const mcpCredentialRelations = relations(mcpCredential, ({ one }) => ({
-  server: one(mcpServer, {
-    fields: [mcpCredential.serverId],
-    references: [mcpServer.id],
+export const mcpServerVariableRelations = relations(
+  mcpServerVariable,
+  ({ one }) => ({
+    server: one(mcpServer, {
+      fields: [mcpServerVariable.serverId],
+      references: [mcpServer.id],
+    }),
   }),
-}));
+);
 
 export const mcpAgentTokenRelations = relations(mcpAgentToken, ({ one }) => ({
   user: one(user, {

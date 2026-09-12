@@ -24,6 +24,10 @@ export const mcpServer = pgTable(
     baseUrl: text().notNull(),
     /** Hostnames allowed for upstream fetch. Default: host derived from baseUrl. */
     allowedHosts: jsonb().$type<string[]>().notNull(),
+    /** Template-aware headers applied to every tool call; tool headers win on conflict. */
+    defaultHeaders: jsonb().$type<Record<string, string>>(),
+    /** Template-aware query params applied to every tool call; tool query wins on conflict. */
+    defaultQuery: jsonb().$type<Record<string, string>>(),
     /** "draft" | "live" | "paused" */
     status: text().default("draft").notNull(),
     createdAt: timestamp({ withTimezone: true, mode: "date" })
