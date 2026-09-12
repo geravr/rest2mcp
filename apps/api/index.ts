@@ -17,13 +17,18 @@ export type { AppContext } from "./lib/context.js";
 export type { ExecuteMappedToolResult } from "./services/mcp-executor-service.js";
 export type {
   CreateServerInput,
+  CreateToolFromCurlInput,
   CreateToolInput,
+  CurlMarkableValue,
+  CurlPreview,
+  CurlValueMarking,
   McpHttpMethod,
   McpServerStatus,
   McpServerWithMeta,
   McpToolSource,
   SetVariableInput,
   TemplateWarning,
+  TestConnectionResult,
   TrafficLight,
   UpdateServerInput,
   UpdateToolInput,

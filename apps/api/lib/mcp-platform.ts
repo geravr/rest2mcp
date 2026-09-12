@@ -15,6 +15,8 @@ import {
   createServer,
   createTool,
   createToolFromCurl,
+  deleteServer,
+  deleteTool,
   deleteVariable,
   getConnectionSnippet,
   listCallLogs,
@@ -123,6 +125,8 @@ export function createPlatformMcpRoutes() {
                 status: item.status,
                 trafficLight: item.trafficLight,
                 hasSecret: item.hasSecret,
+                enabledToolCount: item.enabledToolCount,
+                lastCallAt: item.lastCallAt,
               })),
             };
           },
@@ -141,6 +145,18 @@ export function createPlatformMcpRoutes() {
           }),
         },
         asToolResult((args) => createServer(db, userId, args)),
+      );
+
+      mcp.registerTool(
+        "delete_server",
+        {
+          description:
+            "Delete a server you own, cascading its tools, variables, agent tokens, and call logs.",
+          inputSchema: z.object({
+            serverId: z.string().min(1),
+          }),
+        },
+        asToolResult((args) => deleteServer(db, userId, args.serverId)),
       );
 
       mcp.registerTool(
@@ -194,6 +210,21 @@ export function createPlatformMcpRoutes() {
             args,
             env.MCP_CREDENTIAL_SECRET,
           ),
+        ),
+      );
+
+      mcp.registerTool(
+        "delete_tool",
+        {
+          description:
+            "Delete a tool from a server you own. Historical call logs are kept.",
+          inputSchema: z.object({
+            serverId: z.string().min(1),
+            toolId: z.string().min(1),
+          }),
+        },
+        asToolResult((args) =>
+          deleteTool(db, userId, args.serverId, args.toolId),
         ),
       );
 

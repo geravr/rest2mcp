@@ -8,6 +8,8 @@ import {
   createTool,
   createToolFromCurl,
   createVariable,
+  deleteServer,
+  deleteTool,
   deleteVariable,
   getConnectionSnippet,
   getPlatformTokenMeta,
@@ -18,9 +20,11 @@ import {
   listServers,
   listTools,
   listVariables,
+  previewCurlImport,
   resolveApiOrigin,
   revokePlatformToken,
   revokeServerToken,
+  testConnection,
   updateServer,
   updateTool,
   updateVariable,
@@ -104,6 +108,23 @@ export const mcpRouter = router({
       updateServer(ctx.dbDirect, ctx.user.id, input.serverId, input),
     ),
 
+  deleteServer: protectedProcedure
+    .input(serverIdInput)
+    .mutation(({ ctx, input }) =>
+      deleteServer(ctx.dbDirect, ctx.user.id, input.serverId),
+    ),
+
+  testConnection: protectedProcedure
+    .input(serverIdInput)
+    .mutation(({ ctx, input }) =>
+      testConnection(
+        ctx.dbDirect,
+        ctx.user.id,
+        input.serverId,
+        ctx.env.MCP_CREDENTIAL_SECRET,
+      ),
+    ),
+
   tools: protectedProcedure
     .input(serverIdInput.extend(paginationInputSchema.shape))
     .query(({ ctx, input }) =>
@@ -133,6 +154,17 @@ export const mcpRouter = router({
         curl: z.string().trim().min(1).max(20_000),
         name: z.string().trim().min(1).max(64).optional(),
         description: z.string().trim().max(2000).nullable().optional(),
+        markings: z
+          .array(
+            z.object({
+              value: z.string().min(1).max(8_000),
+              as: z.enum(["param", "variable"]),
+              name: z.string().trim().min(1).max(100),
+              isSecret: z.boolean().optional(),
+            }),
+          )
+          .max(50)
+          .optional(),
       }),
     )
     .mutation(({ ctx, input }) =>
@@ -143,6 +175,16 @@ export const mcpRouter = router({
         input,
         ctx.env.MCP_CREDENTIAL_SECRET,
       ),
+    ),
+
+  parseCurlPreview: protectedProcedure
+    .input(
+      serverIdInput.extend({
+        curl: z.string().trim().min(1).max(20_000),
+      }),
+    )
+    .mutation(({ ctx, input }) =>
+      previewCurlImport(ctx.db, ctx.user.id, input.serverId, input.curl),
     ),
 
   updateTool: protectedProcedure
@@ -167,6 +209,12 @@ export const mcpRouter = router({
         input.toolId,
         input,
       ),
+    ),
+
+  deleteTool: protectedProcedure
+    .input(serverIdInput.extend({ toolId: z.string().min(1) }))
+    .mutation(({ ctx, input }) =>
+      deleteTool(ctx.dbDirect, ctx.user.id, input.serverId, input.toolId),
     ),
 
   variables: protectedProcedure

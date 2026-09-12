@@ -17,6 +17,8 @@ const authenticateAgentToken = vi.hoisted(() => vi.fn());
 const setVariable = vi.hoisted(() => vi.fn());
 const listVariables = vi.hoisted(() => vi.fn());
 const deleteVariable = vi.hoisted(() => vi.fn());
+const deleteServer = vi.hoisted(() => vi.fn());
+const deleteTool = vi.hoisted(() => vi.fn());
 
 vi.mock("../services/mcp-studio-service.js", async () => {
   const actual = await vi.importActual<
@@ -28,6 +30,8 @@ vi.mock("../services/mcp-studio-service.js", async () => {
     setVariable,
     listVariables,
     deleteVariable,
+    deleteServer,
+    deleteTool,
   };
 });
 
@@ -120,7 +124,7 @@ describe("platform MCP", () => {
       return client;
     }
 
-    it("lists exactly the eleven platform tools", async () => {
+    it("lists exactly the thirteen platform tools", async () => {
       const client = await connectClient();
       try {
         const { tools } = await client.listTools();
@@ -131,6 +135,8 @@ describe("platform MCP", () => {
             "add_tool",
             "add_tool_from_curl",
             "create_server",
+            "delete_server",
+            "delete_tool",
             "delete_variable",
             "get_connection_snippet",
             "list_recent_calls",
@@ -196,6 +202,47 @@ describe("platform MCP", () => {
           "usr_1",
           "mcs_1",
           "api_token",
+        );
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("routes delete_server payloads to the studio service", async () => {
+      deleteServer.mockResolvedValue({ id: "mcs_1", deleted: true });
+      const client = await connectClient();
+      try {
+        const result = await client.callTool({
+          name: "delete_server",
+          arguments: { serverId: "mcs_1" },
+        });
+
+        expect(result.isError).toBeFalsy();
+        expect(deleteServer).toHaveBeenCalledWith(
+          expect.anything(),
+          "usr_1",
+          "mcs_1",
+        );
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("routes delete_tool payloads to the studio service", async () => {
+      deleteTool.mockResolvedValue({ id: "mct_1", deleted: true });
+      const client = await connectClient();
+      try {
+        const result = await client.callTool({
+          name: "delete_tool",
+          arguments: { serverId: "mcs_1", toolId: "mct_1" },
+        });
+
+        expect(result.isError).toBeFalsy();
+        expect(deleteTool).toHaveBeenCalledWith(
+          expect.anything(),
+          "usr_1",
+          "mcs_1",
+          "mct_1",
         );
       } finally {
         await client.close();

@@ -55,6 +55,8 @@ export type ExecuteMappedToolResult = {
   truncated: boolean;
   durationMs: number;
   contentType: string | null;
+  /** Id of the persisted call-log row, so the playground can link to it. */
+  callLogId: string | null;
 };
 
 function joinUrlPath(basePath: string, toolPath: string): string {
@@ -64,7 +66,7 @@ function joinUrlPath(basePath: string, toolPath: string): string {
   return `${left}${right}`;
 }
 
-async function loadVariables(
+export async function loadVariables(
   db: DB,
   serverId: string,
   credentialSecret: string,
@@ -251,18 +253,22 @@ export async function executeMappedTool(
     appCode: string | null;
     requestSummary: string | null;
     responseSummary: string | null;
-  }) => {
-    await db.insert(mcpCallLog).values({
-      serverId: server.id,
-      toolId: tool.id,
-      source: input.source,
-      status: entry.status,
-      httpStatus: entry.httpStatus,
-      durationMs: Date.now() - started,
-      appCode: entry.appCode,
-      requestSummary: entry.requestSummary,
-      responseSummary: entry.responseSummary,
-    });
+  }): Promise<string | null> => {
+    const [row] = await db
+      .insert(mcpCallLog)
+      .values({
+        serverId: server.id,
+        toolId: tool.id,
+        source: input.source,
+        status: entry.status,
+        httpStatus: entry.httpStatus,
+        durationMs: Date.now() - started,
+        appCode: entry.appCode,
+        requestSummary: entry.requestSummary,
+        responseSummary: entry.responseSummary,
+      })
+      .returning({ id: mcpCallLog.id });
+    return row?.id ?? null;
   };
 
   try {
@@ -369,7 +375,7 @@ export async function executeMappedTool(
       });
     }
 
-    await persistLog({
+    const callLogId = await persistLog({
       status: "success",
       httpStatus: response.status,
       appCode: null,
@@ -384,6 +390,7 @@ export async function executeMappedTool(
       truncated: capped.truncated,
       durationMs,
       contentType: response.headers.get("content-type"),
+      callLogId,
     };
   } catch (error) {
     if (error instanceof AppError) {

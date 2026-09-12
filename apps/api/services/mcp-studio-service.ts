@@ -14,15 +14,24 @@ import {
 } from "@repo/db";
 import { and, count, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { APP_ERROR_CODES, appError } from "../lib/app-error.js";
+import { APP_ERROR_CODES, AppError, appError } from "../lib/app-error.js";
 import { generateAgentToken, hashAgentToken } from "../lib/mcp-agent-token.js";
 import { encryptCredential } from "../lib/mcp-crypto.js";
 import { isAuthHeaderName, parseCurlCommand } from "../lib/mcp-curl.js";
 import { MCP_MAX_TOOLS_PER_SERVER } from "../lib/mcp-redact.js";
-import { extractPlaceholders } from "../lib/mcp-template.js";
+import { assertUpstreamUrlSafe } from "../lib/mcp-ssrf.js";
+import {
+  extractPlaceholders,
+  renderTemplate,
+  type RenderScope,
+} from "../lib/mcp-template.js";
 import { paginate } from "../lib/paginate.js";
 import { isUserBanned } from "../lib/user-access.js";
-import { MUTATING_METHODS, READ_METHODS } from "./mcp-executor-service.js";
+import {
+  loadVariables,
+  MUTATING_METHODS,
+  READ_METHODS,
+} from "./mcp-executor-service.js";
 
 type DB = PostgresJsDatabase<Record<string, unknown>>;
 
@@ -253,9 +262,21 @@ async function hasSecretVariable(db: DB, serverId: string): Promise<boolean> {
   return Boolean(row);
 }
 
+async function lastCallAt(db: DB, serverId: string): Promise<Date | null> {
+  const [row] = await db
+    .select({ createdAt: mcpCallLog.createdAt })
+    .from(mcpCallLog)
+    .where(eq(mcpCallLog.serverId, serverId))
+    .orderBy(desc(mcpCallLog.createdAt))
+    .limit(1);
+  return row?.createdAt ?? null;
+}
+
 export type McpServerWithMeta = McpServer & {
   trafficLight: TrafficLight;
   hasSecret: boolean;
+  enabledToolCount: number;
+  lastCallAt: Date | null;
 };
 
 export async function attachTrafficLight(
@@ -264,14 +285,18 @@ export async function attachTrafficLight(
 ): Promise<McpServerWithMeta[]> {
   return Promise.all(
     servers.map(async (server) => {
-      const [enabledToolCount, recentCallStatuses, secret] = await Promise.all([
-        countEnabledTools(db, server.id),
-        recentProductCallStatuses(db, server.id),
-        hasSecretVariable(db, server.id),
-      ]);
+      const [enabledToolCount, recentCallStatuses, secret, lastCall] =
+        await Promise.all([
+          countEnabledTools(db, server.id),
+          recentProductCallStatuses(db, server.id),
+          hasSecretVariable(db, server.id),
+          lastCallAt(db, server.id),
+        ]);
       return {
         ...server,
         hasSecret: secret,
+        enabledToolCount,
+        lastCallAt: lastCall,
         trafficLight: deriveTrafficLight({
           status: server.status,
           enabledToolCount,
@@ -471,6 +496,24 @@ export async function updateServer(
 
   const [withMeta] = await attachTrafficLight(db, [updated]);
   return withMeta;
+}
+
+/**
+ * Deletes a server and every row that belongs to it. Call logs are removed
+ * explicitly (their FK is `set null`) so no invisible rows survive.
+ */
+export async function deleteServer(db: DB, userId: string, serverId: string) {
+  const server = await requireOwnedServer(db, userId, serverId);
+  await db.transaction(async (tx) => {
+    await tx.delete(mcpCallLog).where(eq(mcpCallLog.serverId, server.id));
+    await tx.delete(mcpTool).where(eq(mcpTool.serverId, server.id));
+    await tx
+      .delete(mcpServerVariable)
+      .where(eq(mcpServerVariable.serverId, server.id));
+    await tx.delete(mcpAgentToken).where(eq(mcpAgentToken.serverId, server.id));
+    await tx.delete(mcpServer).where(eq(mcpServer.id, server.id));
+  });
+  return { id: server.id, deleted: true };
 }
 
 async function promoteServerIfReady(
@@ -696,14 +739,21 @@ export function capturedVariableName(
   return VARIABLE_NAME_PATTERN.test(slug) ? slug : "auth_secret";
 }
 
-async function upsertSecretVariable(
+async function upsertCapturedVariable(
   db: DB,
   serverId: string,
   name: string,
   plaintext: string,
+  isSecret: boolean,
   credentialSecret: string,
 ): Promise<void> {
-  const ciphertext = encryptCredential(plaintext, credentialSecret);
+  const stored = isSecret
+    ? {
+        isSecret: true,
+        value: null,
+        ciphertext: encryptCredential(plaintext, credentialSecret),
+      }
+    : { isSecret: false, value: plaintext, ciphertext: null };
   const [existing] = await db
     .select({ id: mcpServerVariable.id })
     .from(mcpServerVariable)
@@ -718,29 +768,197 @@ async function upsertSecretVariable(
   if (existing) {
     await db
       .update(mcpServerVariable)
-      .set({ isSecret: true, value: null, ciphertext })
+      .set(stored)
       .where(eq(mcpServerVariable.id, existing.id));
     return;
   }
-  await db.insert(mcpServerVariable).values({
-    serverId,
-    name,
-    isSecret: true,
-    value: null,
-    ciphertext,
-  });
+  await db.insert(mcpServerVariable).values({ serverId, name, ...stored });
+}
+
+export type CurlMarkableValue = {
+  value: string;
+  location: "path" | "query" | "header" | "body";
+  /** Query key, header name, or JSON path for body values; null otherwise. */
+  key: string | null;
+};
+
+export type CurlPreview = {
+  method: McpHttpMethod;
+  pathTemplate: string;
+  query: Record<string, string>;
+  headers: Record<string, string>;
+  body: string | null;
+  bodyType: "json" | "form" | "raw" | undefined;
+  auth: {
+    scheme: "bearer" | "api_key" | "header";
+    headerName: string;
+    value: string;
+    variableName: string;
+  } | null;
+  values: CurlMarkableValue[];
+};
+
+function collectJsonLeafValues(
+  value: unknown,
+  path: string,
+  out: CurlMarkableValue[],
+  seen: Set<string>,
+): void {
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    const text = String(value);
+    if (text.length === 0) return;
+    const dedupeKey = `${path} ${text}`;
+    if (seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+    out.push({ value: text, location: "body", key: path });
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      collectJsonLeafValues(item, `${path}[${index}]`, out, seen),
+    );
+    return;
+  }
+  if (value && typeof value === "object") {
+    for (const [key, item] of Object.entries(value)) {
+      collectJsonLeafValues(item, path ? `${path}.${key}` : key, out, seen);
+    }
+  }
+}
+
+function collectBodyValues(
+  body: string,
+  bodyType: "json" | "form" | "raw" | undefined,
+): CurlMarkableValue[] {
+  if (bodyType === "json") {
+    try {
+      const parsed: unknown = JSON.parse(body);
+      const out: CurlMarkableValue[] = [];
+      collectJsonLeafValues(parsed, "", out, new Set());
+      return out;
+    } catch {
+      return [{ value: body, location: "body", key: null }];
+    }
+  }
+  if (bodyType === "form") {
+    const out: CurlMarkableValue[] = [];
+    for (const [key, value] of new URLSearchParams(body)) {
+      if (value) out.push({ value, location: "body", key });
+    }
+    return out;
+  }
+  return [{ value: body, location: "body", key: null }];
+}
+
+function collectPathValues(pathTemplate: string): CurlMarkableValue[] {
+  const seen = new Set<string>();
+  const out: CurlMarkableValue[] = [];
+  for (const segment of pathTemplate.split("/")) {
+    if (!segment || seen.has(segment)) continue;
+    seen.add(segment);
+    out.push({ value: segment, location: "path", key: null });
+  }
+  return out;
+}
+
+/** Pure dry-run parse: the would-be tool shape plus every markable literal. */
+export function parseCurlPreview(
+  serverBaseUrl: string,
+  curl: string,
+): CurlPreview {
+  const parsed = parseCurlCommand(curl);
+  const { pathTemplate, query } = toolPathFromCurl(serverBaseUrl, parsed.url);
+  const bodyType = inferBodyType(parsed.headers, parsed.body);
+  const suggestion = parsed.credentialSuggestion;
+
+  const values: CurlMarkableValue[] = [
+    ...collectPathValues(pathTemplate),
+    ...Object.entries(query)
+      .filter(([, value]) => value.length > 0)
+      .map(([key, value]) => ({ value, location: "query" as const, key })),
+    ...Object.entries(parsed.headers)
+      .filter(([, value]) => value.length > 0)
+      .map(([key, value]) => ({ value, location: "header" as const, key })),
+    ...(parsed.body !== null ? collectBodyValues(parsed.body, bodyType) : []),
+  ];
+
+  return {
+    method: parsed.method.toUpperCase() as McpHttpMethod,
+    pathTemplate,
+    query,
+    headers: parsed.headers,
+    body: parsed.body,
+    bodyType,
+    auth: suggestion
+      ? {
+          scheme: suggestion.scheme,
+          headerName: suggestion.headerName,
+          value: suggestion.value,
+          variableName: capturedVariableName(
+            suggestion.scheme,
+            suggestion.headerName,
+          ),
+        }
+      : null,
+    values,
+  };
+}
+
+/** Owner-scoped dry-run; writes nothing. */
+export async function previewCurlImport(
+  db: DB,
+  userId: string,
+  serverId: string,
+  curl: string,
+): Promise<CurlPreview> {
+  const server = await requireOwnedServer(db, userId, serverId);
+  return parseCurlPreview(server.baseUrl, curl);
+}
+
+export type CurlValueMarking = {
+  value: string;
+  as: "param" | "variable";
+  name: string;
+  isSecret?: boolean;
+};
+
+export type CreateToolFromCurlInput = {
+  curl: string;
+  name?: string;
+  description?: string | null;
+  markings?: CurlValueMarking[];
+};
+
+const PARAM_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]*$/;
+
+function assertMarkingName(marking: CurlValueMarking): void {
+  const pattern =
+    marking.as === "variable" ? VARIABLE_NAME_PATTERN : PARAM_NAME_PATTERN;
+  if (!pattern.test(marking.name)) {
+    throw appError({
+      appCode: APP_ERROR_CODES.INVALID_INPUT,
+      message: `Marking name "${marking.name}" is not a valid ${marking.as} name.`,
+      status: 400,
+    });
+  }
 }
 
 export async function createToolFromCurl(
   db: DB,
   userId: string,
   serverId: string,
-  input: { curl: string; name?: string; description?: string | null },
+  input: CreateToolFromCurlInput,
   credentialSecret: string,
 ) {
   const server = await requireOwnedServer(db, userId, serverId);
   const parsed = parseCurlCommand(input.curl);
-  const { pathTemplate, query } = toolPathFromCurl(server.baseUrl, parsed.url);
+  const curlTarget = toolPathFromCurl(server.baseUrl, parsed.url);
+  const query = curlTarget.query;
+  let pathTemplate = curlTarget.pathTemplate;
   const method = parsed.method.toUpperCase() as McpHttpMethod;
   const inferredName =
     input.name ??
@@ -752,43 +970,148 @@ export async function createToolFromCurl(
     }`;
 
   const bodyType = inferBodyType(parsed.headers, parsed.body);
-  const requestTemplate: McpRequestTemplate = {
-    ...(Object.keys(query).length > 0 ? { query } : {}),
-    ...(Object.keys(parsed.headers).length > 0
-      ? { headers: parsed.headers }
-      : {}),
-    ...(parsed.body !== null ? { body: parsed.body, bodyType } : {}),
+  const headers: Record<string, string> = { ...parsed.headers };
+  let body = parsed.body;
+  const suggestion = parsed.credentialSuggestion;
+
+  // Longest values first so short values cannot partially rewrite long ones.
+  const markings = [...(input.markings ?? [])].sort(
+    (a, b) => b.value.length - a.value.length,
+  );
+  for (const marking of markings) assertMarkingName(marking);
+
+  // Same markable inventory the preview surfaced, so each marked literal is
+  // rewritten only where it was found — a short value like "1" must not
+  // rewrite unrelated path segments, query keys, headers, or body text.
+  const markables: CurlMarkableValue[] = [
+    ...collectPathValues(pathTemplate),
+    ...Object.entries(query)
+      .filter(([, value]) => value.length > 0)
+      .map(([key, value]) => ({ value, location: "query" as const, key })),
+    ...Object.entries(headers)
+      .filter(([, value]) => value.length > 0)
+      .map(([key, value]) => ({ value, location: "header" as const, key })),
+    ...(body !== null ? collectBodyValues(body, bodyType) : []),
+  ];
+
+  const substituteAt = (markable: CurlMarkableValue, name: string) => {
+    const placeholder = `{{${name}}}`;
+    if (markable.location === "path") {
+      // Path markables are whole segments; never rewrite inside one.
+      pathTemplate = pathTemplate
+        .split("/")
+        .map((segment) => (segment === markable.value ? placeholder : segment))
+        .join("/");
+      return;
+    }
+    if (markable.location === "query" && markable.key !== null) {
+      const current = query[markable.key];
+      if (current !== undefined) {
+        query[markable.key] = current.split(markable.value).join(placeholder);
+      }
+      return;
+    }
+    if (markable.location === "header" && markable.key !== null) {
+      const current = headers[markable.key];
+      if (current !== undefined) {
+        headers[markable.key] = current.split(markable.value).join(placeholder);
+      }
+      return;
+    }
+    if (body !== null) body = body.split(markable.value).join(placeholder);
   };
 
+  const substitute = (value: string, name: string) => {
+    if (!value) return;
+    const markable = markables.find((entry) => entry.value === value);
+    if (markable) substituteAt(markable, name);
+  };
+
+  // The peeled credential is a substring of its own header value, so it
+  // never matches a whole markable; rewrite it inside that header only.
+  const substituteAuth = (value: string, name: string) => {
+    if (!suggestion) return;
+    const current = headers[suggestion.headerName];
+    if (!current) return;
+    headers[suggestion.headerName] = current.split(value).join(`{{${name}}}`);
+  };
+
+  const params: McpToolParam[] = [];
+  const capturedParams: string[] = [];
+  const capturedVariables: string[] = [];
   let capturedVariable: string | null = null;
   let capturedHeader: string | null = null;
-  if (parsed.credentialSuggestion) {
-    const suggestion = parsed.credentialSuggestion;
-    capturedVariable = capturedVariableName(
-      suggestion.scheme,
-      suggestion.headerName,
+
+  if (suggestion) {
+    const authMarking = markings.find(
+      (marking) => marking.value === suggestion.value,
     );
     capturedHeader = suggestion.headerName;
-    await upsertSecretVariable(
-      db,
-      server.id,
-      capturedVariable,
-      suggestion.value,
-      credentialSecret,
-    );
-    const headerValue =
-      suggestion.scheme === "bearer"
-        ? `Bearer {{${capturedVariable}}}`
-        : `{{${capturedVariable}}}`;
-    const defaultHeaders = {
-      ...(server.defaultHeaders ?? {}),
-      [suggestion.headerName]: headerValue,
-    };
-    await db
-      .update(mcpServer)
-      .set({ defaultHeaders })
-      .where(eq(mcpServer.id, server.id));
+    const renderHeaderValue = (name: string) =>
+      suggestion.scheme === "bearer" ? `Bearer {{${name}}}` : `{{${name}}}`;
+
+    if (authMarking?.as === "param") {
+      substituteAuth(suggestion.value, authMarking.name);
+      params.push({ name: authMarking.name, required: true, type: "string" });
+      capturedParams.push(authMarking.name);
+      const defaultHeaders = {
+        ...(server.defaultHeaders ?? {}),
+        [suggestion.headerName]: renderHeaderValue(authMarking.name),
+      };
+      await db
+        .update(mcpServer)
+        .set({ defaultHeaders })
+        .where(eq(mcpServer.id, server.id));
+    } else {
+      const variableName =
+        authMarking?.name ??
+        capturedVariableName(suggestion.scheme, suggestion.headerName);
+      await upsertCapturedVariable(
+        db,
+        server.id,
+        variableName,
+        suggestion.value,
+        authMarking?.isSecret ?? true,
+        credentialSecret,
+      );
+      substituteAuth(suggestion.value, variableName);
+      capturedVariable = variableName;
+      capturedVariables.push(variableName);
+      const defaultHeaders = {
+        ...(server.defaultHeaders ?? {}),
+        [suggestion.headerName]: renderHeaderValue(variableName),
+      };
+      await db
+        .update(mcpServer)
+        .set({ defaultHeaders })
+        .where(eq(mcpServer.id, server.id));
+    }
   }
+
+  for (const marking of markings) {
+    if (suggestion && marking.value === suggestion.value) continue;
+    substitute(marking.value, marking.name);
+    if (marking.as === "param") {
+      params.push({ name: marking.name, required: true, type: "string" });
+      capturedParams.push(marking.name);
+    } else {
+      await upsertCapturedVariable(
+        db,
+        server.id,
+        marking.name,
+        marking.value,
+        marking.isSecret ?? false,
+        credentialSecret,
+      );
+      capturedVariables.push(marking.name);
+    }
+  }
+
+  const requestTemplate: McpRequestTemplate = {
+    ...(Object.keys(query).length > 0 ? { query } : {}),
+    ...(Object.keys(headers).length > 0 ? { headers } : {}),
+    ...(body !== null ? { body, bodyType } : {}),
+  };
 
   const tool = await createTool(
     db,
@@ -800,11 +1123,107 @@ export async function createToolFromCurl(
       method,
       pathTemplate,
       requestTemplate,
+      params,
     },
     "curl",
   );
 
-  return { ...tool, capturedVariable, capturedHeader };
+  return {
+    ...tool,
+    capturedVariable,
+    capturedHeader,
+    capturedVariables,
+    capturedParams,
+  };
+}
+
+const TEST_CONNECTION_TIMEOUT_MS = 5_000;
+
+export type TestConnectionResult = {
+  ok: boolean;
+  httpStatus: number | null;
+  durationMs: number;
+  appCode?: string;
+};
+
+/**
+ * Connectivity probe: GET the baseUrl through the same SSRF guard and
+ * allowlist as execution, with server defaults rendered. Any HTTP response
+ * (including 401) proves reachability. Never writes a call-log row.
+ */
+export async function testConnection(
+  db: DB,
+  userId: string,
+  serverId: string,
+  credentialSecret: string,
+): Promise<TestConnectionResult> {
+  const server = await requireOwnedServer(db, userId, serverId);
+  const started = Date.now();
+  const finish = (
+    ok: boolean,
+    httpStatus: number | null,
+    appCode?: string,
+  ): TestConnectionResult => ({
+    ok,
+    httpStatus,
+    durationMs: Date.now() - started,
+    ...(appCode ? { appCode } : {}),
+  });
+
+  try {
+    const url = await assertUpstreamUrlSafe(
+      server.baseUrl,
+      server.allowedHosts,
+    );
+    const scope: RenderScope = {
+      args: {},
+      variables: await loadVariables(db, server.id, credentialSecret),
+      secretsUsed: new Set<string>(),
+    };
+
+    const queryParts: string[] = [];
+    for (const [key, valueTemplate] of Object.entries(
+      server.defaultQuery ?? {},
+    )) {
+      const rendered = renderTemplate(valueTemplate, "query", scope);
+      queryParts.push(`${encodeURIComponent(key)}=${rendered}`);
+    }
+    if (queryParts.length > 0) {
+      url.search = queryParts.join("&");
+    }
+
+    const headers = new Headers();
+    for (const [name, valueTemplate] of Object.entries(
+      server.defaultHeaders ?? {},
+    )) {
+      headers.set(name, renderTemplate(valueTemplate, "header", scope));
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      TEST_CONNECTION_TIMEOUT_MS,
+    );
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        headers,
+        redirect: "manual",
+        signal: controller.signal,
+      });
+      await response.body?.cancel();
+      return finish(true, response.status);
+    } catch {
+      return finish(false, null, APP_ERROR_CODES.MCP_UPSTREAM_ERROR);
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch (error) {
+    if (error instanceof AppError) {
+      return finish(false, null, error.appCode);
+    }
+    throw error;
+  }
 }
 
 export async function updateTool(
@@ -877,6 +1296,28 @@ export async function updateTool(
     }
     throw error;
   }
+}
+
+/** Historical call logs survive the tool with a null `toolId` (FK set null). */
+export async function deleteTool(
+  db: DB,
+  userId: string,
+  serverId: string,
+  toolId: string,
+) {
+  await requireOwnedServer(db, userId, serverId);
+  const [deleted] = await db
+    .delete(mcpTool)
+    .where(and(eq(mcpTool.id, toolId), eq(mcpTool.serverId, serverId)))
+    .returning({ id: mcpTool.id });
+  if (!deleted) {
+    throw appError({
+      appCode: APP_ERROR_CODES.MCP_TOOL_NOT_FOUND,
+      message: "MCP tool not found.",
+      status: 404,
+    });
+  }
+  return { id: deleted.id, deleted: true };
 }
 
 export async function listVariables(db: DB, userId: string, serverId: string) {
