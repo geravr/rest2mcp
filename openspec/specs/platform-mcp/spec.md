@@ -13,7 +13,7 @@ The system SHALL expose a Streamable HTTP MCP at `/api/platform-mcp` authenticat
 #### Scenario: Valid platform token
 
 - **WHEN** the owner's agent connects to `/api/platform-mcp` with a valid platform token
-- **THEN** the agent receives studio tools (`list_servers`, `create_server`, `add_tool`, `add_tool_from_curl`, `set_credential`, `list_tools`, `test_tool`, `get_connection_snippet`, `list_recent_calls`)
+- **THEN** the agent receives studio tools (`list_servers`, `create_server`, `add_tool`, `add_tool_from_curl`, `set_variable`, `list_variables`, `delete_variable`, `list_tools`, `test_tool`, `get_connection_snippet`, `list_recent_calls`)
 
 #### Scenario: Server token rejected
 
@@ -32,7 +32,7 @@ Platform MCP tools SHALL enforce the same ownership, validation, mutation, and s
 #### Scenario: Create server via agent
 
 - **WHEN** the owner's agent calls `create_server` with a valid name and base URL
-- **THEN** a server owned by that user is created and returned without any credential secret
+- **THEN** a server owned by that user is created and returned without any secret variable value
 
 #### Scenario: Add tool from curl via agent
 
@@ -56,13 +56,18 @@ Platform MCP tools SHALL enforce the same ownership, validation, mutation, and s
 #### Scenario: Connection snippet
 
 - **WHEN** the agent calls `get_connection_snippet` for a server they own
-- **THEN** the result includes `/mcp/{serverId}` and does not include credential ciphertext
+- **THEN** the result includes `/mcp/{serverId}` and does not include secret variable values
 
 ### Requirement: Platform calls stay secret-safe
 
-Platform MCP responses and logs SHALL NOT include decrypted credentials, raw platform tokens after issuance, or raw server agent tokens except the one-time token-create response.
+Platform MCP responses and logs SHALL NOT include secret variable values, raw platform tokens after issuance, or raw server agent tokens except the one-time token-create response. `list_variables` SHALL return names, `isSecret` flags, and `hasValue` metadata only.
+
+#### Scenario: list_variables omits secrets
+
+- **WHEN** the agent calls `list_variables` for a server with a secret variable
+- **THEN** the item includes the variable name, `isSecret` true, and `hasValue` true, and MUST NOT include the value
 
 #### Scenario: list_servers omits secrets
 
 - **WHEN** the agent calls `list_servers`
-- **THEN** each item may include `hasSecret` and MUST NOT include the credential value
+- **THEN** each item may include secret-presence metadata and MUST NOT include any secret variable value

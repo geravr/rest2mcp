@@ -8,7 +8,7 @@ Playground invoke, traffic-light health, and paginated call logs for MCP servers
 
 ### Requirement: Owner can invoke a tool from the playground
 
-The system SHALL provide an authenticated playground invoke that uses the same executor as the gateway (allowlist, mutation rules, credential injection, timeouts). Playground calls SHALL be logged with source `playground`.
+The system SHALL provide an authenticated playground invoke that uses the same executor as the gateway (allowlist, mutation rules, variable rendering, timeouts). Playground calls SHALL be logged with source `playground`.
 
 #### Scenario: Playground success
 
@@ -41,7 +41,7 @@ The system SHALL expose a derived traffic light for each server: `paused` when s
 
 ### Requirement: Paginated call log without secrets
 
-The system SHALL list call logs for a server owned by the caller using the `@repo/core` pagination envelope. Stored summaries SHALL be redacted and capped at 64 KiB. Logs SHALL never contain credential secrets or raw agent tokens.
+The system SHALL list call logs for a server owned by the caller using the `@repo/core` pagination envelope. Stored summaries SHALL be redacted and capped at 64 KiB. Redaction SHALL cover every secret variable value used in the render (in raw, URL-encoded, and form-encoded variants), not only a single credential. Logs SHALL never contain secret variable values or raw agent tokens.
 
 #### Scenario: Owner reads logs
 
@@ -53,7 +53,7 @@ The system SHALL list call logs for a server owned by the caller using the `@rep
 - **WHEN** user B lists logs for user A's server id
 - **THEN** the system rejects the request with `MCP_SERVER_NOT_FOUND` (or equivalent not-found, not a leak)
 
-#### Scenario: Secret not logged
+#### Scenario: Secret variable not logged
 
-- **WHEN** a call used a bearer credential
-- **THEN** the persisted request summary does not contain the credential value
+- **WHEN** a call rendered a secret variable into a query param and body field
+- **THEN** the persisted request summary shows `[REDACTED]` in place of the secret value in both positions

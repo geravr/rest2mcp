@@ -2,18 +2,23 @@
 
 ## Purpose
 
-Owner-scoped control plane for mapping REST APIs to hosted MCP tools: servers, tools, credentials, and connection snippets.
+Owner-scoped control plane for mapping REST APIs to hosted MCP tools: servers, tools, variables, and connection snippets.
 
 ## Requirements
 
 ### Requirement: Owner can create and list MCP servers
 
-The system SHALL let an authenticated user create MCP servers they own, each with a name, optional description, required HTTPS or HTTP `baseUrl`, and a slug unique among that user's servers. Collection list endpoints SHALL return the `@repo/core` pagination envelope (`items`, `page`, `pageSize`, `total`). A user SHALL NOT read or mutate another user's server.
+The system SHALL let an authenticated user create MCP servers they own, each with a name, optional description, required HTTPS or HTTP `baseUrl`, and a slug unique among that user's servers. The stored `baseUrl` SHALL preserve any path prefix (e.g. `https://api.example.com/v2` keeps `/v2`) and SHALL strip query and fragment. Collection list endpoints SHALL return the `@repo/core` pagination envelope (`items`, `page`, `pageSize`, `total`). A user SHALL NOT read or mutate another user's server.
 
 #### Scenario: Create server
 
 - **WHEN** the owner creates a server with name "CRM" and base URL `https://api.example.com`
 - **THEN** the system stores a server owned by that user, derives `allowedHosts` to include `api.example.com`, and returns the server id and slug
+
+#### Scenario: Path prefix preserved
+
+- **WHEN** the owner creates a server with base URL `https://api.example.com/v2`
+- **THEN** the stored `baseUrl` is `https://api.example.com/v2` and tool paths resolve under that prefix
 
 #### Scenario: Paginated list is owner-scoped
 
@@ -27,11 +32,11 @@ The system SHALL let an authenticated user create MCP servers they own, each wit
 
 ### Requirement: Owner can add REST tools manually
 
-The system SHALL let the owner add a tool with a MCP-safe name unique per server, description, HTTP method, path template, and parameter map (path, query, header, body). GET and HEAD tools SHALL be enabled with `allowMutation` false. POST, PUT, PATCH, and DELETE tools SHALL require `allowMutation` true before they can be enabled. A server SHALL NOT exceed 50 tools.
+The system SHALL let the owner add a tool with a MCP-safe name unique per server, description, HTTP method, path template, request template (query, headers, body, `bodyType`), and param metadata. GET and HEAD tools SHALL be enabled with `allowMutation` false. POST, PUT, PATCH, and DELETE tools SHALL require `allowMutation` true before they can be enabled. A server SHALL NOT exceed 50 tools.
 
 #### Scenario: Add GET tool
 
-- **WHEN** the owner adds tool `get_contact` with method GET and path `/contacts/{id}`
+- **WHEN** the owner adds tool `get_contact` with method GET, path `/contacts/{{contactId}}`, and a required param `contactId`
 - **THEN** the tool is stored enabled with `allowMutation` false and source `manual`
 
 #### Scenario: Mutation stays off until allowed
@@ -46,31 +51,17 @@ The system SHALL let the owner add a tool with a MCP-safe name unique per server
 
 ### Requirement: Owner can add a tool from curl
 
-The system SHALL parse a curl command into method, URL, headers, and body and create a tool. Credential-bearing headers (Authorization, api-key style) SHALL NOT be copied into the tool parameter map. If the server already has a `baseUrl`, the tool path SHALL be the remainder after that origin.
+The system SHALL parse a curl command into method, URL, headers, and body and create a tool whose request template carries those values (query params become query template entries, non-auth headers become header entries, body becomes a typed body template). When an auth header is detected, the system SHALL create or update a secret variable with that value plus the matching server default header, and the response SHALL report what was captured. The literal secret SHALL NOT be stored on the tool.
 
-#### Scenario: Curl without secrets in the tool
+#### Scenario: Curl captures credential as variable
 
 - **WHEN** the owner imports `curl -H 'Authorization: Bearer secret' https://api.example.com/v1/items`
-- **THEN** the system creates a GET tool for `/v1/items` and does not store `secret` on the tool
+- **THEN** the system creates a GET tool for `/v1/items`, stores `secret` as an encrypted secret variable, adds default header `Authorization: Bearer {{...}}`, and the tool itself contains no secret
 
 #### Scenario: Invalid curl
 
 - **WHEN** the owner submits a string that is not a parseable curl command
 - **THEN** the system rejects the request with `MCP_CURL_INVALID`
-
-### Requirement: Owner can store one encrypted upstream credential
-
-The system SHALL allow at most one credential per server with a recipe-ready scheme (`bearer`, `api_key`, or `header`) plus header name and value location. The secret value SHALL be encrypted at rest and SHALL never be returned by list or get APIs (only `hasSecret`).
-
-#### Scenario: Set credential
-
-- **WHEN** the owner sets a bearer credential with token `abc`
-- **THEN** subsequent reads return `hasSecret` true and do not include `abc`
-
-#### Scenario: Replace credential
-
-- **WHEN** the owner sets a credential on a server that already has one
-- **THEN** the previous ciphertext is replaced and `hasSecret` remains true
 
 ### Requirement: Owner can copy a connection snippet
 
@@ -88,9 +79,9 @@ The system SHALL let the owner create a server-scoped agent token, display the r
 
 ### Requirement: Records are recipe-ready without secrets
 
-Server, tool, and credential-scheme fields SHALL be sufficient to reconstruct a template later. Ciphertext, agent tokens, and call logs SHALL NOT be part of that template shape.
+Server, tool, and variable-definition fields SHALL be sufficient to reconstruct a template later: name, description, baseUrl, allowedHosts, defaultHeaders, defaultQuery, tool templates, params, and variable names with their `isSecret` flags. Secret values, ciphertext, agent tokens, and call logs SHALL NOT be part of that template shape.
 
 #### Scenario: Template shape excludes secrets
 
-- **WHEN** a server has tools and a stored credential
-- **THEN** the exportable template fields include name, description, baseUrl, allowedHosts, tool mappings, and credential scheme, and exclude ciphertext and tokens
+- **WHEN** a server has tools, variables, and defaults
+- **THEN** the exportable template includes variable names and flags but no secret values, ciphertext, or tokens
