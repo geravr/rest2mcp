@@ -32,7 +32,7 @@ The layer-1 studio cannot express most real-world APIs: the tool form creates st
 
 ## Impact
 
-- **db:** new `mcp_server_variable` table; `mcp_server.defaultHeaders` jsonb; `mcp_tool.requestTemplate` and `mcp_tool.params` jsonb replacing `paramMap`; `mcp_credential` dropped after migration; one migration plus a backfill script.
+- **db:** new `mcp_server_variable` table; `mcp_server.defaultHeaders` jsonb; `mcp_tool.requestTemplate` and `mcp_tool.params` jsonb replacing `paramMap`; `mcp_credential` dropped. Single migration, no backfill (pre-production decision).
 - **apps/api:** new template renderer (`lib/mcp-template.ts`); executor rewritten around rendering; gateway derives input schemas; studio service gains variable CRUD; platform MCP tools updated; curl import emits templates; redaction takes all secret values.
 - **apps/app:** connection tab replaces the credential form with a variables manager (secret flag, add/remove); en/es i18n parity. Tool authoring UI rebuild stays in `studio-authoring-ux`.
 - **packages/core:** new `APP_ERROR_CODES` for template/variable failures.

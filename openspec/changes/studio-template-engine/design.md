@@ -36,15 +36,15 @@ One syntax everywhere: path template, query values, header values, and the body 
 
 Escaping depends on where the placeholder sits:
 
-| Context | Escaping |
-|---|---|
-| Path segment | `encodeURIComponent` |
-| Query value | `encodeURIComponent` |
-| Header value | Raw, CRLF stripped |
-| JSON body, quoted (`"{{x}}"`) | JSON string-escaped content |
-| JSON body, bare (`{{x}}`) | Raw JSON value (objects, numbers, booleans) |
-| Form body value | URL-encoded |
-| Raw body | None (explicit opt-in) |
+| Context                       | Escaping                                    |
+| ----------------------------- | ------------------------------------------- |
+| Path segment                  | `encodeURIComponent`                        |
+| Query value                   | `encodeURIComponent`                        |
+| Header value                  | Raw, CRLF stripped                          |
+| JSON body, quoted (`"{{x}}"`) | JSON string-escaped content                 |
+| JSON body, bare (`{{x}}`)     | Raw JSON value (objects, numbers, booleans) |
+| Form body value               | URL-encoded                                 |
+| Raw body                      | None (explicit opt-in)                      |
 
 Rationale: Postman/Bruno proved this model; users already know it. The alternative (keep `paramMap`, add more buckets) grows the form without closing the expressiveness gaps. Bare-vs-quoted in JSON bodies is the one rule to teach; it is what makes nested payloads from simple params possible.
 
@@ -90,16 +90,17 @@ The executor collects all decrypted secret values used in the render and passes 
 - [Agent-controlled raw JSON injection via bare `{{x}}` in bodies] → JSON body type escapes quoted placeholders by default; `raw` body type is an explicit opt-in; mutation tools still require `allowMutation`.
 - [Template/escaping bugs send malformed requests] → renderer gets a dedicated unit-test matrix across all six contexts; playground surfaces the fully rendered (redacted) request in logs.
 - [Param/variable name collisions confuse resolution] → args-first order is documented; save-time validation warns when a param shadows a variable name.
-- [Migration loses an exotic `paramMap`] → backfill is mechanical and total (every bucket maps to a template); run `bun db:export` before migrating; pre-launch product with no external users.
+- [Migration loses an exotic `paramMap`] → pre-production product with no external users; the single migration drops `paramMap` and `mcp_credential` directly and dev data is recreated by hand.
 - [Secret value appears in a URL path and leaks via upstream access logs] → unavoidable at the upstream; our own logs redact it; docs recommend header placement.
 
 ## Migration Plan
 
-1. Generate migration A: create `mcp_server_variable`; add `mcp_server.defaultHeaders` / `defaultQuery`; add `mcp_tool.requestTemplate` / `params`. Keep `paramMap` and `mcp_credential` readable.
+Pre-production decision: a single migration, no backfill. The dev database holds only disposable test data, so the old columns/tables are dropped in place instead of migrated.
+
+1. Generate one migration: create `mcp_server_variable`; add `mcp_server.defaultHeaders` / `defaultQuery`; add `mcp_tool.requestTemplate` / `params`; drop `paramMap` and `mcp_credential`.
 2. Deploy code that reads the new shape (executor, gateway, studio service, platform MCP).
-3. Run a backfill script (`db/scripts/`): convert each `paramMap` bucket to template form; convert each `mcp_credential` row to a secret variable plus default header (or default query entry appended per tool when `valueLocation = "query"`).
-4. Generate migration B: drop `paramMap` and `mcp_credential`.
-5. Rollback: restore from the pre-migration `db:export` dump; no forward-fix of generated migrations.
+3. Recreate dev servers/tools by hand (curl import covers the common case).
+4. Rollback: restore from a `db:export` dump taken before applying; no forward-fix of generated migrations.
 
 ## Open Questions
 
