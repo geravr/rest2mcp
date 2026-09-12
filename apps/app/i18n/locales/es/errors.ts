@@ -76,8 +76,6 @@ export const esErrors = {
         "No se encontr\u00f3 el servidor MCP.",
       [APP_ERROR_CODES.MCP_TOOL_NOT_FOUND]:
         "No se encontr\u00f3 la herramienta MCP.",
-      [APP_ERROR_CODES.MCP_CREDENTIAL_REQUIRED]:
-        "Esta herramienta requiere una credencial de origen.",
       [APP_ERROR_CODES.MCP_HOST_NOT_ALLOWED]:
         "El destino de la petici\u00f3n no est\u00e1 en la lista de hosts permitidos.",
       [APP_ERROR_CODES.MCP_MUTATION_NOT_ALLOWED]:
@@ -92,6 +90,12 @@ export const esErrors = {
         "Ya existe una herramienta con este nombre en el servidor.",
       [APP_ERROR_CODES.MCP_SERVER_SLUG_CONFLICT]:
         "Ya existe un servidor con este slug en tu cuenta.",
+      [APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED]:
+        "Un placeholder de la plantilla no tiene argumento ni variable correspondiente.",
+      [APP_ERROR_CODES.MCP_VARIABLE_NAME_CONFLICT]:
+        "Ya existe una variable con este nombre en el servidor.",
+      [APP_ERROR_CODES.MCP_PLAINTEXT_SECRET]:
+        "Guarda los secretos en una variable secreta y referénciala con {{name}} en lugar de pegarlos literalmente.",
 
       [APP_ERROR_CODES.ROUTE_NOT_FOUND]: "Esta ruta de API no existe.",
       [APP_ERROR_CODES.INTERNAL_ERROR]:

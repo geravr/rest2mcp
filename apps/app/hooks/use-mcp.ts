@@ -49,6 +49,14 @@ export function useMcpSnippet(serverId: string) {
   });
 }
 
+export function useMcpVariables(serverId: string) {
+  return useQuery({
+    ...api.mcp.variables.queryOptions({ serverId }),
+    placeholderData: keepPreviousData,
+    enabled: serverId.length > 0,
+  });
+}
+
 export function useMcpCallLogs(serverId: string, input: PaginationInput) {
   return useQuery({
     ...api.mcp.callLogs.queryOptions({ serverId, ...input }),
@@ -79,6 +87,7 @@ function useInvalidateMcp() {
       queryClient.invalidateQueries(api.mcp.getServer.pathFilter()),
       queryClient.invalidateQueries(api.mcp.tools.pathFilter()),
       queryClient.invalidateQueries(api.mcp.tokens.pathFilter()),
+      queryClient.invalidateQueries(api.mcp.variables.pathFilter()),
       queryClient.invalidateQueries(api.mcp.callLogs.pathFilter()),
       queryClient.invalidateQueries(api.mcp.platformToken.pathFilter()),
     ]);
@@ -175,16 +184,34 @@ export function useUpdateMcpTool() {
   });
 }
 
-export function useSetMcpCredential() {
+export function useCreateMcpVariable() {
   const { t } = useTranslations();
   const invalidate = useInvalidateMcp();
-  const baseOptions = api.mcp.setCredential.mutationOptions();
+  const baseOptions = api.mcp.createVariable.mutationOptions();
   return useMutation({
     ...baseOptions,
     onSuccess: async (...args) => {
       baseOptions.onSuccess?.(...args);
       await invalidate();
-      toast.success(t.toasts.servers.credentialSaved);
+      toast.success(t.toasts.servers.variableSaved);
+    },
+    onError: (error, ...rest) => {
+      baseOptions.onError?.(error, ...rest);
+      toast.error(resolveErrorMessage(error, t));
+    },
+  });
+}
+
+export function useDeleteMcpVariable() {
+  const { t } = useTranslations();
+  const invalidate = useInvalidateMcp();
+  const baseOptions = api.mcp.deleteVariable.mutationOptions();
+  return useMutation({
+    ...baseOptions,
+    onSuccess: async (...args) => {
+      baseOptions.onSuccess?.(...args);
+      await invalidate();
+      toast.success(t.toasts.servers.variableDeleted);
     },
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);

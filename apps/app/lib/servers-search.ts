@@ -5,7 +5,7 @@ export const serversSearchSchema = listPaginationSearchSchema;
 
 export const serverDetailTabValues = [
   "tools",
-  "credential",
+  "connection",
   "playground",
   "logs",
 ] as const;

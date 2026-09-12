@@ -2,87 +2,97 @@ import { SettingsFormSkeleton } from "@/components/loading";
 import { CopyButton } from "@/components/servers/copy-button";
 import {
   useCreateMcpToken,
+  useCreateMcpVariable,
+  useDeleteMcpVariable,
   useMcpSnippet,
   useMcpTokens,
+  useMcpVariables,
   useRevokeMcpToken,
-  useSetMcpCredential,
+  useUpdateMcpServer,
 } from "@/hooks/use-mcp";
 import { useTranslations } from "@/i18n/use-translations";
 import { resolveErrorMessage } from "@/lib/errors";
-import { Alert, AlertDescription, Button, Input, Label } from "@repo/ui";
+import {
+  Alert,
+  AlertDescription,
+  Badge,
+  Button,
+  Input,
+  Label,
+  Switch,
+  Textarea,
+} from "@repo/ui";
 import { LoaderCircle } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
 
-type CredentialScheme = "bearer" | "api_key" | "header";
-type CredentialLocation = "header" | "query";
-
-function isCredentialScheme(
-  value: string | null | undefined,
-): value is CredentialScheme {
-  return value === "bearer" || value === "api_key" || value === "header";
+function formatDefaults(value: Record<string, string> | null): string {
+  return value ? JSON.stringify(value, null, 2) : "";
 }
 
-function isCredentialLocation(
-  value: string | null | undefined,
-): value is CredentialLocation {
-  return value === "header" || value === "query";
-}
-
-function defaultHeaderName(
-  scheme: CredentialScheme,
-  headerName?: string | null,
-): string {
-  if (headerName) return headerName;
-  return scheme === "bearer" ? "Authorization" : "X-API-Key";
+function parseDefaults(raw: string): Record<string, string> | null | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed) ||
+      Object.values(parsed).some((value) => typeof value !== "string")
+    ) {
+      return undefined;
+    }
+    return parsed as Record<string, string>;
+  } catch {
+    return undefined;
+  }
 }
 
 export function ServerConnectionTab({
   serverId,
-  hasSecret,
-  scheme: storedScheme,
-  headerName: storedHeaderName,
-  valueLocation: storedValueLocation,
+  defaultHeaders,
+  defaultQuery,
 }: {
   serverId: string;
-  hasSecret: boolean;
-  scheme?: string | null;
-  headerName?: string | null;
-  valueLocation?: string | null;
+  defaultHeaders: Record<string, string> | null;
+  defaultQuery: Record<string, string> | null;
 }) {
   const { t } = useTranslations();
   const snippet = useMcpSnippet(serverId);
   const tokens = useMcpTokens(serverId);
-  const setCredential = useSetMcpCredential();
+  const variables = useMcpVariables(serverId);
+  const createVariable = useCreateMcpVariable();
+  const deleteVariable = useDeleteMcpVariable();
+  const updateServer = useUpdateMcpServer();
   const createToken = useCreateMcpToken();
   const revokeToken = useRevokeMcpToken();
-  const [secret, setSecret] = useState("");
-  const [scheme, setScheme] = useState<CredentialScheme>(() =>
-    isCredentialScheme(storedScheme) ? storedScheme : "bearer",
+  const [variableName, setVariableName] = useState("");
+  const [variableValue, setVariableValue] = useState("");
+  const [variableSecret, setVariableSecret] = useState(true);
+  const [headersDraft, setHeadersDraft] = useState(() =>
+    formatDefaults(defaultHeaders),
   );
-  const [headerName, setHeaderName] = useState(() =>
-    defaultHeaderName(
-      isCredentialScheme(storedScheme) ? storedScheme : "bearer",
-      storedHeaderName,
-    ),
-  );
-  const [valueLocation, setValueLocation] = useState<CredentialLocation>(() =>
-    isCredentialLocation(storedValueLocation) ? storedValueLocation : "header",
+  const [queryDraft, setQueryDraft] = useState(() =>
+    formatDefaults(defaultQuery),
   );
   const [rawToken, setRawToken] = useState<string | null>(null);
-  const [savedLocally, setSavedLocally] = useState(false);
-  const stored = hasSecret || savedLocally;
 
   if (
     (snippet.isLoading && snippet.data === undefined) ||
-    (tokens.isLoading && tokens.data === undefined)
+    (tokens.isLoading && tokens.data === undefined) ||
+    (variables.isLoading && variables.data === undefined)
   ) {
     return <SettingsFormSkeleton cards={2} fields={3} />;
   }
 
-  if (snippet.isError || tokens.isError) {
+  if (snippet.isError || tokens.isError || variables.isError) {
     return (
       <p className="text-sm text-destructive">
-        {resolveErrorMessage(snippet.error ?? tokens.error, t)}
+        {resolveErrorMessage(
+          snippet.error ?? tokens.error ?? variables.error,
+          t,
+        )}
       </p>
     );
   }
@@ -90,92 +100,170 @@ export function ServerConnectionTab({
   return (
     <div className="space-y-8">
       <section className="space-y-3">
-        <h3 className="text-sm font-medium">{t.servers.credential}</h3>
+        <h3 className="text-sm font-medium">{t.servers.variables}</h3>
         <p className="text-sm text-muted-foreground">
-          {stored ? t.servers.credentialHasSecret : t.servers.credentialMissing}
+          {t.servers.variablesDescription}
         </p>
+        {!variables.data || variables.data.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            {t.servers.noVariables}
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {variables.data.map((variable) => (
+              <li
+                key={variable.id}
+                className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
+              >
+                <span className="flex items-center gap-2 text-sm">
+                  <code className="font-mono text-xs">{variable.name}</code>
+                  {variable.isSecret ? (
+                    <Badge variant="secondary">
+                      {t.servers.variableSecretBadge}
+                    </Badge>
+                  ) : null}
+                  <span className="text-muted-foreground">
+                    {variable.isSecret
+                      ? variable.hasValue
+                        ? t.servers.variableHasValue
+                        : t.servers.variableNoValue
+                      : variable.value}
+                  </span>
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={deleteVariable.isPending}
+                  onClick={() =>
+                    deleteVariable.mutate({ serverId, name: variable.name })
+                  }
+                >
+                  {t.servers.deleteVariable}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
         <form
           className="grid gap-3 sm:grid-cols-2"
           onSubmit={(event) => {
             event.preventDefault();
-            const nextSecret = secret.trim();
-            if (!nextSecret && !stored) return;
-            setCredential.mutate(
+            const name = variableName.trim();
+            if (!name || !variableValue) return;
+            createVariable.mutate(
               {
                 serverId,
-                scheme,
-                headerName,
-                valueLocation,
-                ...(nextSecret ? { secret: nextSecret } : {}),
+                name,
+                isSecret: variableSecret,
+                value: variableValue,
               },
               {
                 onSuccess: () => {
-                  setSecret("");
-                  setSavedLocally(true);
+                  setVariableName("");
+                  setVariableValue("");
                 },
               },
             );
           }}
         >
           <div className="space-y-2">
-            <Label htmlFor="cred-scheme">{t.servers.credentialScheme}</Label>
-            <select
-              id="cred-scheme"
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-              value={scheme}
-              onChange={(event) =>
-                setScheme(event.target.value as CredentialScheme)
-              }
-            >
-              <option value="bearer">{t.servers.schemeBearer}</option>
-              <option value="api_key">{t.servers.schemeApiKey}</option>
-              <option value="header">{t.servers.schemeHeader}</option>
-            </select>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="cred-location">
-              {t.servers.credentialLocation}
-            </Label>
-            <select
-              id="cred-location"
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-              value={valueLocation}
-              onChange={(event) =>
-                setValueLocation(event.target.value as CredentialLocation)
-              }
-            >
-              <option value="header">{t.servers.locationHeader}</option>
-              <option value="query">{t.servers.locationQuery}</option>
-            </select>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="cred-header">{t.servers.credentialHeader}</Label>
+            <Label htmlFor="var-name">{t.servers.variableName}</Label>
             <Input
-              id="cred-header"
-              value={headerName}
-              onChange={(event) => setHeaderName(event.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="cred-secret">{t.servers.credentialSecret}</Label>
-            <Input
-              id="cred-secret"
-              type="password"
-              value={secret}
-              onChange={(event) => setSecret(event.target.value)}
-              placeholder={stored ? t.servers.credentialKeepStored : undefined}
+              id="var-name"
+              value={variableName}
+              onChange={(event) => setVariableName(event.target.value)}
+              placeholder={t.servers.variableNamePlaceholder}
               autoComplete="off"
-              required={!stored}
+              required
             />
           </div>
-          <Button type="submit" disabled={setCredential.isPending}>
-            {setCredential.isPending ? (
+          <div className="space-y-2">
+            <Label htmlFor="var-value">{t.servers.variableValue}</Label>
+            <Input
+              id="var-value"
+              type={variableSecret ? "password" : "text"}
+              value={variableValue}
+              onChange={(event) => setVariableValue(event.target.value)}
+              autoComplete="off"
+              required
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Switch
+              id="var-secret"
+              checked={variableSecret}
+              onCheckedChange={setVariableSecret}
+            />
+            <Label htmlFor="var-secret">{t.servers.variableSecret}</Label>
+          </div>
+          <Button type="submit" disabled={createVariable.isPending}>
+            {createVariable.isPending ? (
               <LoaderCircle className="h-4 w-4 animate-spin" />
             ) : null}
-            {setCredential.isPending
-              ? t.servers.savingCredential
-              : t.servers.saveCredential}
+            {createVariable.isPending
+              ? t.servers.addingVariable
+              : t.servers.addVariable}
           </Button>
+        </form>
+      </section>
+
+      <section className="space-y-3">
+        <h3 className="text-sm font-medium">{t.servers.defaultsTitle}</h3>
+        <p className="text-sm text-muted-foreground">
+          {t.servers.defaultsDescription}
+        </p>
+        <form
+          className="grid gap-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const parsedHeaders = parseDefaults(headersDraft);
+            const parsedQuery = parseDefaults(queryDraft);
+            if (parsedHeaders === undefined || parsedQuery === undefined) {
+              toast.error(t.servers.invalidDefaultsJson);
+              return;
+            }
+            updateServer.mutate({
+              serverId,
+              defaultHeaders: parsedHeaders,
+              defaultQuery: parsedQuery,
+            });
+          }}
+        >
+          <div className="space-y-2">
+            <Label htmlFor="default-headers">{t.servers.defaultHeaders}</Label>
+            <Textarea
+              id="default-headers"
+              className="font-mono text-xs"
+              rows={3}
+              value={headersDraft}
+              onChange={(event) => setHeadersDraft(event.target.value)}
+              placeholder='{ "Authorization": "Bearer {{api_token}}" }'
+              spellCheck={false}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="default-query">{t.servers.defaultQuery}</Label>
+            <Textarea
+              id="default-query"
+              className="font-mono text-xs"
+              rows={3}
+              value={queryDraft}
+              onChange={(event) => setQueryDraft(event.target.value)}
+              placeholder='{ "region": "{{region}}" }'
+              spellCheck={false}
+            />
+          </div>
+          <div>
+            <Button type="submit" disabled={updateServer.isPending}>
+              {updateServer.isPending ? (
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+              ) : null}
+              {updateServer.isPending
+                ? t.servers.savingDefaults
+                : t.servers.saveDefaults}
+            </Button>
+          </div>
         </form>
       </section>
 

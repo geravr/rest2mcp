@@ -66,8 +66,6 @@ export const enErrors = {
 
       [APP_ERROR_CODES.MCP_SERVER_NOT_FOUND]: "MCP server not found.",
       [APP_ERROR_CODES.MCP_TOOL_NOT_FOUND]: "MCP tool not found.",
-      [APP_ERROR_CODES.MCP_CREDENTIAL_REQUIRED]:
-        "This tool requires an upstream credential.",
       [APP_ERROR_CODES.MCP_HOST_NOT_ALLOWED]:
         "The request target is not on the allowed host list.",
       [APP_ERROR_CODES.MCP_MUTATION_NOT_ALLOWED]:
@@ -82,6 +80,12 @@ export const enErrors = {
         "A tool with this name already exists on the server.",
       [APP_ERROR_CODES.MCP_SERVER_SLUG_CONFLICT]:
         "A server with this slug already exists on your account.",
+      [APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED]:
+        "A template placeholder has no matching argument or variable.",
+      [APP_ERROR_CODES.MCP_VARIABLE_NAME_CONFLICT]:
+        "A variable with this name already exists on the server.",
+      [APP_ERROR_CODES.MCP_PLAINTEXT_SECRET]:
+        "Store secrets in a secret variable and reference it with {{name}} instead of pasting them literally.",
 
       [APP_ERROR_CODES.ROUTE_NOT_FOUND]: "This API route does not exist.",
       [APP_ERROR_CODES.INTERNAL_ERROR]:

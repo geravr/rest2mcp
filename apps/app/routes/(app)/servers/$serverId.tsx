@@ -104,7 +104,7 @@ function ServerDetailPage() {
             <Tabs value={activeTab} onValueChange={setTab}>
               <TabsList>
                 <TabsTrigger value="tools">{t.servers.tools}</TabsTrigger>
-                <TabsTrigger value="credential">
+                <TabsTrigger value="connection">
                   {t.servers.connection}
                 </TabsTrigger>
                 <TabsTrigger value="playground">
@@ -137,14 +137,12 @@ function ServerDetailPage() {
                   }
                 />
               </TabsContent>
-              <TabsContent value="credential">
+              <TabsContent value="connection">
                 <ServerConnectionTab
                   key={serverId}
                   serverId={serverId}
-                  hasSecret={data.hasSecret}
-                  scheme={data.credential.scheme}
-                  headerName={data.credential.headerName}
-                  valueLocation={data.credential.valueLocation}
+                  defaultHeaders={data.defaultHeaders}
+                  defaultQuery={data.defaultQuery}
                 />
               </TabsContent>
               <TabsContent value="playground">
