@@ -13,7 +13,7 @@ The system SHALL expose a Streamable HTTP MCP at `/api/platform-mcp` authenticat
 #### Scenario: Valid platform token
 
 - **WHEN** the owner's agent connects to `/api/platform-mcp` with a valid platform token
-- **THEN** the agent receives studio tools (`list_servers`, `create_server`, `add_tool`, `add_tool_from_curl`, `set_variable`, `list_variables`, `delete_variable`, `list_tools`, `test_tool`, `get_connection_snippet`, `list_recent_calls`)
+- **THEN** the agent receives studio tools (`list_servers`, `create_server`, `delete_server`, `add_tool`, `add_tool_from_curl`, `delete_tool`, `set_variable`, `list_variables`, `delete_variable`, `list_tools`, `test_tool`, `get_connection_snippet`, `list_recent_calls`)
 
 #### Scenario: Server token rejected
 
@@ -27,7 +27,7 @@ The system SHALL expose a Streamable HTTP MCP at `/api/platform-mcp` authenticat
 
 ### Requirement: Platform tools mutate only the owner's studio
 
-Platform MCP tools SHALL enforce the same ownership, validation, mutation, and secret rules as the tRPC studio. They SHALL NOT expose ciphertext or other users' servers.
+Platform MCP tools SHALL enforce the same ownership, validation, mutation, and secret rules as the tRPC studio. They SHALL NOT expose ciphertext or other users' servers. `delete_server` SHALL apply the same cascading transaction as the tRPC delete.
 
 #### Scenario: Create server via agent
 
@@ -43,6 +43,11 @@ Platform MCP tools SHALL enforce the same ownership, validation, mutation, and s
 
 - **WHEN** the agent passes another user's server id to `add_tool`
 - **THEN** the tool fails with `MCP_SERVER_NOT_FOUND` and no row is inserted
+
+#### Scenario: Cannot delete another user's server
+
+- **WHEN** the agent passes another user's server id to `delete_server`
+- **THEN** the tool fails with `MCP_SERVER_NOT_FOUND` and nothing is removed
 
 ### Requirement: Platform tools can test and connect
 
