@@ -5,6 +5,22 @@ export const esSettings = {
     tabProfile: "Perfil",
     tabSecurity: "Seguridad",
     tabPrivacy: "Privacidad y Cookies",
+    tabPlatform: "MCP de plataforma",
+
+    platform: {
+      title: "MCP de plataforma",
+      description:
+        "Permite que tu agente actual cree servidores y herramientas desde un MCP dedicado.",
+      urlLabel: "Endpoint",
+      createToken: "Crear token de plataforma",
+      creatingToken: "Creando...",
+      revokeToken: "Revocar token",
+      revokingToken: "Revocando...",
+      tokenShownOnce: "Copia este token ahora. No se volverá a mostrar.",
+      hasToken: "Prefijo del token activo: {prefix}",
+      noToken: "No hay token de plataforma activo.",
+      copySnippet: "Copiar snippet",
+    },
 
     profile: {
       title: "Perfil",

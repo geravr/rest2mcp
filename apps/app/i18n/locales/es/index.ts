@@ -7,12 +7,14 @@ import { esDashboard } from "./dashboard";
 import { esLayout } from "./layout";
 import { esErrors } from "./errors";
 import { esLegal } from "./legal";
+import { esServers } from "./servers";
 import { esSettings } from "./settings";
 
 export const es: Widened<typeof en> = {
   ...esCommon,
   ...esAuth,
   ...esDashboard,
+  ...esServers,
   ...esSettings,
   ...esAdmin,
   ...esLayout,

@@ -21,10 +21,13 @@ export const enDashboard = {
       },
     },
     gettingStarted: {
-      title: "Getting started",
+      title: "Your MCP servers",
       description:
-        "rest2mcp is Charro Digital's internal template. Add your own dashboard content, metrics, and workflows backed by real data. Edit routes in",
-      routesPath: "apps/app/routes/",
+        "Create a server, map REST tools, and copy a hosted MCP URL.",
+      routesPath: "/servers",
+      viewAll: "View servers",
+      empty: "No servers yet. Create one to host your first MCP.",
+      count: "{count} servers",
     },
   },
 } as const;

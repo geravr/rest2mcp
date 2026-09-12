@@ -2,6 +2,7 @@ export const enLayout = {
   layout: {
     nav: {
       home: "Home",
+      servers: "Servers",
       settings: "Settings",
     },
 
@@ -47,6 +48,21 @@ export const enLayout = {
       avatarUpdated: "Avatar updated successfully.",
       emailChangeRequested:
         "Check your current email to approve this email change request.",
+    },
+    servers: {
+      created: "Server created.",
+      updated: "Server updated.",
+      toolCreated: "Tool added.",
+      toolUpdated: "Tool updated.",
+      credentialSaved: "Credential saved.",
+      tokenCreated: "Agent token created.",
+      tokenRevoked: "Agent token revoked.",
+      invoked: "Tool invoked.",
+      copied: "Copied to clipboard.",
+    },
+    platform: {
+      tokenCreated: "Platform token created.",
+      tokenRevoked: "Platform token revoked.",
     },
   },
 } as const;

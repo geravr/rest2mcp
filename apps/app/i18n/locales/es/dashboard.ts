@@ -21,10 +21,13 @@ export const esDashboard = {
       },
     },
     gettingStarted: {
-      title: "Primeros pasos",
+      title: "Tus servidores MCP",
       description:
-        "rest2mcp es la plantilla interna de Charro Digital. A\u00f1ade tu propio contenido de panel, m\u00e9tricas y flujos respaldados por datos reales. Edita rutas en",
-      routesPath: "apps/app/routes/",
+        "Crea un servidor, mapea herramientas REST y copia una URL MCP alojada.",
+      routesPath: "/servers",
+      viewAll: "Ver servidores",
+      empty: "Aún no hay servidores. Crea uno para hospedar tu primer MCP.",
+      count: "{count} servidores",
     },
   },
 } as const;

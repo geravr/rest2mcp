@@ -1,9 +1,12 @@
 import { FeatureErrorBoundary } from "@/components/feature-error-boundary";
+import { StatValueSkeleton } from "@/components/loading";
+import { useMcpServers } from "@/hooks/use-mcp";
 import { useTranslations } from "@/i18n/use-translations";
+import { resolveErrorMessage } from "@/lib/errors";
 import { useSessionQuery } from "@/lib/queries/session";
 import { Button, Card, CardContent } from "@repo/ui";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowRight, Lock, Settings, User, ShieldCheck } from "lucide-react";
+import { ArrowRight, Lock, Server, ShieldCheck, User } from "lucide-react";
 
 export const Route = createFileRoute("/(app)/")({
   component: Dashboard,
@@ -12,6 +15,7 @@ export const Route = createFileRoute("/(app)/")({
 function Dashboard() {
   const { t } = useTranslations();
   const { data: session } = useSessionQuery();
+  const servers = useMcpServers({ page: 1, pageSize: 10 });
   const userName = session?.user?.name ?? t.dashboard.userFallback;
 
   const quickActions = [
@@ -93,18 +97,42 @@ function Dashboard() {
           <CardContent className="p-5">
             <div className="flex items-start gap-4">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted">
-                <Settings className="h-4 w-4 text-muted-foreground" />
+                <Server className="h-4 w-4 text-muted-foreground" />
               </div>
-              <div className="space-y-1">
+              <div className="min-w-0 flex-1 space-y-2">
                 <h3 className="text-sm font-medium text-foreground">
                   {t.dashboard.gettingStarted.title}
                 </h3>
                 <p className="text-sm text-muted-foreground">
-                  {t.dashboard.gettingStarted.description}{" "}
-                  <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
-                    {t.dashboard.gettingStarted.routesPath}
-                  </code>
+                  {t.dashboard.gettingStarted.description}
                 </p>
+                {servers.isLoading && !servers.data ? (
+                  <StatValueSkeleton />
+                ) : servers.isError ? (
+                  <p className="text-sm text-destructive">
+                    {resolveErrorMessage(servers.error, t)}
+                  </p>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {servers.data && servers.data.total > 0
+                      ? t.dashboard.gettingStarted.count.replace(
+                          "{count}",
+                          String(servers.data.total),
+                        )
+                      : t.dashboard.gettingStarted.empty}
+                  </p>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1 px-0"
+                  asChild
+                >
+                  <Link to="/servers">
+                    {t.dashboard.gettingStarted.viewAll}{" "}
+                    <ArrowRight className="h-3 w-3" />
+                  </Link>
+                </Button>
               </div>
             </div>
           </CardContent>

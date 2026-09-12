@@ -2,6 +2,7 @@ export const esLayout = {
   layout: {
     nav: {
       home: "Inicio",
+      servers: "Servidores",
       settings: "Configuraci\u00f3n",
     },
 
@@ -47,6 +48,21 @@ export const esLayout = {
       avatarUpdated: "Avatar actualizado correctamente.",
       emailChangeRequested:
         "Revisa tu email actual para aprobar esta solicitud de cambio.",
+    },
+    servers: {
+      created: "Servidor creado.",
+      updated: "Servidor actualizado.",
+      toolCreated: "Herramienta añadida.",
+      toolUpdated: "Herramienta actualizada.",
+      credentialSaved: "Credencial guardada.",
+      tokenCreated: "Token de agente creado.",
+      tokenRevoked: "Token de agente revocado.",
+      invoked: "Herramienta invocada.",
+      copied: "Copiado al portapapeles.",
+    },
+    platform: {
+      tokenCreated: "Token de plataforma creado.",
+      tokenRevoked: "Token de plataforma revocado.",
     },
   },
 } as const;

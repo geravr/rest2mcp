@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-export const settingsTabValues = ["profile", "security", "privacy"] as const;
+export const settingsTabValues = [
+  "profile",
+  "security",
+  "privacy",
+  "platform",
+] as const;
 
 export type SettingsTab = (typeof settingsTabValues)[number];
 

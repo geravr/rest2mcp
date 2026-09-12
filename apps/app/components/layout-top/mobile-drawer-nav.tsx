@@ -1,11 +1,12 @@
 import { useTranslations } from "@/i18n/use-translations";
 import { cn } from "@repo/ui";
 import { Link } from "@tanstack/react-router";
-import { ChevronRight, Home, type LucideIcon } from "lucide-react";
+import { ChevronRight, Home, Server, type LucideIcon } from "lucide-react";
 import type { TopNavItem } from "./constants";
 
 const navIcons: Partial<Record<TopNavItem["labelKey"], LucideIcon>> = {
   home: Home,
+  servers: Server,
 };
 
 interface MobileDrawerNavProps {

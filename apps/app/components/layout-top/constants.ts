@@ -14,4 +14,8 @@ export const topNavItems: readonly TopNavItem[] = [
     to: "/",
     exact: true,
   },
+  {
+    labelKey: "servers",
+    to: "/servers",
+  },
 ] as const;

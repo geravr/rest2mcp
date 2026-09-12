@@ -23,6 +23,8 @@ import { Route as appAdminAuditLogRouteImport } from './../routes/(app)/admin/au
 import { Route as appAdminInvitationsRouteImport } from './../routes/(app)/admin/invitations'
 import { Route as appAdminSettingsRouteImport } from './../routes/(app)/admin/settings'
 import { Route as appAdminUsersRouteImport } from './../routes/(app)/admin/users'
+import { Route as appServersIndexRouteImport } from './../routes/(app)/servers/index'
+import { Route as appServersServerIdRouteImport } from './../routes/(app)/servers/$serverId'
 
 const appRouteRoute = appRouteRouteImport.update({
   id: '/(app)',
@@ -93,6 +95,16 @@ const appAdminUsersRoute = appAdminUsersRouteImport.update({
   path: '/users',
   getParentRoute: () => appAdminRouteRoute,
 } as any)
+const appServersIndexRoute = appServersIndexRouteImport.update({
+  id: '/servers/',
+  path: '/servers/',
+  getParentRoute: () => appRouteRoute,
+} as any)
+const appServersServerIdRoute = appServersServerIdRouteImport.update({
+  id: '/servers/$serverId',
+  path: '/servers/$serverId',
+  getParentRoute: () => appRouteRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/privacy': typeof PrivacyRoute
@@ -107,7 +119,9 @@ export interface FileRoutesByFullPath {
   '/admin/invitations': typeof appAdminInvitationsRoute
   '/admin/settings': typeof appAdminSettingsRoute
   '/admin/users': typeof appAdminUsersRoute
+  '/servers/$serverId': typeof appServersServerIdRoute
   '/admin/': typeof appAdminIndexRoute
+  '/servers/': typeof appServersIndexRoute
 }
 export interface FileRoutesByTo {
   '/privacy': typeof PrivacyRoute
@@ -121,7 +135,9 @@ export interface FileRoutesByTo {
   '/admin/invitations': typeof appAdminInvitationsRoute
   '/admin/settings': typeof appAdminSettingsRoute
   '/admin/users': typeof appAdminUsersRoute
+  '/servers/$serverId': typeof appServersServerIdRoute
   '/admin': typeof appAdminIndexRoute
+  '/servers': typeof appServersIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -138,7 +154,9 @@ export interface FileRoutesById {
   '/(app)/admin/invitations': typeof appAdminInvitationsRoute
   '/(app)/admin/settings': typeof appAdminSettingsRoute
   '/(app)/admin/users': typeof appAdminUsersRoute
+  '/(app)/servers/$serverId': typeof appServersServerIdRoute
   '/(app)/admin/': typeof appAdminIndexRoute
+  '/(app)/servers/': typeof appServersIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -155,7 +173,9 @@ export interface FileRouteTypes {
     | '/admin/invitations'
     | '/admin/settings'
     | '/admin/users'
+    | '/servers/$serverId'
     | '/admin/'
+    | '/servers/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/privacy'
@@ -169,7 +189,9 @@ export interface FileRouteTypes {
     | '/admin/invitations'
     | '/admin/settings'
     | '/admin/users'
+    | '/servers/$serverId'
     | '/admin'
+    | '/servers'
   id:
     | '__root__'
     | '/(app)'
@@ -185,7 +207,9 @@ export interface FileRouteTypes {
     | '/(app)/admin/invitations'
     | '/(app)/admin/settings'
     | '/(app)/admin/users'
+    | '/(app)/servers/$serverId'
     | '/(app)/admin/'
+    | '/(app)/servers/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -297,6 +321,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof appAdminUsersRouteImport
       parentRoute: typeof appAdminRouteRoute
     }
+    '/(app)/servers/': {
+      id: '/(app)/servers/'
+      path: '/servers'
+      fullPath: '/servers/'
+      preLoaderRoute: typeof appServersIndexRouteImport
+      parentRoute: typeof appRouteRoute
+    }
+    '/(app)/servers/$serverId': {
+      id: '/(app)/servers/$serverId'
+      path: '/servers/$serverId'
+      fullPath: '/servers/$serverId'
+      preLoaderRoute: typeof appServersServerIdRouteImport
+      parentRoute: typeof appRouteRoute
+    }
   }
 }
 
@@ -324,12 +362,16 @@ interface appRouteRouteChildren {
   appAdminRouteRoute: typeof appAdminRouteRouteWithChildren
   appSettingsRoute: typeof appSettingsRoute
   appIndexRoute: typeof appIndexRoute
+  appServersServerIdRoute: typeof appServersServerIdRoute
+  appServersIndexRoute: typeof appServersIndexRoute
 }
 
 const appRouteRouteChildren: appRouteRouteChildren = {
   appAdminRouteRoute: appAdminRouteRouteWithChildren,
   appSettingsRoute: appSettingsRoute,
   appIndexRoute: appIndexRoute,
+  appServersServerIdRoute: appServersServerIdRoute,
+  appServersIndexRoute: appServersIndexRoute,
 }
 
 const appRouteRouteWithChildren = appRouteRoute._addFileChildren(
