@@ -52,8 +52,10 @@ export const esLayout = {
     servers: {
       created: "Servidor creado.",
       updated: "Servidor actualizado.",
+      deleted: "Servidor eliminado.",
       toolCreated: "Herramienta añadida.",
       toolUpdated: "Herramienta actualizada.",
+      toolDeleted: "Herramienta eliminada.",
       variableSaved: "Variable guardada.",
       variableDeleted: "Variable eliminada.",
       tokenCreated: "Token de agente creado.",

@@ -1,9 +1,14 @@
 import { AdminListPagination } from "@/components/admin-list";
 import { TableRowsSkeleton } from "@/components/loading";
+import { CurlImportDialog } from "@/components/servers/curl-import-dialog";
+import { DeleteToolDialog } from "@/components/servers/delete-tool-dialog";
 import {
-  useCreateMcpTool,
-  useCreateMcpToolFromCurl,
+  ToolFormDialog,
+  type ToolFormTool,
+} from "@/components/servers/tool-form-dialog";
+import {
   useMcpTools,
+  useMcpVariables,
   useUpdateMcpTool,
 } from "@/hooks/use-mcp";
 import { useTranslations } from "@/i18n/use-translations";
@@ -15,8 +20,10 @@ import {
   AlertDescription,
   Badge,
   Button,
-  Input,
-  Label,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
   Switch,
   Table,
   TableBody,
@@ -24,12 +31,15 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-  Textarea,
 } from "@repo/ui";
-import { LoaderCircle } from "lucide-react";
+import { Copy, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
-const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] as const;
+type FormState =
+  | { kind: "create" }
+  | { kind: "edit"; tool: ToolFormTool }
+  | { kind: "duplicate"; tool: ToolFormTool }
+  | null;
 
 export function ServerToolsTab({
   serverId,
@@ -49,15 +59,16 @@ export function ServerToolsTab({
     page,
     pageSize,
   });
-  const createTool = useCreateMcpTool();
-  const importCurl = useCreateMcpToolFromCurl();
+  const variables = useMcpVariables(serverId);
   const updateTool = useUpdateMcpTool();
-  const [name, setName] = useState("");
-  const [method, setMethod] = useState<(typeof METHODS)[number]>("GET");
-  const [pathTemplate, setPathTemplate] = useState("");
-  const [description, setDescription] = useState("");
-  const [curl, setCurl] = useState("");
+  const [formState, setFormState] = useState<FormState>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [curlOpen, setCurlOpen] = useState(false);
   const atCap = (data?.total ?? 0) >= MCP_MAX_TOOLS;
+  const variableNames = (variables.data ?? []).map((variable) => variable.name);
 
   return (
     <div className="space-y-6">
@@ -67,105 +78,22 @@ export function ServerToolsTab({
         </Alert>
       ) : null}
 
-      <form
-        className="grid gap-3 sm:grid-cols-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          createTool.mutate(
-            { serverId, name, method, pathTemplate, description },
-            {
-              onSuccess: () => {
-                setName("");
-                setPathTemplate("");
-                setDescription("");
-              },
-            },
-          );
-        }}
-      >
-        <div className="space-y-2">
-          <Label htmlFor="tool-name">{t.servers.toolName}</Label>
-          <Input
-            id="tool-name"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder={t.servers.toolNamePlaceholder}
-            required
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="tool-method">{t.servers.method}</Label>
-          <select
-            id="tool-method"
-            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-            value={method}
-            onChange={(event) =>
-              setMethod(event.target.value as (typeof METHODS)[number])
-            }
-          >
-            {METHODS.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="space-y-2 sm:col-span-2">
-          <Label htmlFor="tool-path">{t.servers.pathTemplate}</Label>
-          <Input
-            id="tool-path"
-            value={pathTemplate}
-            onChange={(event) => setPathTemplate(event.target.value)}
-            placeholder={t.servers.pathPlaceholder}
-            required
-          />
-        </div>
-        <div className="space-y-2 sm:col-span-2">
-          <Label htmlFor="tool-description">{t.servers.descriptionLabel}</Label>
-          <Input
-            id="tool-description"
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            placeholder={t.servers.optionalDescription}
-          />
-        </div>
-        <Button type="submit" disabled={createTool.isPending || atCap}>
-          {createTool.isPending ? (
-            <LoaderCircle className="h-4 w-4 animate-spin" />
-          ) : null}
-          {createTool.isPending ? t.servers.savingTool : t.servers.addTool}
-        </Button>
-      </form>
-
-      <form
-        className="space-y-3"
-        onSubmit={(event) => {
-          event.preventDefault();
-          importCurl.mutate(
-            { serverId, curl },
-            { onSuccess: () => setCurl("") },
-          );
-        }}
-      >
-        <Label htmlFor="tool-curl">{t.servers.curlLabel}</Label>
-        <Textarea
-          id="tool-curl"
-          value={curl}
-          onChange={(event) => setCurl(event.target.value)}
-          placeholder={t.servers.curlPlaceholder}
-          rows={4}
-        />
+      <div className="flex flex-wrap gap-2">
         <Button
-          type="submit"
-          variant="outline"
-          disabled={importCurl.isPending || atCap}
+          onClick={() => setFormState({ kind: "create" })}
+          disabled={atCap}
         >
-          {importCurl.isPending ? (
-            <LoaderCircle className="h-4 w-4 animate-spin" />
-          ) : null}
+          <Plus className="h-4 w-4" />
+          {t.servers.addTool}
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => setCurlOpen(true)}
+          disabled={atCap}
+        >
           {t.servers.importCurl}
         </Button>
-      </form>
+      </div>
 
       {isLoading && !data ? (
         <TableRowsSkeleton />
@@ -184,6 +112,7 @@ export function ServerToolsTab({
               <TableHead>{t.servers.pathTemplate}</TableHead>
               <TableHead>{t.servers.enabled}</TableHead>
               <TableHead>{t.servers.allowMutation}</TableHead>
+              <TableHead className="w-10" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -224,6 +153,45 @@ export function ServerToolsTab({
                     }
                   />
                 </TableCell>
+                <TableCell>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        aria-label={tool.name}
+                      >
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        onSelect={() => setFormState({ kind: "edit", tool })}
+                      >
+                        <Pencil className="h-4 w-4" />
+                        {t.servers.editTool}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() =>
+                          setFormState({ kind: "duplicate", tool })
+                        }
+                      >
+                        <Copy className="h-4 w-4" />
+                        {t.servers.duplicateTool}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="text-destructive"
+                        onSelect={() =>
+                          setDeleteTarget({ id: tool.id, name: tool.name })
+                        }
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        {t.servers.deleteTool}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -237,6 +205,29 @@ export function ServerToolsTab({
           itemCount={data.items.length}
           onPageChange={onPageChange}
           onPageSizeChange={onPageSizeChange}
+        />
+      ) : null}
+
+      {formState ? (
+        <ToolFormDialog
+          serverId={serverId}
+          variableNames={variableNames}
+          tool={formState.kind === "create" ? undefined : formState.tool}
+          duplicate={formState.kind === "duplicate"}
+          onClose={() => setFormState(null)}
+        />
+      ) : null}
+      {deleteTarget ? (
+        <DeleteToolDialog
+          serverId={serverId}
+          tool={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+        />
+      ) : null}
+      {curlOpen ? (
+        <CurlImportDialog
+          serverId={serverId}
+          onClose={() => setCurlOpen(false)}
         />
       ) : null}
     </div>

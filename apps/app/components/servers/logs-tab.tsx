@@ -19,7 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from "@repo/ui";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 function formatSummary(value: string | null): string {
   if (!value) return "—";
@@ -36,20 +36,41 @@ export function ServerLogsTab({
   pageSize,
   onPageChange,
   onPageSizeChange,
+  selectedLogId,
+  onClearSelectedLog,
 }: {
   serverId: string;
   page: number;
   pageSize: PageSize;
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: PageSize) => void;
+  selectedLogId?: string;
+  onClearSelectedLog?: () => void;
 }) {
   const { t } = useTranslations();
   const { data, isLoading, isError, error } = useMcpCallLogs(serverId, {
     page,
     pageSize,
   });
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [localSelectedId, setLocalSelectedId] = useState<string | null>(null);
+  const selectedId = selectedLogId ?? localSelectedId;
   const selected = data?.items.find((log) => log.id === selectedId) ?? null;
+  const clearSelection = () => {
+    setLocalSelectedId(null);
+    if (selectedLogId) onClearSelectedLog?.();
+  };
+
+  // A deep-linked log outside the current page would otherwise pin
+  // `selectedId` to an unresolvable id and block row clicks.
+  useEffect(() => {
+    if (
+      selectedLogId &&
+      data &&
+      !data.items.some((log) => log.id === selectedLogId)
+    ) {
+      onClearSelectedLog?.();
+    }
+  }, [selectedLogId, data, onClearSelectedLog]);
 
   if (isLoading && !data) {
     return <TableRowsSkeleton />;
@@ -86,7 +107,7 @@ export function ServerLogsTab({
               <TableRow
                 key={log.id}
                 className="cursor-pointer"
-                onClick={() => setSelectedId(log.id)}
+                onClick={() => setLocalSelectedId(log.id)}
               >
                 <TableCell>{log.source}</TableCell>
                 <TableCell>{log.status}</TableCell>
@@ -104,7 +125,7 @@ export function ServerLogsTab({
                     size="sm"
                     onClick={(event) => {
                       event.stopPropagation();
-                      setSelectedId(log.id);
+                      setLocalSelectedId(log.id);
                     }}
                   >
                     {t.servers.viewLog}
@@ -129,7 +150,7 @@ export function ServerLogsTab({
       <Dialog
         open={selected !== null}
         onOpenChange={(open) => {
-          if (!open) setSelectedId(null);
+          if (!open) clearSelection();
         }}
       >
         <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">

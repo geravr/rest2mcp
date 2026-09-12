@@ -130,6 +130,48 @@ export function useUpdateMcpServer() {
   });
 }
 
+export function useDeleteMcpServer() {
+  const { t } = useTranslations();
+  const invalidate = useInvalidateMcp();
+  const baseOptions = api.mcp.deleteServer.mutationOptions();
+  return useMutation({
+    ...baseOptions,
+    onSuccess: async (...args) => {
+      baseOptions.onSuccess?.(...args);
+      await invalidate();
+      toast.success(t.toasts.servers.deleted);
+    },
+    onError: (error, ...rest) => {
+      baseOptions.onError?.(error, ...rest);
+      toast.error(resolveErrorMessage(error, t));
+    },
+  });
+}
+
+export function useTestMcpConnection() {
+  const { t } = useTranslations();
+  const baseOptions = api.mcp.testConnection.mutationOptions();
+  return useMutation({
+    ...baseOptions,
+    onError: (error, ...rest) => {
+      baseOptions.onError?.(error, ...rest);
+      toast.error(resolveErrorMessage(error, t));
+    },
+  });
+}
+
+export function useParseCurlPreview() {
+  const { t } = useTranslations();
+  const baseOptions = api.mcp.parseCurlPreview.mutationOptions();
+  return useMutation({
+    ...baseOptions,
+    onError: (error, ...rest) => {
+      baseOptions.onError?.(error, ...rest);
+      toast.error(resolveErrorMessage(error, t));
+    },
+  });
+}
+
 export function useCreateMcpTool() {
   const { t } = useTranslations();
   const invalidate = useInvalidateMcp();
@@ -176,6 +218,24 @@ export function useUpdateMcpTool() {
       baseOptions.onSuccess?.(...args);
       await invalidate();
       toast.success(t.toasts.servers.toolUpdated);
+    },
+    onError: (error, ...rest) => {
+      baseOptions.onError?.(error, ...rest);
+      toast.error(resolveErrorMessage(error, t));
+    },
+  });
+}
+
+export function useDeleteMcpTool() {
+  const { t } = useTranslations();
+  const invalidate = useInvalidateMcp();
+  const baseOptions = api.mcp.deleteTool.mutationOptions();
+  return useMutation({
+    ...baseOptions,
+    onSuccess: async (...args) => {
+      baseOptions.onSuccess?.(...args);
+      await invalidate();
+      toast.success(t.toasts.servers.toolDeleted);
     },
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);
@@ -266,6 +326,7 @@ export function useInvokeMcpTool() {
       baseOptions.onSuccess?.(...args);
       await queryClient.invalidateQueries(api.mcp.callLogs.pathFilter());
       await queryClient.invalidateQueries(api.mcp.getServer.pathFilter());
+      await queryClient.invalidateQueries(api.mcp.servers.pathFilter());
       toast.success(t.toasts.servers.invoked);
     },
     onError: (error, ...rest) => {

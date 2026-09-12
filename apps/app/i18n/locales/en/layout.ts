@@ -52,8 +52,10 @@ export const enLayout = {
     servers: {
       created: "Server created.",
       updated: "Server updated.",
+      deleted: "Server deleted.",
       toolCreated: "Tool added.",
       toolUpdated: "Tool updated.",
+      toolDeleted: "Tool deleted.",
       variableSaved: "Variable saved.",
       variableDeleted: "Variable deleted.",
       tokenCreated: "Agent token created.",
