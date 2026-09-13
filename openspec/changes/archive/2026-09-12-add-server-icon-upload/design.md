@@ -67,12 +67,12 @@ Rename `ServerFavicon` â†’ `ServerIcon` (or keep filename and change behavior â€
 
 ## Risks / Trade-offs
 
-| Risk | Mitigation |
-|------|------------|
+| Risk                                                    | Mitigation                                                                               |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | Domains with real favicons no longer show automatically | Acceptable trade-off for v1; owners can upload or we can add opt-in domain favicon later |
-| S3 not configured blocks upload | Show localized error; rings fallback still works |
-| Orphaned S3 objects after icon replace | Same as avatars today; no GC in scope |
-| `iconImage` URL validation gaps | Reject URLs outside caller's `users/{id}/` prefix on update |
+| S3 not configured blocks upload                         | Show localized error; rings fallback still works                                         |
+| Orphaned S3 objects after icon replace                  | Same as avatars today; no GC in scope                                                    |
+| `iconImage` URL validation gaps                         | Reject URLs outside caller's `users/{id}/` prefix on update                              |
 
 ## Migration Plan
 
