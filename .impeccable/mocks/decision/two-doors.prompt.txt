@@ -1,0 +1,34 @@
+High-fidelity designed website UI screenshot, desktop landscape first viewport 16:9, rest2mcp marketing home. Flat Paper #FFFFFF ground. Ink #0B0B0B type and rules. Gate Orange #FD410B only on the 2 in the attached custom wordmark. Inter for UI. System mono for code. No glow, no gradient, no zinc SaaS, no terminal, no fake metrics.
+
+EVERY visible word must be letter-perfect. Do not double letters. Do not invent extra glyphs.
+
+Exact strings only:
+- wordmark from the attached lockup: rest2mcp
+- Log in
+- Sign up
+- Sign up. Then pick a door.
+- Web GUI
+- Platform MCP
+- Create server
+- Map a tool
+- Copy MCP URL
+- CRM
+- get_contact
+- /api/platform-mcp
+- /mcp/{serverId}
+
+LAYOUT, top to bottom:
+
+NAV (thin): attached rest2mcp wordmark left (stencil, Ink letters, orange 2). Right: Log in text, Sign up solid Ink button with Paper type. Hairline rule.
+
+THRESHOLD (next full-width band, before columns): centered Inter text Sign up. Then pick a door. plus one Sign up Ink button. This is the crossing into both doors.
+
+TWO EQUAL COLUMNS (~80% of remaining height), split by a hairline, same type size:
+
+LEFT — heading Web GUI. Three steps stacked: 1 Create server  2 Map a tool  3 Copy MCP URL. Below, a thin Paper panel with mono lines: server CRM / tool get_contact / URL /mcp/{serverId}.
+
+RIGHT — heading Platform MCP. Same three steps at the same scale: 1 Create server  2 Map a tool  3 Copy MCP URL. Below, thin Paper panel: POST /api/platform-mcp / server CRM / tool get_contact / URL /mcp/{serverId}.
+
+CENTER hinge on the midline between columns: one word CRM in Inter, proving both doors open onto the same live server.
+
+Sparse, precise, editorial. Large Paper margins. No extra copy.

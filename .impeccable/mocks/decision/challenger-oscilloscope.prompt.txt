@@ -1,0 +1,19 @@
+High-fidelity designed website UI mockup of the rest2mcp marketing home first viewport. Desktop landscape, 1440 by 900 pixels, 16:9. A light laboratory bench as a webpage — Paper white instrument, not a dark oscilloscope, not a poster, not a photograph, not a 3D product shot.
+
+STRUCTURE, regions in order with scale:
+
+1. NAV — thin full-width top bar, about 56px, Paper #FFFFFF ground. Left: the exact custom rest2mcp wordmark from the attached reference image, used as-is. Lowercase stencil lockup, letters Ink #0B0B0B, only the numeral 2 is Gate Orange #FD410B. Do not typeset the name in Inter or any other face. Do not recolor, stretch, tilt, or close the stencil cuts. Right: small Inter Medium labels in Ink: Docs, Log in. Hairline Ink rule under the bar. No hamburger, no icons, no orange except the 2.
+
+2. BENCH FACE — the dominant region, nearly the full remaining viewport. A measured Paper instrument bench: a large rectangular plot sitting in a flat Ink-outlined bezel, like a light digital scope or chart recorder, flush on the page. The plot ground is Paper #FFFFFF. Across the plot, a precise Ink #0B0B0B graticule: fine even grid, 8 vertical and 10 horizontal divisions, hairline rules, no glow, no phosphor, no glass tint, no vignette. This is a working instrument face, not a screenshot of a terminal and not a CRT.
+
+3. ENDPOINT TRACES — inside the graticule, many thin Ink traces running left to right like catalog waveforms. Each trace is a REST endpoint written in system monospace along or as the waveform: GET /v1/invoices, GET /v1/invoices/{id}, POST /v1/invoices, PUT /v1/invoices/{id}, PATCH /v1/invoices/{id}, DELETE /v1/invoices/{id}, GET /v1/customers/{id}, GET /v1/orders, POST /v1/orders, GET /v1/webhooks, POST /v1/webhooks, GET /health, GET /v1/refunds, GET /v1/keys. Most traces keep moving — faint, slightly lighter Ink gray, overlapping, the noisy catalog. No fake amplitudes, no latency numbers, no prices.
+
+4. TRIGGER LOCK — a single vertical trigger cursor, a sharp solid Ink hairline near the right third of the plot, labeled TRIGGER in Inter condensed caps on the bezel (not inside the glass). At that cursor, six traces freeze still as locked horizontal levels, full Ink, high contrast, each ending in a named MCP tool in system mono: get_invoice, list_invoices, get_customer, get_balance, search_orders, list_payments. Those six sit still; the rest of the catalog keeps drifting past. A small Inter condensed readout on the top bezel: LOCKED 6. No other counts, no fake metrics.
+
+5. BEZEL / SIGN UP — the instrument chrome around the plot is Paper with hairline Ink edges, like machined light metal drawn flat. All controls live on this bezel, outside the graticule, never on the plot. Bottom-right of the bezel, outside the glass: a compact solid Ink rectangle with Paper type “Sign up”. Also on the bezel, small Inter condensed / mono instrument caps only: CATALOG, TRIGGER, 50 / SERVER. Sign up is a control on the chrome, not a hero band, not centered inside the plot.
+
+GROUND AND MATERIAL: flat Paper #FFFFFF page. Light instrument. Generous outer margin. Hairline Ink rules. Inter for chrome labels. System monospace for endpoints, tool names, and readouts. Custom wordmark only from the reference.
+
+COLOR LOCK: Paper #FFFFFF, Ink #0B0B0B, Gate Orange #FD410B exclusively on the wordmark 2. No phosphor green. No near-black CRT glass. No glowing bezels. No neon. No lime traces. No navy. No gradients, photos, drop shadows, or glass reflections.
+
+Designed website UI, crisp vector-like edges, readable type, first viewport only. Real product only: hosted REST-to-MCP, curated tools, same-day loop. No testimonials, no prices, no dates, no benchmarks.

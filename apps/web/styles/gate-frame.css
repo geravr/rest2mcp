@@ -1,0 +1,166 @@
+.gate-pin {
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --lockup-w: min(36rem, 70vw);
+  --lockup-h: calc(var(--lockup-w) * 127 / 480);
+  height: 175vh;
+}
+
+.gate-sticky {
+  position: sticky;
+  top: 0;
+  display: grid;
+  min-height: 100svh;
+  overflow: hidden;
+  background: #ffffff;
+  color: #0b0b0b;
+}
+
+.gate-start,
+.gate-lockup {
+  grid-area: 1 / 1;
+}
+
+.gate-start {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(12rem, 28vw) minmax(0, 1fr);
+  align-items: center;
+  gap: 2rem 3vw;
+  min-height: 100svh;
+  padding: 3rem 4vw;
+}
+
+.gate-symbol {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 72svh;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.gate-endpoints {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow: hidden;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-weight: 400;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: #a0a0a0;
+}
+
+.gate-endpoints li {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gate-tools {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1.15rem;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-weight: 400;
+  font-size: clamp(1.25rem, 2.4vw, 2.125rem);
+  line-height: 1.15;
+  color: #0b0b0b;
+}
+
+.gate-lockup {
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  align-self: center;
+  justify-self: center;
+  width: var(--lockup-w);
+  height: var(--lockup-h);
+  pointer-events: none;
+}
+
+.gate-crop {
+  overflow: hidden;
+  height: 100%;
+  flex: none;
+}
+
+.gate-crop img {
+  display: block;
+  width: var(--lockup-w);
+  height: var(--lockup-h);
+  max-width: none;
+}
+
+.gate-crop-rest {
+  width: calc(var(--lockup-w) * 194 / 480);
+}
+
+.gate-crop-two {
+  width: calc(var(--lockup-w) * 110 / 480);
+}
+
+.gate-crop-two img {
+  transform: translateX(calc(var(--lockup-w) * -194 / 480));
+}
+
+.gate-crop-mcp {
+  width: calc(var(--lockup-w) * 176 / 480);
+}
+
+.gate-crop-mcp img {
+  transform: translateX(calc(var(--lockup-w) * -304 / 480));
+}
+
+@media (max-width: 800px) {
+  .gate-pin {
+    height: auto;
+  }
+
+  .gate-sticky {
+    position: static;
+    display: block;
+    min-height: auto;
+    overflow: visible;
+  }
+
+  .gate-start {
+    display: grid;
+    grid-template-columns: 1fr;
+    min-height: auto;
+    padding: 2.5rem 1.25rem 3rem;
+  }
+
+  .gate-symbol {
+    max-width: 14rem;
+    max-height: 40svh;
+    margin-inline: auto;
+  }
+
+  .gate-tools {
+    gap: 0.85rem;
+  }
+
+  .gate-lockup {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gate-pin {
+    height: auto;
+  }
+
+  .gate-sticky {
+    position: static;
+    display: block;
+    min-height: auto;
+  }
+
+  .gate-lockup {
+    display: none;
+  }
+}

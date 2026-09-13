@@ -1,43 +1,209 @@
 ---
 import type { UI } from "../../i18n";
-import { spaUrl } from "../../lib/spa-url";
 
 interface Props {
   hero: UI["hero"];
+  logoAlt: string;
 }
 
-const { hero } = Astro.props;
+const { hero: _hero, logoAlt } = Astro.props;
+
+const endpoints = [
+  "GET /v1/users",
+  "POST /v1/users",
+  "GET /v1/users/{id}",
+  "PUT /v1/users/{id}",
+  "DELETE /v1/users/{id}",
+  "GET /v1/users/{id}/settings",
+  "PATCH /v1/settings",
+  "GET /v1/invoices",
+  "GET /v1/invoices/{id}",
+  "POST /v1/invoices",
+  "POST /v1/invoices/{id}/void",
+  "GET /v1/invoices/{id}/lines",
+  "GET /v1/orders",
+  "GET /v1/orders/{id}",
+  "POST /v1/orders",
+  "PATCH /v1/orders/{id}",
+  "DELETE /v1/orders/{id}",
+  "GET /v1/orders/{id}/items",
+  "POST /v1/orders/{id}/cancel",
+  "GET /v1/webhooks",
+  "POST /v1/webhooks",
+  "DELETE /v1/webhooks/{id}",
+  "GET /v1/events",
+  "POST /v1/events/{id}/replay",
+  "GET /v1/keys",
+  "DELETE /v1/keys/{id}",
+];
+
+const tools = [
+  "get_customer",
+  "list_invoices",
+  "get_invoice",
+  "search_orders",
+  "get_order",
+  "list_payments",
+];
 ---
 
-<section
-  class="border-b border-border bg-background py-16 text-center sm:py-24 md:py-32"
->
-  <div class="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
-    <h1
-      class="mx-auto max-w-4xl text-balance text-3xl font-semibold tracking-tight text-foreground sm:text-5xl md:text-6xl"
-    >
-      {hero.title}
-    </h1>
+<div class="gate-pin" data-gate-pin>
+  <section class="gate-sticky" aria-label={logoAlt}>
+    <p class="sr-only">{logoAlt}</p>
 
-    <p
-      class="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground sm:text-xl"
-    >
-      {hero.subtitle}
-    </p>
+    <div class="gate-start">
+      <ul class="gate-endpoints" data-gate-list data-gate-anim="list-left">
+        {endpoints.map((row) => <li>{row}</li>)}
+      </ul>
 
-    <div class="mt-10 flex flex-col justify-center gap-4 sm:flex-row">
-      <a
-        href={spaUrl("/signup")}
-        class="flex items-center justify-center rounded-md bg-primary px-8 py-3 text-base font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-      >
-        {hero.ctaStart}
-      </a>
-      <a
-        href="#how-it-works"
-        class="flex items-center justify-center rounded-md border border-border bg-background px-8 py-3 text-base font-medium text-foreground transition-colors hover:bg-muted"
-      >
-        {hero.ctaDocs}
-      </a>
+      <img
+        class="gate-symbol"
+        data-gate-anim="symbol"
+        src="/icon-light.png"
+        alt=""
+        width="192"
+        height="192"
+      />
+
+      <ul class="gate-tools" data-gate-list data-gate-anim="list-right">
+        {tools.map((name) => <li>{name}</li>)}
+      </ul>
     </div>
-  </div>
-</section>
+
+    <div class="gate-lockup" aria-hidden="true">
+      <div class="gate-crop gate-crop-rest" data-gate-anim="rest">
+        <img
+          src="/logo-light.png"
+          alt=""
+          width="480"
+          height="127"
+        />
+      </div>
+      <div class="gate-crop gate-crop-two" data-gate-anim="two">
+        <img
+          src="/logo-light.png"
+          alt=""
+          width="480"
+          height="127"
+        />
+      </div>
+      <div class="gate-crop gate-crop-mcp" data-gate-anim="mcp">
+        <img
+          src="/logo-light.png"
+          alt=""
+          width="480"
+          height="127"
+        />
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+  const EASE = "cubic-bezier(0.77, 0, 0.175, 1)";
+
+  const KEYFRAMES: Record<string, Keyframe[]> = {
+    "list-left": [
+      { offset: 0, opacity: 1, transform: "translateX(0) scale(1)" },
+      { offset: 0.4, opacity: 0.35, transform: "translateX(12%) scale(0.97)" },
+      { offset: 0.55, opacity: 0, transform: "translateX(20%) scale(0.95)" },
+      { offset: 1, opacity: 0, transform: "translateX(20%) scale(0.95)" },
+    ],
+    "list-right": [
+      { offset: 0, opacity: 1, transform: "translateX(0) scale(1)" },
+      { offset: 0.4, opacity: 0.35, transform: "translateX(-12%) scale(0.97)" },
+      { offset: 0.55, opacity: 0, transform: "translateX(-20%) scale(0.95)" },
+      { offset: 1, opacity: 0, transform: "translateX(-20%) scale(0.95)" },
+    ],
+    symbol: [
+      { offset: 0, opacity: 1, transform: "scale(1)" },
+      { offset: 0.45, opacity: 1, transform: "scale(0.62)" },
+      { offset: 0.7, opacity: 0, transform: "scale(0.42)" },
+      { offset: 1, opacity: 0, transform: "scale(0.42)" },
+    ],
+    rest: [
+      { offset: 0, opacity: 0, transform: "translateX(-18%) scale(0.96)" },
+      { offset: 0.28, opacity: 0, transform: "translateX(-14%) scale(0.96)" },
+      { offset: 0.55, opacity: 1, transform: "translateX(-4%) scale(1)" },
+      { offset: 1, opacity: 1, transform: "translateX(0) scale(1)" },
+    ],
+    two: [
+      { offset: 0, opacity: 0, transform: "scale(1.12)" },
+      { offset: 0.38, opacity: 0, transform: "scale(1.08)" },
+      { offset: 0.68, opacity: 1, transform: "scale(1)" },
+      { offset: 1, opacity: 1, transform: "scale(1)" },
+    ],
+    mcp: [
+      { offset: 0, opacity: 0, transform: "translateX(18%) scale(0.96)" },
+      { offset: 0.28, opacity: 0, transform: "translateX(14%) scale(0.96)" },
+      { offset: 0.55, opacity: 1, transform: "translateX(4%) scale(1)" },
+      { offset: 1, opacity: 1, transform: "translateX(0) scale(1)" },
+    ],
+  };
+
+  function setup(pin: HTMLElement) {
+    const reduce = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    const stacked = window.matchMedia("(max-width: 800px)").matches;
+    if (reduce || stacked) {
+      return;
+    }
+
+    const pieces = [
+      ...pin.querySelectorAll<HTMLElement>("[data-gate-anim]"),
+    ];
+    const lists = pin.querySelectorAll<HTMLElement>("[data-gate-list]");
+
+    const animations = pieces.flatMap((el) => {
+      const name = el.dataset.gateAnim;
+      const frames = name ? KEYFRAMES[name] : undefined;
+      if (!frames) {
+        return [];
+      }
+      const animation = el.animate(frames, {
+        duration: 1000,
+        fill: "both",
+        easing: EASE,
+      });
+      animation.pause();
+      return [animation];
+    });
+
+    let ticking = false;
+
+    const update = () => {
+      ticking = false;
+      const max = pin.offsetHeight - window.innerHeight;
+      const top = pin.getBoundingClientRect().top;
+      const progress =
+        max <= 0 ? 0 : Math.min(1, Math.max(0, -top / max));
+
+      for (const animation of animations) {
+        animation.currentTime = progress * 1000;
+      }
+
+      const hidden = progress > 0.5;
+      for (const list of lists) {
+        list.setAttribute("aria-hidden", hidden ? "true" : "false");
+      }
+    };
+
+    const onScroll = () => {
+      if (ticking) {
+        return;
+      }
+      ticking = true;
+      window.requestAnimationFrame(update);
+    };
+
+    update();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+  }
+
+  const pin = document.querySelector<HTMLElement>("[data-gate-pin]");
+  if (pin) {
+    setup(pin);
+  }
+</script>

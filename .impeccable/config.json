@@ -1,4 +1,20 @@
 {
-  "projectRoots": ["apps/app", "apps/web", "apps/email"],
-  "buildPath": "comp"
+  "projectRoots": [
+    "apps/app",
+    "apps/web",
+    "apps/email"
+  ],
+  "buildPath": "comp",
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "inter",
+        "createdAt": "2026-09-13T21:20:52.051Z",
+        "reason": "Brand manual pins Inter as the support face for product, web, presentations, and documentation."
+      }
+    ]
+  }
 }
