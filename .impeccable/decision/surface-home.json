@@ -1,0 +1,166 @@
+{
+  "title": "Choose the marketing home",
+  "question": "The roll assigned The cull list. Keep it, take an alternate, or re-roll. Brand stays fixed: Ink, Paper, Gate Orange, Inter, stencil 2.",
+  "options": [
+    {
+      "id": "assigned",
+      "label": "The cull list",
+      "kicker": "THE ROLL",
+      "thesis": "The home is a REST catalog being crossed out until a handful of named tools remain.",
+      "palette": ["#FFFFFF", "#0B0B0B", "#FD410B"],
+      "materials": [
+        "Inter editorial columns",
+        "system mono for endpoints",
+        "stencil 2 as the cut mark"
+      ],
+      "viewport": "A long inventory fills the first screen; struck rows recede; six kept tools sit in full Ink; Sign up sits in the margin of the cut.",
+      "risk": "Reads as documentation, not a product you can start today, if Sign up is not at the cut.",
+      "raised": [
+        {
+          "from": "Suminagashi basin",
+          "raise": "The row under decision is the only full-ink row; already-cut rows thin to gray."
+        },
+        {
+          "from": "Cloud quarry",
+          "raise": "Kept tools stack as solid Ink blocks; cut endpoints leave Paper voids."
+        },
+        {
+          "from": "Mesophotic dive",
+          "raise": "A single vertical count (50 → n) rules every line of the list."
+        }
+      ],
+      "comp": ".impeccable/mocks/decision/assigned.webp"
+    },
+    {
+      "id": "gate-cut",
+      "label": "The gate cut",
+      "thesis": "The first viewport is the 2 as a cut between a wide REST catalog and the small tool set that passed.",
+      "palette": ["#FFFFFF", "#0B0B0B", "#FD410B"],
+      "materials": [
+        "custom stencil wordmark",
+        "Inter on Paper",
+        "mono endpoint lists"
+      ],
+      "viewport": "Left: noisy endpoint list. Center: the stencil 2 as the gate. Right: six named tools and Sign up at the opening.",
+      "risk": "The 2 becomes a decorative mascot if the two sides are not real product content.",
+      "comp": ".impeccable/mocks/decision/gate-cut.webp"
+    },
+    {
+      "id": "two-doors",
+      "label": "The two doors",
+      "thesis": "GUI and Platform MCP open as two equal doors onto the same server.",
+      "palette": ["#FFFFFF", "#0B0B0B", "#FD410B"],
+      "materials": [
+        "Inter labels",
+        "system mono snippets",
+        "solid Paper fields"
+      ],
+      "viewport": "Two columns from the first fold share one live server in the middle; Sign up is the threshold before either door.",
+      "risk": "Dual authoring can bury the same-day loop if neither door shows server → tool → URL.",
+      "comp": ".impeccable/mocks/decision/two-doors.webp"
+    },
+    {
+      "id": "challenger-sukeban",
+      "label": "Annotated keep/cut",
+      "verdict": "competitive",
+      "lineage": "measured dress-code callouts",
+      "thesis": "The catalog is a measured document: every keep or cut has a leader line to the rule that allowed it.",
+      "palette": ["#FFFFFF", "#0B0B0B", "#FD410B"],
+      "materials": [
+        "Inter condensed labels",
+        "leader lines",
+        "system mono rules"
+      ],
+      "viewport": "A keep/cut inventory with leader lines to mutation guard, the 50-tool cap, and agent-facing names; Sign up sits at the last kept row.",
+      "case": "Holds clarity — consultants already read annotated specs; loses identification with the source subculture.",
+      "risk": "Callouts can crowd the offer until it reads as a legal sheet.",
+      "comp": ".impeccable/mocks/decision/challenger-sukeban.webp",
+      "hero": "https://impeccable.style/worlds/cards/pop-culture-shelf-sukeban-long-skirt-code-hero.webp",
+      "board": "https://impeccable.style/worlds/cards/pop-culture-shelf-sukeban-long-skirt-code.webp"
+    },
+    {
+      "id": "challenger-oscilloscope",
+      "label": "Triggered catalog",
+      "verdict": "competitive",
+      "lineage": "oscilloscope signal bench",
+      "thesis": "The first screen is a bench: one catalog, many endpoints, you trigger the handful that lock still.",
+      "palette": ["#FFFFFF", "#0B0B0B", "#FD410B"],
+      "materials": [
+        "Inter instrument caps",
+        "mono readouts",
+        "Paper field with Ink graticule"
+      ],
+      "viewport": "A measured bench shows endpoints as traces; a trigger locks six named tools; Sign up sits on the bezel, not inside the glass.",
+      "case": "Holds identification as an instrument; loses clarity because a trace does not say REST-to-MCP in one glance.",
+      "risk": "The bench can hide Sign up and the same-day loop behind a demo.",
+      "comp": ".impeccable/mocks/decision/challenger-oscilloscope.webp",
+      "hero": "https://impeccable.style/worlds/cards/scientific-notation-oscilloscope-signal-bench-hero.webp",
+      "board": "https://impeccable.style/worlds/cards/scientific-notation-oscilloscope-signal-bench.webp"
+    },
+    {
+      "id": "challenger-parametric",
+      "label": "Live set, not live mark",
+      "verdict": "declined",
+      "lineage": "generative parametric identity",
+      "thesis": "One control updates the visible live tool set together — never the wordmark.",
+      "palette": ["#FFFFFF", "#0B0B0B", "#FD410B"],
+      "materials": ["Inter", "system mono", "fixed stencil 2"],
+      "viewport": "A single control thins the catalog; the custom wordmark does not redraw.",
+      "case": "Loses both axes: regenerating the mark violates the brand lock, and a parametric toy is not this audience.",
+      "kept": "One control updates the visible live set together.",
+      "risk": "Any live-drawn 2 would break the master wordmark.",
+      "hero": "https://impeccable.style/worlds/cards/generative-parametric-identity-hero.webp"
+    },
+    {
+      "id": "challenger-suminagashi",
+      "label": "Newest cut is darkest",
+      "verdict": "declined",
+      "lineage": "suminagashi ink basin",
+      "thesis": "Fluid ornament hid the offer; only the ink hierarchy was kept.",
+      "palette": ["#FFFFFF", "#0B0B0B", "#FD410B"],
+      "materials": ["Paper", "Ink"],
+      "viewport": "Not shown as a basin.",
+      "case": "Loses identification and clarity: marbling conceals REST-to-MCP.",
+      "kept": "The row under decision is the only full-ink row.",
+      "risk": "A decorative surface would hide Sign up.",
+      "hero": "https://impeccable.style/worlds/cards/medium-native-fluid-ink-basin-hero.webp"
+    },
+    {
+      "id": "challenger-quarry",
+      "label": "Blocks and voids",
+      "verdict": "declined",
+      "lineage": "cloud quarry",
+      "thesis": "Surreal weather architecture hid the job.",
+      "palette": ["#FFFFFF", "#0B0B0B", "#FD410B"],
+      "materials": ["solid Ink blocks", "Paper voids"],
+      "viewport": "Not shown as a quarry.",
+      "case": "Loses both axes: consultants do not identify with a cloud quarry.",
+      "kept": "Kept tools as solid blocks; cut endpoints leave voids.",
+      "risk": "Fantasy architecture cannot prove a hosted gateway.",
+      "hero": "https://impeccable.style/worlds/cards/dream-surreal-impossible-worlds-cloud-quarry-hero.webp"
+    },
+    {
+      "id": "challenger-dive",
+      "label": "Count axis",
+      "verdict": "declined",
+      "lineage": "mesophotic deep dive",
+      "thesis": "A vertical ocean metaphor hid the product.",
+      "palette": ["#FFFFFF", "#0B0B0B", "#FD410B"],
+      "materials": ["Inter", "mono count"],
+      "viewport": "Not shown as a dive wall.",
+      "case": "Loses both axes: a descent does not make signup obvious.",
+      "kept": "A single vertical count (50 → n) rules the list.",
+      "risk": "Atmosphere would replace the offer.",
+      "hero": "https://impeccable.style/worlds/cards/rivers-tides-ocean-depths-mesophotic-deep-dive-hero.webp"
+    }
+  ],
+  "reroll": {
+    "registers": ["safer", "bolder"]
+  },
+  "buildPath": {
+    "value": "comp",
+    "toggle": true
+  },
+  "canon": false,
+  "steer": true
+}

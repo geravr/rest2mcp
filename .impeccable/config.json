@@ -1,3 +1,4 @@
 {
-  "projectRoots": ["apps/app", "apps/web", "apps/email"]
+  "projectRoots": ["apps/app", "apps/web", "apps/email"],
+  "buildPath": "comp"
 }
