@@ -17,25 +17,25 @@ const endpoints = [
   { method: "GET", path: "/v1/users/{id}" },
   { method: "PUT", path: "/v1/users/{id}" },
   { method: "DELETE", path: "/v1/users/{id}" },
-  { method: "GET", path: "/v1/users/{id}/settings" },
+  { method: "GET", path: "/v1/users/{id}/settings", extra: true },
   { method: "PATCH", path: "/v1/settings" },
   { method: "GET", path: "/v1/invoices" },
-  { method: "GET", path: "/v1/invoices/{id}" },
+  { method: "GET", path: "/v1/invoices/{id}", extra: true },
   { method: "POST", path: "/v1/invoices" },
-  { method: "POST", path: "/v1/invoices/{id}/void" },
-  { method: "GET", path: "/v1/invoices/{id}/lines" },
+  { method: "POST", path: "/v1/invoices/{id}/void", extra: true },
+  { method: "GET", path: "/v1/invoices/{id}/lines", extra: true },
   { method: "GET", path: "/v1/orders" },
-  { method: "GET", path: "/v1/orders/{id}" },
-  { method: "POST", path: "/v1/orders" },
-  { method: "PATCH", path: "/v1/orders/{id}" },
-  { method: "DELETE", path: "/v1/orders/{id}" },
-  { method: "GET", path: "/v1/orders/{id}/items" },
-  { method: "POST", path: "/v1/orders/{id}/cancel" },
-  { method: "GET", path: "/v1/webhooks" },
-  { method: "POST", path: "/v1/webhooks" },
-  { method: "DELETE", path: "/v1/webhooks/{id}" },
-  { method: "GET", path: "/v1/events" },
-  { method: "POST", path: "/v1/events/{id}/replay" },
+  { method: "GET", path: "/v1/orders/{id}", extra: true },
+  { method: "POST", path: "/v1/orders", extra: true },
+  { method: "PATCH", path: "/v1/orders/{id}", extra: true },
+  { method: "DELETE", path: "/v1/orders/{id}", extra: true },
+  { method: "GET", path: "/v1/orders/{id}/items", extra: true },
+  { method: "POST", path: "/v1/orders/{id}/cancel", extra: true },
+  { method: "GET", path: "/v1/webhooks", extra: true },
+  { method: "POST", path: "/v1/webhooks", extra: true },
+  { method: "DELETE", path: "/v1/webhooks/{id}", extra: true },
+  { method: "GET", path: "/v1/events", extra: true },
+  { method: "POST", path: "/v1/events/{id}/replay", extra: true },
   { method: "GET", path: "/v1/keys" },
   { method: "DELETE", path: "/v1/keys/{id}" },
 ] as const;
@@ -57,7 +57,7 @@ const tools = [
     <div class="gate-start">
       <ul class="gate-endpoints" data-gate-list data-gate-anim="list-left">
         {endpoints.map((row) => (
-          <li>
+          <li class:list={[{ "gate-row-extra": "extra" in row && row.extra }]}>
             <span class="gate-method" data-method={row.method}>
               {row.method}
             </span>
@@ -76,7 +76,9 @@ const tools = [
       />
 
       <ul class="gate-tools" data-gate-list data-gate-anim="list-right">
-        {tools.map((name) => <li>{name}</li>)}
+        {tools.map((name, index) => (
+          <li class:list={[{ "gate-row-extra": index >= 4 }]}>{name}</li>
+        ))}
       </ul>
     </div>
 
@@ -168,8 +170,7 @@ const tools = [
     const reduce = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
     ).matches;
-    const stacked = window.matchMedia("(max-width: 800px)").matches;
-    if (reduce || stacked) {
+    if (reduce) {
       return;
     }
 
