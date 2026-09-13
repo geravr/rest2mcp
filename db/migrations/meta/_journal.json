@@ -15,6 +15,13 @@
       "when": 1789235967880,
       "tag": "0001_harsh_sabretooth",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789269923379,
+      "tag": "0002_breezy_raza",
+      "breakpoints": true
     }
   ]
 }

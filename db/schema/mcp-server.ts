@@ -21,6 +21,8 @@ export const mcpServer = pgTable(
     name: text().notNull(),
     slug: text().notNull(),
     description: text(),
+    /** User-uploaded icon URL from scoped storage, or null for automatic rings fallback. */
+    iconImage: text(),
     baseUrl: text().notNull(),
     /** Hostnames allowed for upstream fetch. Default: host derived from baseUrl. */
     allowedHosts: jsonb().$type<string[]>().notNull(),
