@@ -24,7 +24,7 @@ export function ServerIcon({
       src={src}
       alt=""
       loading="lazy"
-      className={cn("shrink-0 rounded-md object-cover", SIZES[size])}
+      className={cn("shrink-0 rounded-md object-contain", SIZES[size])}
     />
   );
 }
