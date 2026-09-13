@@ -27,19 +27,19 @@ Internal code names (`mcp-studio`, `mcp-studio-service.ts`) remain accurate as e
 
 ### 1. Product noun: "service" / "servicio"
 
-**Choice:** Use *REST-to-MCP service* (EN) and *servicio REST a MCP* (ES) in meta titles, taglines, and hero subtitles where the product category appears.
+**Choice:** Use _REST-to-MCP service_ (EN) and _servicio REST a MCP_ (ES) in meta titles, taglines, and hero subtitles where the product category appears.
 
 **Alternatives considered:**
 
-| Option | Rejected because |
-|--------|------------------|
-| Platform / plataforma | Heavier SaaS tone; user chose "servicio" |
-| Gateway | Describes runtime only, not authoring + hosting |
-| Keep "studio" | Conflicts with product truth and Spanish agency connotation |
+| Option                | Rejected because                                            |
+| --------------------- | ----------------------------------------------------------- |
+| Platform / plataforma | Heavier SaaS tone; user chose "servicio"                    |
+| Gateway               | Describes runtime only, not authoring + hosting             |
+| Keep "studio"         | Conflicts with product truth and Spanish agency connotation |
 
 ### 2. UI noun: "console" / "consola"
 
-**Choice:** When copy refers to where capabilities live today (features subtitle, workflows subtitle), say *console* / *consola*, not *studio* / *estudio*.
+**Choice:** When copy refers to where capabilities live today (features subtitle, workflows subtitle), say _console_ / _consola_, not _studio_ / _estudio_.
 
 **Example (EN):** "Capabilities available in the console now" instead of "in the studio now."
 
@@ -61,11 +61,11 @@ Internal code names (`mcp-studio`, `mcp-studio-service.ts`) remain accurate as e
 
 ## Risks / Trade-offs
 
-| Risk | Mitigation |
-|------|------------|
-| Residual "studio" in archived OpenSpec changes | Out of scope; main spec + live i18n are source of truth for apply |
-| "Console" feels enterprise-heavy in ES | "Consola" is standard for admin UIs; alternative "panel" documented if user feedback |
-| Marketing-site-content change overlap | Apply this change after verifying no duplicate active change edits same strings |
+| Risk                                           | Mitigation                                                                           |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Residual "studio" in archived OpenSpec changes | Out of scope; main spec + live i18n are source of truth for apply                    |
+| "Console" feels enterprise-heavy in ES         | "Consola" is standard for admin UIs; alternative "panel" documented if user feedback |
+| Marketing-site-content change overlap          | Apply this change after verifying no duplicate active change edits same strings      |
 
 ## Migration Plan
 
