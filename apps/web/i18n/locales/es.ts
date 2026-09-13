@@ -1,6 +1,6 @@
 export const es = {
   meta: {
-    title: "rest2mcp — estudio REST a MCP",
+    title: "rest2mcp — servicio REST a MCP",
     description:
       "Mapea APIs REST a herramientas MCP curadas con gateway alojado, pruebas en playground y observabilidad lista para agentes.",
   },
@@ -18,7 +18,7 @@ export const es = {
     },
   },
   footer: {
-    tagline: "rest2mcp · estudio REST a MCP",
+    tagline: "rest2mcp · servicio REST a MCP",
     description:
       "Construye herramientas MCP intencionales desde tus APIs, prueba en un playground y conecta cualquier cliente Streamable HTTP. Construido con un stack web moderno.",
     startHeading: "Empezar",
@@ -32,7 +32,7 @@ export const es = {
   hero: {
     title: "Convierte tu API REST en un MCP en el que tu agente puede confiar",
     subtitle:
-      "rest2mcp es un estudio para mapear endpoints a herramientas curadas—no generación masiva automática. Importa desde curl, prueba en un playground y conecta vía un gateway alojado.",
+      "rest2mcp es un servicio alojado para mapear endpoints a herramientas curadas—no generación masiva automática. Importa desde curl, prueba en un playground y conecta vía el gateway.",
     ctaStart: "Registrarse",
     ctaDocs: "Cómo funciona",
   },
@@ -81,7 +81,7 @@ export const es = {
   features: {
     title: "Disponible hoy",
     subtitle:
-      "Capacidades disponibles en el estudio ahora—no promesas del roadmap.",
+      "Capacidades disponibles en la consola ahora—no promesas del roadmap.",
     items: [
       {
         title: "Importación curl con vista previa",
@@ -124,7 +124,7 @@ export const es = {
   workflows: {
     title: "Dos formas de construir",
     subtitle:
-      "Usa la GUI o conduce el estudio desde tu agente—mismos servidores, mismas herramientas.",
+      "Usa la GUI o configura desde tu agente—mismos servidores, mismas herramientas.",
     gui: {
       title: "GUI web",
       desc: "Autoría visual para consultores y desarrolladores que quieren control total.",
