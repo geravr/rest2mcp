@@ -57,6 +57,16 @@ export const enServers = {
     noTools: "No tools yet. Add a GET tool or paste a curl command.",
     identityTitle: "Server",
     identityDescription: "Name, origin, and optional notes for this server.",
+    iconTitle: "Icon",
+    iconDescription:
+      "Upload a custom icon or use the automatic rings placeholder.",
+    iconUpload: "Upload icon",
+    iconUploading: "Uploading...",
+    iconRemove: "Remove custom icon",
+    iconRemoving: "Removing...",
+    iconPhotoDescription: "Upload a JPG, PNG, or WebP image up to 5 MB.",
+    invalidIconType: "Upload a JPG, PNG, or WebP image.",
+    iconTooLarge: "Icon images must be 5 MB or smaller.",
     variables: "Variables",
     variablesDescription:
       "Values tools reference as {{name}}. Secret variables are encrypted and never shown again.",

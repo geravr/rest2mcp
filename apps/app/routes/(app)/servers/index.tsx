@@ -1,7 +1,7 @@
 import { FeatureErrorBoundary } from "@/components/feature-error-boundary";
 import { AdminListPagination } from "@/components/admin-list";
 import { ServerCardsSkeleton } from "@/components/loading";
-import { ServerFavicon } from "@/components/servers/server-favicon";
+import { ServerIcon } from "@/components/servers/server-icon";
 import { TrafficLightBadge } from "@/components/servers/traffic-light";
 import {
   useCreateMcpServer,
@@ -152,9 +152,9 @@ function ServersPage() {
               <Card key={server.id} className="flex flex-col">
                 <CardContent className="flex flex-1 flex-col gap-3 p-4">
                   <div className="flex items-start gap-3">
-                    <ServerFavicon
-                      baseUrl={server.baseUrl}
-                      name={server.name}
+                    <ServerIcon
+                      serverId={server.id}
+                      iconImage={server.iconImage}
                     />
                     <div className="min-w-0 flex-1">
                       <Link

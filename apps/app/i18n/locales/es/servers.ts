@@ -57,6 +57,16 @@ export const esServers = {
     noTools: "Aún no hay herramientas. Añade un GET o pega un curl.",
     identityTitle: "Servidor",
     identityDescription: "Nombre, origen y notas opcionales de este servidor.",
+    iconTitle: "Icono",
+    iconDescription:
+      "Sube un icono personalizado o usa el placeholder automático de anillos.",
+    iconUpload: "Subir icono",
+    iconUploading: "Subiendo...",
+    iconRemove: "Quitar icono personalizado",
+    iconRemoving: "Quitando...",
+    iconPhotoDescription: "Sube una imagen JPG, PNG o WebP de hasta 5 MB.",
+    invalidIconType: "Sube una imagen JPG, PNG o WebP.",
+    iconTooLarge: "El icono debe pesar 5 MB o menos.",
     variables: "Variables",
     variablesDescription:
       "Valores que las herramientas referencian como {{name}}. Las variables secretas se cifran y no se vuelven a mostrar.",

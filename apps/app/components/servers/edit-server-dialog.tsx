@@ -13,7 +13,7 @@ import {
 } from "@repo/ui";
 import { LoaderCircle } from "lucide-react";
 import { useState } from "react";
-import { ServerFavicon } from "./server-favicon";
+import { ServerIcon } from "./server-icon";
 
 /**
  * Mount conditionally (`{open ? <EditServerDialog …/> : null}`) so the form
@@ -28,6 +28,7 @@ export function EditServerDialog({
     name: string;
     description: string | null;
     baseUrl: string;
+    iconImage: string | null;
   };
   onClose: () => void;
 }) {
@@ -42,9 +43,9 @@ export function EditServerDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-3">
-            <ServerFavicon
-              baseUrl={server.baseUrl}
-              name={server.name}
+            <ServerIcon
+              serverId={server.id}
+              iconImage={server.iconImage}
               size="sm"
             />
             {t.servers.editTitle}

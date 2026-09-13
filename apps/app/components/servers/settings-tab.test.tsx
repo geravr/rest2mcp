@@ -32,6 +32,7 @@ const server = {
   name: "CRM",
   description: null,
   baseUrl: "https://api.example.com",
+  iconImage: null,
 };
 
 describe("ServerSettingsTab", () => {

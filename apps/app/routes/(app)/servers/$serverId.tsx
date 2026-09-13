@@ -5,7 +5,7 @@ import { DeleteServerDialog } from "@/components/servers/delete-server-dialog";
 import { EditServerDialog } from "@/components/servers/edit-server-dialog";
 import { ServerLogsTab } from "@/components/servers/logs-tab";
 import { ServerPlaygroundTab } from "@/components/servers/playground-tab";
-import { ServerFavicon } from "@/components/servers/server-favicon";
+import { ServerIcon } from "@/components/servers/server-icon";
 import { ServerSettingsTab } from "@/components/servers/settings-tab";
 import { TrafficLightBadge } from "@/components/servers/traffic-light";
 import { ServerToolsTab } from "@/components/servers/tools-tab";
@@ -83,9 +83,9 @@ function ServerDetailPage() {
           <>
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="flex items-start gap-3">
-                <ServerFavicon
-                  baseUrl={data.baseUrl}
-                  name={data.name}
+                <ServerIcon
+                  serverId={data.id}
+                  iconImage={data.iconImage}
                   size="lg"
                 />
                 <div className="space-y-1">

@@ -13,6 +13,8 @@ import {
 } from "@/hooks/use-mcp";
 import { useTranslations } from "@/i18n/use-translations";
 import { resolveErrorMessage } from "@/lib/errors";
+import { ServerIcon } from "@/components/servers/server-icon";
+import { uploadFileToStorage } from "@/lib/storage";
 import {
   Badge,
   Button,
@@ -26,7 +28,8 @@ import {
   Switch,
 } from "@repo/ui";
 import { LoaderCircle, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 
 const VARIABLE_NAME_PATTERN = /^[a-z][a-z0-9_]*$/;
 
@@ -48,6 +51,7 @@ type ServerIdentity = {
   name: string;
   description: string | null;
   baseUrl: string;
+  iconImage: string | null;
 };
 
 /** Server-owned configuration: identity, variables, and request defaults. */
@@ -65,6 +69,9 @@ export function ServerSettingsTab({
   const createVariable = useCreateMcpVariable();
   const deleteVariable = useDeleteMcpVariable();
   const updateServer = useUpdateMcpServer();
+  const iconFileInputRef = useRef<HTMLInputElement>(null);
+  const [iconUploadPending, setIconUploadPending] = useState(false);
+  const [iconRemovePending, setIconRemovePending] = useState(false);
 
   const [name, setName] = useState(server.name);
   const [baseUrl, setBaseUrl] = useState(server.baseUrl);
@@ -114,8 +121,125 @@ export function ServerSettingsTab({
     );
   }
 
+  const handleIconFile = async (file: File) => {
+    const contentType = file.type.toLowerCase();
+
+    if (!["image/jpeg", "image/png", "image/webp"].includes(contentType)) {
+      throw new Error(t.servers.invalidIconType);
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      throw new Error(t.servers.iconTooLarge);
+    }
+
+    setIconUploadPending(true);
+    try {
+      const upload = await uploadFileToStorage({
+        file,
+        directory: "server-icons",
+      });
+      await updateServer.mutateAsync({
+        serverId: server.id,
+        iconImage: upload.accessUrl,
+      });
+    } finally {
+      setIconUploadPending(false);
+      if (iconFileInputRef.current) {
+        iconFileInputRef.current.value = "";
+      }
+    }
+  };
+
   return (
     <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>{t.servers.iconTitle}</CardTitle>
+          <CardDescription>{t.servers.iconDescription}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap items-center gap-4">
+            <ServerIcon
+              serverId={server.id}
+              iconImage={server.iconImage}
+              size="lg"
+            />
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">
+                {t.servers.iconPhotoDescription}
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Label htmlFor="server-icon-upload" className="sr-only">
+                  {t.servers.iconUpload}
+                </Label>
+                <input
+                  ref={iconFileInputRef}
+                  id="server-icon-upload"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  tabIndex={-1}
+                  className="sr-only"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (!file) {
+                      return;
+                    }
+
+                    void handleIconFile(file).catch((error: unknown) => {
+                      toast.error(
+                        error instanceof Error
+                          ? error.message
+                          : resolveErrorMessage(error, t),
+                      );
+                    });
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={iconUploadPending || iconRemovePending}
+                  onClick={() => iconFileInputRef.current?.click()}
+                >
+                  {iconUploadPending ? (
+                    <>
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                      {t.servers.iconUploading}
+                    </>
+                  ) : (
+                    t.servers.iconUpload
+                  )}
+                </Button>
+                {server.iconImage ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={iconUploadPending || iconRemovePending}
+                    onClick={() => {
+                      setIconRemovePending(true);
+                      updateServer.mutate(
+                        { serverId: server.id, iconImage: null },
+                        { onSettled: () => setIconRemovePending(false) },
+                      );
+                    }}
+                  >
+                    {iconRemovePending ? (
+                      <>
+                        <LoaderCircle className="h-4 w-4 animate-spin" />
+                        {t.servers.iconRemoving}
+                      </>
+                    ) : (
+                      t.servers.iconRemove
+                    )}
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>{t.servers.identityTitle}</CardTitle>
