@@ -1,6 +1,16 @@
 ---
 import type { UI } from "../../i18n";
-import { Zap, Shield, Database, Layers } from "lucide-react";
+import {
+  Terminal,
+  Wrench,
+  KeyRound,
+  Globe,
+  Play,
+  ScrollText,
+  ShieldCheck,
+  Bot,
+  Image,
+} from "lucide-react";
 
 interface Props {
   features: UI["features"];
@@ -8,10 +18,20 @@ interface Props {
 
 const { features } = Astro.props;
 
-const icons = [Layers, Zap, Database, Shield];
+const icons = [
+  Terminal,
+  Wrench,
+  KeyRound,
+  Globe,
+  Play,
+  ScrollText,
+  ShieldCheck,
+  Bot,
+  Image,
+];
 ---
 
-<section id="features" class="border-b border-border bg-background py-24">
+<section id="features" class="scroll-mt-20 border-b border-border bg-background py-24">
   <div class="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
     <div class="mx-auto mb-16 max-w-3xl text-center">
       <h2
@@ -24,13 +44,13 @@ const icons = [Layers, Zap, Database, Shield];
       </p>
     </div>
 
-    <div class="grid gap-8 md:grid-cols-2 lg:grid-cols-4">
+    <div class="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
       {
         features.items.map((item, index) => {
-          const Icon = icons[index] ?? Layers;
+          const Icon = icons[index] ?? Terminal;
           return (
             <div class="border border-border bg-background p-8">
-              <Icon className="mb-4 h-5 w-5 text-muted-foreground" />
+              <Icon className="mb-4 h-5 w-5 text-muted-foreground" aria-hidden="true" />
               <h3 class="font-medium text-foreground">{item.title}</h3>
               <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
                 {item.desc}

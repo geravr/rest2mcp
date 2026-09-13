@@ -1,0 +1,49 @@
+---
+import type { UI } from "../../i18n";
+
+interface Props {
+  roadmap: UI["roadmap"];
+}
+
+const { roadmap } = Astro.props;
+
+function statusLabel(status: string): string {
+  if (status === "planned" || status === "exploring") {
+    return roadmap.statusLabels[status];
+  }
+  return status;
+}
+---
+
+<section id="roadmap" class="scroll-mt-20 border-b border-border bg-muted py-24">
+  <div class="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
+    <div class="mx-auto mb-16 max-w-3xl text-center">
+      <h2
+        class="text-3xl font-semibold tracking-tight text-foreground md:text-4xl"
+      >
+        {roadmap.title}
+      </h2>
+      <p class="mt-4 text-base text-muted-foreground sm:text-lg">
+        {roadmap.subtitle}
+      </p>
+    </div>
+
+    <ul class="mx-auto max-w-5xl space-y-6 sm:columns-2 sm:gap-6">
+      {
+        roadmap.items.map((item) => (
+          <li class="break-inside-avoid border border-border bg-background p-6 sm:mb-6">
+            <div class="flex flex-wrap items-start justify-between gap-2">
+              <h3 class="font-medium text-foreground">{item.title}</h3>
+              <span class="rounded-full border border-border bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+                {statusLabel(item.status)}
+              </span>
+            </div>
+            <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
+              {item.desc}
+            </p>
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+</section>

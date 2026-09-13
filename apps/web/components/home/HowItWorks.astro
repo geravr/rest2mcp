@@ -1,0 +1,45 @@
+---
+import type { UI } from "../../i18n";
+
+interface Props {
+  howItWorks: UI["howItWorks"];
+}
+
+const { howItWorks } = Astro.props;
+---
+
+<section id="how-it-works" class="scroll-mt-20 border-b border-border bg-background py-24">
+  <div class="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
+    <div class="mx-auto mb-16 max-w-3xl text-center">
+      <h2
+        class="text-3xl font-semibold tracking-tight text-foreground md:text-4xl"
+      >
+        {howItWorks.title}
+      </h2>
+      <p class="mt-4 text-base text-muted-foreground sm:text-lg">
+        {howItWorks.subtitle}
+      </p>
+    </div>
+
+    <ol class="mx-auto max-w-5xl space-y-8">
+      {
+        howItWorks.steps.map((step, index) => (
+          <li class="flex gap-4 border border-border p-6">
+            <span
+              class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-sm font-medium text-foreground"
+              aria-hidden="true"
+            >
+              {index + 1}
+            </span>
+            <div class="min-w-0">
+              <h3 class="font-medium text-foreground">{step.title}</h3>
+              <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
+                {step.desc}
+              </p>
+            </div>
+          </li>
+        ))
+      }
+    </ol>
+  </div>
+</section>
