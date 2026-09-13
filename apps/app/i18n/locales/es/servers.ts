@@ -136,6 +136,8 @@ export const esServers = {
     addFirstTool: "Añadir la primera herramienta",
     saveChanges: "Guardar cambios",
     savingChanges: "Guardando...",
+    dangerZoneTitle: "Zona de peligro",
+    dangerZoneDescription: "Acciones irreversibles para este servidor MCP.",
     deleteTitle: "Eliminar servidor",
     deleteDescription:
       "Esto elimina permanentemente {name} con sus herramientas, variables, tokens e historial de llamadas.",

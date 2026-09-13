@@ -1,4 +1,5 @@
 import { SettingsFormSkeleton } from "@/components/loading";
+import { DeleteServerDialog } from "@/components/servers/delete-server-dialog";
 import {
   KeyValueEditor,
   pairsToRecord,
@@ -72,6 +73,7 @@ export function ServerSettingsTab({
   const iconFileInputRef = useRef<HTMLInputElement>(null);
   const [iconUploadPending, setIconUploadPending] = useState(false);
   const [iconRemovePending, setIconRemovePending] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const [name, setName] = useState(server.name);
   const [baseUrl, setBaseUrl] = useState(server.baseUrl);
@@ -507,6 +509,37 @@ export function ServerSettingsTab({
           </form>
         </CardContent>
       </Card>
+
+      <Card className="border-destructive/40">
+        <CardHeader>
+          <CardTitle className="text-destructive">
+            {t.servers.dangerZoneTitle}
+          </CardTitle>
+          <CardDescription>{t.servers.dangerZoneDescription}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <p className="text-sm font-medium">{t.servers.deleteTitle}</p>
+              <p className="text-sm text-muted-foreground">
+                {t.servers.deleteDescription.replace("{name}", server.name)}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="destructive"
+              className="shrink-0"
+              onClick={() => setDeleteOpen(true)}
+            >
+              {t.servers.deleteServer}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {deleteOpen ? (
+        <DeleteServerDialog server={server} onClose={() => setDeleteOpen(false)} />
+      ) : null}
     </div>
   );
 }

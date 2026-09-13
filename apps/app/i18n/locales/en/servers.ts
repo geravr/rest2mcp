@@ -135,6 +135,8 @@ export const enServers = {
     addFirstTool: "Add the first tool",
     saveChanges: "Save changes",
     savingChanges: "Saving...",
+    dangerZoneTitle: "Danger zone",
+    dangerZoneDescription: "Irreversible actions for this MCP server.",
     deleteTitle: "Delete server",
     deleteDescription:
       "This permanently deletes {name} with its tools, variables, tokens, and call history.",

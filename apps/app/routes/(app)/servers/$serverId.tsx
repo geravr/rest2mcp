@@ -1,7 +1,6 @@
 import { FeatureErrorBoundary } from "@/components/feature-error-boundary";
 import { SettingsFormSkeleton } from "@/components/loading";
 import { ServerConnectionTab } from "@/components/servers/connection-tab";
-import { DeleteServerDialog } from "@/components/servers/delete-server-dialog";
 import { ServerLogsTab } from "@/components/servers/logs-tab";
 import { ServerPlaygroundTab } from "@/components/servers/playground-tab";
 import { ServerIcon } from "@/components/servers/server-icon";
@@ -21,8 +20,7 @@ import {
 } from "@/lib/servers-search";
 import { Button, Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { LoaderCircle, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { LoaderCircle } from "lucide-react";
 
 export const Route = createFileRoute("/(app)/servers/$serverId")({
   validateSearch: serverDetailSearchSchema,
@@ -38,7 +36,6 @@ function ServerDetailPage() {
   const activeTab = search.tab ?? "tools";
   const { data, isLoading, isError, error } = useMcpServer(serverId);
   const updateServer = useUpdateMcpServer();
-  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const setTab = (tab: string) => {
     const valid = serverDetailTabValues.includes(
@@ -121,24 +118,8 @@ function ServerDetailPage() {
                     ? t.servers.resume
                     : t.servers.pause}
                 </Button>
-                <Button
-                  variant="destructive"
-                  size="icon"
-                  title={t.servers.deleteServer}
-                  aria-label={t.servers.deleteServer}
-                  onClick={() => setDeleteOpen(true)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
               </div>
             </div>
-
-            {deleteOpen ? (
-              <DeleteServerDialog
-                server={data}
-                onClose={() => setDeleteOpen(false)}
-              />
-            ) : null}
 
             <Tabs value={activeTab} onValueChange={setTab}>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
