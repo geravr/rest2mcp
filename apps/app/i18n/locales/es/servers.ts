@@ -125,7 +125,6 @@ export const esServers = {
     appCode: "Código",
     neverCalled: "Sin llamadas aún",
     copyMcpUrl: "Copiar URL MCP",
-    editServer: "Editar servidor",
     deleteServer: "Eliminar servidor",
     testingConnection: "Probando...",
     connectionReachable: "Accesible — la API respondió (HTTP {status}).",
@@ -135,7 +134,6 @@ export const esServers = {
     createdNextStep:
       "Servidor creado. Siguiente paso: añade tu primera herramienta.",
     addFirstTool: "Añadir la primera herramienta",
-    editTitle: "Editar servidor",
     saveChanges: "Guardar cambios",
     savingChanges: "Guardando...",
     deleteTitle: "Eliminar servidor",

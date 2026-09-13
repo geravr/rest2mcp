@@ -2,7 +2,6 @@ import { FeatureErrorBoundary } from "@/components/feature-error-boundary";
 import { SettingsFormSkeleton } from "@/components/loading";
 import { ServerConnectionTab } from "@/components/servers/connection-tab";
 import { DeleteServerDialog } from "@/components/servers/delete-server-dialog";
-import { EditServerDialog } from "@/components/servers/edit-server-dialog";
 import { ServerLogsTab } from "@/components/servers/logs-tab";
 import { ServerPlaygroundTab } from "@/components/servers/playground-tab";
 import { ServerIcon } from "@/components/servers/server-icon";
@@ -22,7 +21,7 @@ import {
 } from "@/lib/servers-search";
 import { Button, Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { LoaderCircle, Pencil, Trash2 } from "lucide-react";
+import { LoaderCircle, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 export const Route = createFileRoute("/(app)/servers/$serverId")({
@@ -39,7 +38,6 @@ function ServerDetailPage() {
   const activeTab = search.tab ?? "tools";
   const { data, isLoading, isError, error } = useMcpServer(serverId);
   const updateServer = useUpdateMcpServer();
-  const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const setTab = (tab: string) => {
@@ -108,15 +106,6 @@ function ServerDetailPage() {
               <div className="flex items-center gap-2">
                 <Button
                   variant="outline"
-                  size="icon"
-                  title={t.servers.editServer}
-                  aria-label={t.servers.editServer}
-                  onClick={() => setEditOpen(true)}
-                >
-                  <Pencil className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="outline"
                   disabled={updateServer.isPending}
                   onClick={() =>
                     updateServer.mutate({
@@ -144,12 +133,6 @@ function ServerDetailPage() {
               </div>
             </div>
 
-            {editOpen ? (
-              <EditServerDialog
-                server={data}
-                onClose={() => setEditOpen(false)}
-              />
-            ) : null}
             {deleteOpen ? (
               <DeleteServerDialog
                 server={data}
