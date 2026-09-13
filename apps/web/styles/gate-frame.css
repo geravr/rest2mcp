@@ -16,7 +16,7 @@
 }
 
 .gate-start,
-.gate-lockup {
+.gate-end {
   grid-area: 1 / 1;
 }
 
@@ -24,9 +24,9 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(12rem, 28vw) minmax(0, 1fr);
   align-items: center;
-  gap: 2rem 3vw;
+  gap: 2rem 1.25rem;
   min-height: 100svh;
-  padding: 3rem 4vw;
+  padding: 3rem 3vw;
 }
 
 .gate-symbol {
@@ -39,24 +39,54 @@
 }
 
 .gate-endpoints {
+  justify-self: end;
+  width: max-content;
+  max-width: 100%;
   margin: 0;
   padding: 0;
   list-style: none;
   overflow: hidden;
+  display: grid;
+  row-gap: 0.35rem;
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-weight: 400;
   font-size: 0.8125rem;
-  line-height: 1.55;
-  color: #a0a0a0;
+  line-height: 1.2;
+  color: #5c5c5c;
 }
 
 .gate-endpoints li {
+  display: grid;
+  grid-template-columns: 4.25rem minmax(0, max-content);
+  align-items: center;
+  column-gap: 0.65rem;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+.gate-method {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 4.25rem;
+  padding: 0.22rem 0.35rem;
+  border-radius: 0.25rem;
+  background: #d8d8d8;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  color: #3a3a3a;
+}
+
+.gate-path {
+  margin: 0;
+  font: inherit;
+  color: inherit;
 }
 
 .gate-tools {
+  justify-self: start;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -71,15 +101,70 @@
   color: #0b0b0b;
 }
 
-.gate-lockup {
+.gate-end {
   z-index: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
+  justify-content: center;
   align-self: center;
   justify-self: center;
+  gap: 2rem;
+  pointer-events: none;
+}
+
+.gate-lockup {
+  display: flex;
+  align-items: center;
   width: var(--lockup-w);
   height: var(--lockup-h);
-  pointer-events: none;
+}
+
+.gate-cta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  pointer-events: auto;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.gate-cta-signup,
+.gate-cta-login {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding: 0.7rem 1.15rem;
+  border-radius: 0.25rem;
+  text-decoration: none;
+}
+
+.gate-cta-signup {
+  background: #0b0b0b;
+  color: #ffffff;
+}
+
+.gate-cta-signup:hover {
+  background: #2a2a2a;
+}
+
+.gate-cta-login {
+  border: 1px solid #0b0b0b;
+  background: #ffffff;
+  color: #0b0b0b;
+}
+
+.gate-cta-login:hover {
+  background: #f4f4f4;
+}
+
+.gate-cta-signup:focus-visible,
+.gate-cta-login:focus-visible {
+  outline: 2px solid #0b0b0b;
+  outline-offset: 3px;
 }
 
 .gate-crop {
@@ -134,6 +219,12 @@
     padding: 2.5rem 1.25rem 3rem;
   }
 
+  .gate-endpoints {
+    justify-self: stretch;
+    width: auto;
+    text-align: left;
+  }
+
   .gate-symbol {
     max-width: 14rem;
     max-height: 40svh;
@@ -142,6 +233,13 @@
 
   .gate-tools {
     gap: 0.85rem;
+  }
+
+  .gate-end {
+    align-self: auto;
+    justify-self: auto;
+    margin-top: 2rem;
+    pointer-events: auto;
   }
 
   .gate-lockup {
@@ -158,6 +256,13 @@
     position: static;
     display: block;
     min-height: auto;
+  }
+
+  .gate-end {
+    align-self: auto;
+    justify-self: auto;
+    margin-top: 2rem;
+    pointer-events: auto;
   }
 
   .gate-lockup {

@@ -16,7 +16,12 @@ const t = getTranslations(Astro.currentLocale);
 ---
 
 <Layout>
-  <Hero hero={t.hero} logoAlt={t.header.logoAlt} />
+  <Hero
+    hero={t.hero}
+    logoAlt={t.header.logoAlt}
+    signup={t.header.signup}
+    login={t.header.login}
+  />
   <Problem problem={t.problem} />
   <HowItWorks howItWorks={t.howItWorks} />
   <Features features={t.features} />

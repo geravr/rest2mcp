@@ -1,41 +1,44 @@
 ---
 import type { UI } from "../../i18n";
+import { spaUrl } from "../../lib/spa-url";
 
 interface Props {
   hero: UI["hero"];
   logoAlt: string;
+  signup: string;
+  login: string;
 }
 
-const { hero: _hero, logoAlt } = Astro.props;
+const { hero: _hero, logoAlt, signup, login } = Astro.props;
 
 const endpoints = [
-  "GET /v1/users",
-  "POST /v1/users",
-  "GET /v1/users/{id}",
-  "PUT /v1/users/{id}",
-  "DELETE /v1/users/{id}",
-  "GET /v1/users/{id}/settings",
-  "PATCH /v1/settings",
-  "GET /v1/invoices",
-  "GET /v1/invoices/{id}",
-  "POST /v1/invoices",
-  "POST /v1/invoices/{id}/void",
-  "GET /v1/invoices/{id}/lines",
-  "GET /v1/orders",
-  "GET /v1/orders/{id}",
-  "POST /v1/orders",
-  "PATCH /v1/orders/{id}",
-  "DELETE /v1/orders/{id}",
-  "GET /v1/orders/{id}/items",
-  "POST /v1/orders/{id}/cancel",
-  "GET /v1/webhooks",
-  "POST /v1/webhooks",
-  "DELETE /v1/webhooks/{id}",
-  "GET /v1/events",
-  "POST /v1/events/{id}/replay",
-  "GET /v1/keys",
-  "DELETE /v1/keys/{id}",
-];
+  { method: "GET", path: "/v1/users" },
+  { method: "POST", path: "/v1/users" },
+  { method: "GET", path: "/v1/users/{id}" },
+  { method: "PUT", path: "/v1/users/{id}" },
+  { method: "DELETE", path: "/v1/users/{id}" },
+  { method: "GET", path: "/v1/users/{id}/settings" },
+  { method: "PATCH", path: "/v1/settings" },
+  { method: "GET", path: "/v1/invoices" },
+  { method: "GET", path: "/v1/invoices/{id}" },
+  { method: "POST", path: "/v1/invoices" },
+  { method: "POST", path: "/v1/invoices/{id}/void" },
+  { method: "GET", path: "/v1/invoices/{id}/lines" },
+  { method: "GET", path: "/v1/orders" },
+  { method: "GET", path: "/v1/orders/{id}" },
+  { method: "POST", path: "/v1/orders" },
+  { method: "PATCH", path: "/v1/orders/{id}" },
+  { method: "DELETE", path: "/v1/orders/{id}" },
+  { method: "GET", path: "/v1/orders/{id}/items" },
+  { method: "POST", path: "/v1/orders/{id}/cancel" },
+  { method: "GET", path: "/v1/webhooks" },
+  { method: "POST", path: "/v1/webhooks" },
+  { method: "DELETE", path: "/v1/webhooks/{id}" },
+  { method: "GET", path: "/v1/events" },
+  { method: "POST", path: "/v1/events/{id}/replay" },
+  { method: "GET", path: "/v1/keys" },
+  { method: "DELETE", path: "/v1/keys/{id}" },
+] as const;
 
 const tools = [
   "get_customer",
@@ -53,7 +56,14 @@ const tools = [
 
     <div class="gate-start">
       <ul class="gate-endpoints" data-gate-list data-gate-anim="list-left">
-        {endpoints.map((row) => <li>{row}</li>)}
+        {endpoints.map((row) => (
+          <li>
+            <span class="gate-method" data-method={row.method}>
+              {row.method}
+            </span>
+            <code class="gate-path">{row.path}</code>
+          </li>
+        ))}
       </ul>
 
       <img
@@ -70,31 +80,38 @@ const tools = [
       </ul>
     </div>
 
-    <div class="gate-lockup" aria-hidden="true">
-      <div class="gate-crop gate-crop-rest" data-gate-anim="rest">
-        <img
-          src="/logo-light.png"
-          alt=""
-          width="480"
-          height="127"
-        />
+    <div class="gate-end">
+      <div class="gate-lockup" aria-hidden="true">
+        <div class="gate-crop gate-crop-rest" data-gate-anim="rest">
+          <img
+            src="/logo-light.png"
+            alt=""
+            width="480"
+            height="127"
+          />
+        </div>
+        <div class="gate-crop gate-crop-two" data-gate-anim="two">
+          <img
+            src="/logo-light.png"
+            alt=""
+            width="480"
+            height="127"
+          />
+        </div>
+        <div class="gate-crop gate-crop-mcp" data-gate-anim="mcp">
+          <img
+            src="/logo-light.png"
+            alt=""
+            width="480"
+            height="127"
+          />
+        </div>
       </div>
-      <div class="gate-crop gate-crop-two" data-gate-anim="two">
-        <img
-          src="/logo-light.png"
-          alt=""
-          width="480"
-          height="127"
-        />
-      </div>
-      <div class="gate-crop gate-crop-mcp" data-gate-anim="mcp">
-        <img
-          src="/logo-light.png"
-          alt=""
-          width="480"
-          height="127"
-        />
-      </div>
+
+      <nav class="gate-cta" data-gate-anim="cta" data-gate-cta>
+        <a class="gate-cta-signup" href={spaUrl("/signup")}>{signup}</a>
+        <a class="gate-cta-login" href={spaUrl("/login")}>{login}</a>
+      </nav>
     </div>
   </section>
 </div>
@@ -139,6 +156,12 @@ const tools = [
       { offset: 0.55, opacity: 1, transform: "translateX(4%) scale(1)" },
       { offset: 1, opacity: 1, transform: "translateX(0) scale(1)" },
     ],
+    cta: [
+      { offset: 0, opacity: 0, transform: "translateY(0.75rem)" },
+      { offset: 0.72, opacity: 0, transform: "translateY(0.75rem)" },
+      { offset: 0.88, opacity: 1, transform: "translateY(0)" },
+      { offset: 1, opacity: 1, transform: "translateY(0)" },
+    ],
   };
 
   function setup(pin: HTMLElement) {
@@ -154,6 +177,7 @@ const tools = [
       ...pin.querySelectorAll<HTMLElement>("[data-gate-anim]"),
     ];
     const lists = pin.querySelectorAll<HTMLElement>("[data-gate-list]");
+    const cta = pin.querySelector<HTMLElement>("[data-gate-cta]");
 
     const animations = pieces.flatMap((el) => {
       const name = el.dataset.gateAnim;
@@ -187,6 +211,7 @@ const tools = [
       for (const list of lists) {
         list.setAttribute("aria-hidden", hidden ? "true" : "false");
       }
+      cta?.toggleAttribute("inert", progress < 0.78);
     };
 
     const onScroll = () => {
