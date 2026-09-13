@@ -62,7 +62,6 @@ export function BaseTemplate({
               style={{
                 display: "block",
                 margin: "0 auto",
-                borderRadius: "10px",
               }}
             />
           </Section>

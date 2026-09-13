@@ -76,8 +76,10 @@ const ogLocale = Astro.currentLocale === "es" ? "es_ES" : "en_US";
         }
       })();
     </script>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" type="image/png" href="/favicon.png" sizes="64x64" />
     <link rel="icon" type="image/png" href="/favicon-32.png" sizes="32x32" />
+    <link rel="shortcut icon" href="/favicon.ico" />
     <link
       rel="apple-touch-icon"
       href="/apple-touch-icon.png"
@@ -129,7 +131,7 @@ const ogLocale = Astro.currentLocale === "es" ? "es_ES" : "en_US";
                 src="/logo-light.png"
                 alt={t.header.logoAlt}
                 width="232"
-                height="43"
+                height="61"
                 class="block h-8 w-auto max-w-[9.5rem] object-contain dark:hidden sm:h-12 sm:max-w-none"
               />
               <img
@@ -137,7 +139,7 @@ const ogLocale = Astro.currentLocale === "es" ? "es_ES" : "en_US";
                 alt=""
                 aria-hidden="true"
                 width="232"
-                height="43"
+                height="61"
                 class="hidden h-8 w-auto max-w-[9.5rem] object-contain dark:block sm:h-12 sm:max-w-none"
               />
             </a>

@@ -2,7 +2,7 @@ import { cn } from "@repo/ui";
 import type { ComponentProps } from "react";
 
 const LOGO_WIDTH = 232;
-const LOGO_HEIGHT = 43;
+const LOGO_HEIGHT = 61;
 
 interface BrandLogoProps extends Omit<ComponentProps<"img">, "src" | "alt"> {
   alt: string;
