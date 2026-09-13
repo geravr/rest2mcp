@@ -2,6 +2,7 @@ import { APP_ERROR_CODES } from "@repo/core";
 import { describe, expect, it } from "vitest";
 import { AppError } from "./app-error.js";
 import {
+  assertOwnedStorageAccessUrl,
   buildStorageObjectKey,
   canAccessStorageObject,
   getObject,
@@ -115,5 +116,65 @@ describe("canAccessStorageObject", () => {
     expect(
       canAccessStorageObject("workspaces/org_123/2026/03/file.png", ctx),
     ).toBe(false);
+  });
+});
+
+describe("assertOwnedStorageAccessUrl", () => {
+  const ctx = {
+    user: {
+      id: "usr_123",
+    },
+  };
+
+  it("accepts a storage access URL for the caller scope", () => {
+    expect(() =>
+      assertOwnedStorageAccessUrl(
+        "http://localhost:5173/api/storage/object?key=users%2Fusr_123%2Fserver-icons%2Ficon.png",
+        ctx,
+        "http://localhost:5173",
+      ),
+    ).not.toThrow();
+  });
+
+  it("rejects a storage access URL on a foreign origin", () => {
+    expect(() =>
+      assertOwnedStorageAccessUrl(
+        "https://attacker.example/api/storage/object?key=users%2Fusr_123%2Ficon.png",
+        ctx,
+        "http://localhost:5173",
+      ),
+    ).toThrow(
+      expect.objectContaining({
+        appCode: APP_ERROR_CODES.INVALID_INPUT,
+      }),
+    );
+  });
+
+  it("rejects a storage access URL for another user", () => {
+    expect(() =>
+      assertOwnedStorageAccessUrl(
+        "http://localhost:5173/api/storage/object?key=users%2Fusr_other%2Ficon.png",
+        ctx,
+        "http://localhost:5173",
+      ),
+    ).toThrow(
+      expect.objectContaining({
+        appCode: APP_ERROR_CODES.INVALID_INPUT,
+      }),
+    );
+  });
+
+  it("rejects non-storage URLs", () => {
+    expect(() =>
+      assertOwnedStorageAccessUrl(
+        "https://cdn.example.com/icon.png",
+        ctx,
+        "http://localhost:5173",
+      ),
+    ).toThrow(
+      expect.objectContaining({
+        appCode: APP_ERROR_CODES.INVALID_INPUT,
+      }),
+    );
   });
 });

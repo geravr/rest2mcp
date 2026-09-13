@@ -477,9 +477,15 @@ describe("mcp-studio servers", () => {
       [],
     ]);
 
-    await updateServer(db as never, "user-a", "mcs_1", {
-      baseUrl: "https://api.example.com/v3/",
-    });
+    await updateServer(
+      db as never,
+      "user-a",
+      "mcs_1",
+      {
+        baseUrl: "https://api.example.com/v3/",
+      },
+      "http://localhost:5173",
+    );
 
     expect(db.updatedValues[0]).toMatchObject({
       baseUrl: "https://api.example.com/v3",
@@ -501,9 +507,15 @@ describe("mcp-studio servers", () => {
     ]);
 
     await expect(
-      updateServer(db as never, "user-a", "mcs_1", {
-        defaultHeaders: { Authorization: "Bearer sk_live_123" },
-      }),
+      updateServer(
+        db as never,
+        "user-a",
+        "mcs_1",
+        {
+          defaultHeaders: { Authorization: "Bearer sk_live_123" },
+        },
+        "http://localhost:5173",
+      ),
     ).rejects.toSatisfy(
       (error: unknown) =>
         error instanceof AppError &&
@@ -531,13 +543,119 @@ describe("mcp-studio servers", () => {
       [],
     ]);
 
-    await updateServer(db as never, "user-a", "mcs_1", {
-      defaultHeaders: { Authorization: "Bearer {{api_token}}" },
-    });
+    await updateServer(
+      db as never,
+      "user-a",
+      "mcs_1",
+      {
+        defaultHeaders: { Authorization: "Bearer {{api_token}}" },
+      },
+      "http://localhost:5173",
+    );
 
     expect(db.updatedValues[0]).toMatchObject({
       defaultHeaders: { Authorization: "Bearer {{api_token}}" },
     });
+  });
+
+  it("persists a custom icon image URL scoped to the owner", async () => {
+    const iconImage =
+      "http://localhost:5173/api/storage/object?key=users%2Fuser-a%2Fserver-icons%2Ficon.png";
+
+    const db = makeDb([
+      [
+        {
+          id: "mcs_1",
+          userId: "user-a",
+          name: "CRM",
+          status: "draft",
+          baseUrl: "https://api.example.com",
+          allowedHosts: ["api.example.com"],
+          iconImage: null,
+        },
+      ],
+      [{ id: "mcs_1", iconImage }],
+      [{ count: 0 }],
+      [],
+      [],
+      [],
+    ]);
+
+    await updateServer(
+      db as never,
+      "user-a",
+      "mcs_1",
+      { iconImage },
+      "http://localhost:5173",
+    );
+
+    expect(db.updatedValues[0]).toMatchObject({ iconImage });
+  });
+
+  it("clears a custom icon image", async () => {
+    const db = makeDb([
+      [
+        {
+          id: "mcs_1",
+          userId: "user-a",
+          name: "CRM",
+          status: "draft",
+          baseUrl: "https://api.example.com",
+          allowedHosts: ["api.example.com"],
+          iconImage:
+            "http://localhost:5173/api/storage/object?key=users%2Fuser-a%2Fserver-icons%2Ficon.png",
+        },
+      ],
+      [{ id: "mcs_1", iconImage: null }],
+      [{ count: 0 }],
+      [],
+      [],
+      [],
+    ]);
+
+    await updateServer(
+      db as never,
+      "user-a",
+      "mcs_1",
+      { iconImage: null },
+      "http://localhost:5173",
+    );
+
+    expect(db.updatedValues[0]).toMatchObject({ iconImage: null });
+  });
+
+  it("rejects a foreign storage icon URL", async () => {
+    const db = makeDb([
+      [
+        {
+          id: "mcs_1",
+          userId: "user-a",
+          name: "CRM",
+          status: "draft",
+          baseUrl: "https://api.example.com",
+          allowedHosts: ["api.example.com"],
+          iconImage: null,
+        },
+      ],
+    ]);
+
+    await expect(
+      updateServer(
+        db as never,
+        "user-a",
+        "mcs_1",
+        {
+          iconImage:
+            "http://localhost:5173/api/storage/object?key=users%2Fuser-b%2Fserver-icons%2Ficon.png",
+        },
+        "http://localhost:5173",
+      ),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.appCode === APP_ERROR_CODES.INVALID_INPUT,
+    );
+    expect(db.update).not.toHaveBeenCalled();
   });
 });
 

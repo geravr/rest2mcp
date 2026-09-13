@@ -97,6 +97,7 @@ export const mcpRouter = router({
       serverIdInput.extend({
         name: z.string().trim().min(1).max(120).optional(),
         description: z.string().trim().max(2000).nullable().optional(),
+        iconImage: z.url().nullable().optional(),
         baseUrl: z.url().optional(),
         status: z.enum(["draft", "live", "paused"]).optional(),
         allowedHosts: z.array(z.string().min(1)).optional(),
@@ -105,7 +106,13 @@ export const mcpRouter = router({
       }),
     )
     .mutation(({ ctx, input }) =>
-      updateServer(ctx.dbDirect, ctx.user.id, input.serverId, input),
+      updateServer(
+        ctx.dbDirect,
+        ctx.user.id,
+        input.serverId,
+        input,
+        ctx.env.APP_ORIGIN,
+      ),
     ),
 
   deleteServer: protectedProcedure

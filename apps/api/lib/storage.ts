@@ -154,6 +154,51 @@ export function resolveStorageAccessUrl(env: Env, key: string) {
   return url.toString();
 }
 
+export function assertOwnedStorageAccessUrl(
+  accessUrl: string,
+  ctx: StorageScopeContext,
+  appOrigin: string,
+) {
+  let parsed: URL;
+  let expectedOrigin: string;
+
+  try {
+    parsed = new URL(accessUrl);
+    expectedOrigin = new URL(appOrigin).origin;
+  } catch {
+    throw appError({
+      appCode: APP_ERROR_CODES.INVALID_INPUT,
+      message: "Storage access URL is invalid.",
+      status: 400,
+    });
+  }
+
+  if (parsed.origin !== expectedOrigin) {
+    throw appError({
+      appCode: APP_ERROR_CODES.INVALID_INPUT,
+      message: "Storage access URL is invalid.",
+      status: 400,
+    });
+  }
+
+  if (parsed.pathname !== "/api/storage/object") {
+    throw appError({
+      appCode: APP_ERROR_CODES.INVALID_INPUT,
+      message: "Storage access URL is invalid.",
+      status: 400,
+    });
+  }
+
+  const key = parsed.searchParams.get("key");
+  if (!key || !canAccessStorageObject(key, ctx)) {
+    throw appError({
+      appCode: APP_ERROR_CODES.INVALID_INPUT,
+      message: "Storage access URL is not allowed for this user.",
+      status: 403,
+    });
+  }
+}
+
 export function canAccessStorageObject(key: string, ctx: StorageScopeContext) {
   const segments = key.split("/");
 

@@ -20,6 +20,7 @@ import { encryptCredential } from "../lib/mcp-crypto.js";
 import { isAuthHeaderName, parseCurlCommand } from "../lib/mcp-curl.js";
 import { MCP_MAX_TOOLS_PER_SERVER } from "../lib/mcp-redact.js";
 import { assertUpstreamUrlSafe } from "../lib/mcp-ssrf.js";
+import { assertOwnedStorageAccessUrl } from "../lib/storage.js";
 import {
   extractPlaceholders,
   renderTemplate,
@@ -51,6 +52,7 @@ export type CreateServerInput = {
 export type UpdateServerInput = {
   name?: string;
   description?: string | null;
+  iconImage?: string | null;
   baseUrl?: string;
   status?: McpServerStatus;
   allowedHosts?: string[];
@@ -456,6 +458,7 @@ export async function updateServer(
   userId: string,
   serverId: string,
   input: UpdateServerInput,
+  appOrigin: string,
 ) {
   const server = await requireOwnedServer(db, userId, serverId);
   const nextBaseUrl = input.baseUrl
@@ -471,6 +474,22 @@ export async function updateServer(
     assertNoPlaintextSecretHeaders(input.defaultHeaders);
   }
 
+  let nextIconImage = server.iconImage ?? null;
+  if (input.iconImage !== undefined) {
+    if (input.iconImage === null) {
+      nextIconImage = null;
+    } else {
+      assertOwnedStorageAccessUrl(
+        input.iconImage,
+        {
+          user: { id: userId },
+        },
+        appOrigin,
+      );
+      nextIconImage = input.iconImage;
+    }
+  }
+
   const [updated] = await db
     .update(mcpServer)
     .set({
@@ -479,6 +498,7 @@ export async function updateServer(
         input.description === undefined
           ? server.description
           : input.description?.trim() || null,
+      iconImage: nextIconImage,
       baseUrl: nextBaseUrl,
       allowedHosts,
       status: input.status ?? server.status,
