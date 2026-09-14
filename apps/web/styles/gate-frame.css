@@ -36,6 +36,7 @@
   max-height: 72svh;
   object-fit: contain;
   pointer-events: none;
+  transform-origin: center center;
 }
 
 .gate-endpoints {
@@ -177,6 +178,7 @@
   overflow: hidden;
   height: 100%;
   flex: none;
+  transform-origin: center center;
 }
 
 .gate-crop img {
@@ -187,15 +189,16 @@
 }
 
 .gate-crop-rest {
-  width: calc(var(--lockup-w) * 194 / 480);
+  width: calc(var(--lockup-w) * 193 / 480);
 }
 
 .gate-crop-two {
-  width: calc(var(--lockup-w) * 110 / 480);
+  /* 106/480 = glyph (101px) + rest→2 letterspace (5px) after the 2 */
+  width: calc(var(--lockup-w) * 106 / 480);
 }
 
 .gate-crop-two img {
-  transform: translateX(calc(var(--lockup-w) * -194 / 480));
+  transform: translateX(calc(var(--lockup-w) * -193 / 480));
 }
 
 .gate-crop-mcp {

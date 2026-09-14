@@ -71,8 +71,8 @@ const tools = [
         data-gate-anim="symbol"
         src="/icon-dark.png"
         alt=""
-        width="192"
-        height="192"
+        width="256"
+        height="256"
       />
 
       <ul class="gate-tools" data-gate-list data-gate-anim="list-right">
@@ -121,50 +121,108 @@ const tools = [
 <script>
   const EASE = "cubic-bezier(0.77, 0, 0.175, 1)";
 
-  const KEYFRAMES: Record<string, Keyframe[]> = {
-    "list-left": [
-      { offset: 0, opacity: 1, transform: "translateX(0) scale(1)" },
-      { offset: 0.4, opacity: 0.35, transform: "translateX(12%) scale(0.97)" },
-      { offset: 0.55, opacity: 0, transform: "translateX(20%) scale(0.95)" },
-      { offset: 1, opacity: 0, transform: "translateX(20%) scale(0.95)" },
-    ],
-    "list-right": [
-      { offset: 0, opacity: 1, transform: "translateX(0) scale(1)" },
-      { offset: 0.4, opacity: 0.35, transform: "translateX(-12%) scale(0.97)" },
-      { offset: 0.55, opacity: 0, transform: "translateX(-20%) scale(0.95)" },
-      { offset: 1, opacity: 0, transform: "translateX(-20%) scale(0.95)" },
-    ],
-    symbol: [
-      { offset: 0, opacity: 1, transform: "scale(1)" },
-      { offset: 0.45, opacity: 1, transform: "scale(0.62)" },
-      { offset: 0.7, opacity: 0, transform: "scale(0.42)" },
-      { offset: 1, opacity: 0, transform: "scale(0.42)" },
-    ],
-    rest: [
-      { offset: 0, opacity: 0, transform: "translateX(-18%) scale(0.96)" },
-      { offset: 0.28, opacity: 0, transform: "translateX(-14%) scale(0.96)" },
-      { offset: 0.55, opacity: 1, transform: "translateX(-4%) scale(1)" },
-      { offset: 1, opacity: 1, transform: "translateX(0) scale(1)" },
-    ],
-    two: [
-      { offset: 0, opacity: 0, transform: "scale(1.12)" },
-      { offset: 0.38, opacity: 0, transform: "scale(1.08)" },
-      { offset: 0.68, opacity: 1, transform: "scale(1)" },
-      { offset: 1, opacity: 1, transform: "scale(1)" },
-    ],
-    mcp: [
-      { offset: 0, opacity: 0, transform: "translateX(18%) scale(0.96)" },
-      { offset: 0.28, opacity: 0, transform: "translateX(14%) scale(0.96)" },
-      { offset: 0.55, opacity: 1, transform: "translateX(4%) scale(1)" },
-      { offset: 1, opacity: 1, transform: "translateX(0) scale(1)" },
-    ],
-    cta: [
-      { offset: 0, opacity: 0, transform: "translateY(0.75rem)" },
-      { offset: 0.72, opacity: 0, transform: "translateY(0.75rem)" },
-      { offset: 0.88, opacity: 1, transform: "translateY(0)" },
-      { offset: 1, opacity: 1, transform: "translateY(0)" },
-    ],
-  };
+  // Orange "2" width within the 256px transparent symbol canvas.
+  const SYMBOL_GLYPH_RATIO = 239 / 256;
+
+  interface GateHandoff {
+    dx: number;
+    scale: number;
+  }
+
+  function buildKeyframes(handoff: GateHandoff): Record<string, Keyframe[]> {
+    const { dx, scale } = handoff;
+    const px = (value: number) => `${value.toFixed(2)}px`;
+    const sc = (value: number) => value.toFixed(4);
+    const handoffScale = Math.min(Math.max(scale, 0.2), 1);
+
+    return {
+      "list-left": [
+        { offset: 0, opacity: 1, transform: "translateX(0) scale(1)" },
+        { offset: 0.4, opacity: 0.35, transform: "translateX(12%) scale(0.97)" },
+        { offset: 0.55, opacity: 0, transform: "translateX(20%) scale(0.95)" },
+        { offset: 1, opacity: 0, transform: "translateX(20%) scale(0.95)" },
+      ],
+      "list-right": [
+        { offset: 0, opacity: 1, transform: "translateX(0) scale(1)" },
+        { offset: 0.4, opacity: 0.35, transform: "translateX(-12%) scale(0.97)" },
+        { offset: 0.55, opacity: 0, transform: "translateX(-20%) scale(0.95)" },
+        { offset: 1, opacity: 0, transform: "translateX(-20%) scale(0.95)" },
+      ],
+      symbol: [
+        { offset: 0, opacity: 1, transform: "translateX(0px) scale(1)" },
+        {
+          offset: 0.42,
+          opacity: 1,
+          transform: `translateX(${px(dx * 0.94)}) scale(${sc(handoffScale)})`,
+        },
+        {
+          offset: 0.5,
+          opacity: 0,
+          transform: `translateX(${px(dx)}) scale(${sc(handoffScale)})`,
+        },
+        {
+          offset: 1,
+          opacity: 0,
+          transform: `translateX(${px(dx)}) scale(${sc(handoffScale)})`,
+        },
+      ],
+      rest: [
+        { offset: 0, opacity: 0, transform: "translateX(-18%) scale(0.96)" },
+        { offset: 0.3, opacity: 0, transform: "translateX(-14%) scale(0.96)" },
+        { offset: 0.58, opacity: 1, transform: "translateX(-4%) scale(1)" },
+        { offset: 1, opacity: 1, transform: "translateX(0) scale(1)" },
+      ],
+      two: [
+        {
+          offset: 0,
+          opacity: 0,
+          transform: `scale(${sc(handoffScale)})`,
+        },
+        {
+          offset: 0.48,
+          opacity: 0,
+          transform: `scale(${sc(handoffScale)})`,
+        },
+        { offset: 0.52, opacity: 1, transform: `scale(${sc(handoffScale)})` },
+        { offset: 0.64, opacity: 1, transform: "scale(1)" },
+        { offset: 1, opacity: 1, transform: "scale(1)" },
+      ],
+      mcp: [
+        { offset: 0, opacity: 0, transform: "translateX(18%) scale(0.96)" },
+        { offset: 0.3, opacity: 0, transform: "translateX(14%) scale(0.96)" },
+        { offset: 0.58, opacity: 1, transform: "translateX(4%) scale(1)" },
+        { offset: 1, opacity: 1, transform: "translateX(0) scale(1)" },
+      ],
+      cta: [
+        { offset: 0, opacity: 0, transform: "translateY(0.75rem)" },
+        { offset: 0.72, opacity: 0, transform: "translateY(0.75rem)" },
+        { offset: 0.88, opacity: 1, transform: "translateY(0)" },
+        { offset: 1, opacity: 1, transform: "translateY(0)" },
+      ],
+    };
+  }
+
+  function measureHandoff(pin: HTMLElement): GateHandoff {
+    const symbol = pin.querySelector<HTMLElement>(".gate-symbol");
+    const two = pin.querySelector<HTMLElement>(".gate-crop-two");
+    if (!symbol || !two) {
+      return { dx: 0, scale: 0.62 };
+    }
+
+    const symBox = symbol.getBoundingClientRect();
+    const twoBox = two.getBoundingClientRect();
+
+    const symbolGlyphWidth = symBox.width * SYMBOL_GLYPH_RATIO;
+    const scale =
+      symbolGlyphWidth > 0 ? twoBox.width / symbolGlyphWidth : 0.62;
+
+    const dx =
+      twoBox.left +
+      twoBox.width / 2 -
+      (symBox.left + symBox.width / 2);
+
+    return { dx, scale };
+  }
 
   function setup(pin: HTMLElement) {
     const reduce = window.matchMedia(
@@ -180,22 +238,33 @@ const tools = [
     const lists = pin.querySelectorAll<HTMLElement>("[data-gate-list]");
     const cta = pin.querySelector<HTMLElement>("[data-gate-cta]");
 
-    const animations = pieces.flatMap((el) => {
-      const name = el.dataset.gateAnim;
-      const frames = name ? KEYFRAMES[name] : undefined;
-      if (!frames) {
-        return [];
-      }
-      const animation = el.animate(frames, {
-        duration: 1000,
-        fill: "both",
-        easing: EASE,
-      });
-      animation.pause();
-      return [animation];
-    });
-
+    let animations: Animation[] = [];
     let ticking = false;
+    let resizeFrame = 0;
+
+    const createAnimations = () => {
+      for (const animation of animations) {
+        animation.cancel();
+      }
+
+      const handoff = measureHandoff(pin);
+      const keyframes = buildKeyframes(handoff);
+
+      animations = pieces.flatMap((el) => {
+        const name = el.dataset.gateAnim;
+        const frames = name ? keyframes[name] : undefined;
+        if (!frames) {
+          return [];
+        }
+        const animation = el.animate(frames, {
+          duration: 1000,
+          fill: "both",
+          easing: EASE,
+        });
+        animation.pause();
+        return [animation];
+      });
+    };
 
     const update = () => {
       ticking = false;
@@ -223,9 +292,31 @@ const tools = [
       window.requestAnimationFrame(update);
     };
 
+    const onResize = () => {
+      cancelAnimationFrame(resizeFrame);
+      resizeFrame = window.requestAnimationFrame(() => {
+        const progress =
+          pin.offsetHeight <= window.innerHeight
+            ? 0
+            : Math.min(
+                1,
+                Math.max(
+                  0,
+                  -pin.getBoundingClientRect().top /
+                    (pin.offsetHeight - window.innerHeight),
+                ),
+              );
+        createAnimations();
+        for (const animation of animations) {
+          animation.currentTime = progress * 1000;
+        }
+      });
+    };
+
+    createAnimations();
     update();
     window.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("resize", onScroll);
+    window.addEventListener("resize", onResize);
   }
 
   const pin = document.querySelector<HTMLElement>("[data-gate-pin]");
