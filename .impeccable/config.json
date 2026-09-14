@@ -4,7 +4,7 @@
     "apps/web",
     "apps/email"
   ],
-  "buildPath": "comp",
+  "buildPath": "code",
   "detector": {
     "ignoreRules": [],
     "ignoreFiles": [],
