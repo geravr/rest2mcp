@@ -181,6 +181,45 @@
   transform-origin: center center;
 }
 
+/* Match scroll keyframe 0 before JS initializes WAAPI (prevents logo FOUC). */
+@media (prefers-reduced-motion: no-preference) {
+  .gate-pin:not([data-gate-ready]) [data-gate-anim="rest"],
+  .gate-pin:not([data-gate-ready]) [data-gate-anim="two"],
+  .gate-pin:not([data-gate-ready]) [data-gate-anim="mcp"] {
+    opacity: 0;
+  }
+
+  .gate-pin:not([data-gate-ready]) [data-gate-anim="cta"] {
+    opacity: 0;
+    transform: translateY(0.75rem);
+  }
+
+  .gate-pin[data-gate-primed="scrolled"]:not([data-gate-ready])
+    [data-gate-anim="rest"],
+  .gate-pin[data-gate-primed="scrolled"]:not([data-gate-ready])
+    [data-gate-anim="two"],
+  .gate-pin[data-gate-primed="scrolled"]:not([data-gate-ready])
+    [data-gate-anim="mcp"] {
+    opacity: 1;
+    transform: none;
+  }
+
+  .gate-pin[data-gate-primed="scrolled"]:not([data-gate-ready])
+    [data-gate-anim="cta"] {
+    opacity: 1;
+    transform: none;
+  }
+
+  .gate-pin[data-gate-primed="scrolled"]:not([data-gate-ready])
+    [data-gate-anim="symbol"],
+  .gate-pin[data-gate-primed="scrolled"]:not([data-gate-ready])
+    [data-gate-anim="list-left"],
+  .gate-pin[data-gate-primed="scrolled"]:not([data-gate-ready])
+    [data-gate-anim="list-right"] {
+    opacity: 0;
+  }
+}
+
 .gate-crop img {
   display: block;
   width: var(--lockup-w);

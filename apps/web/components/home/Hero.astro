@@ -118,6 +118,28 @@ const tools = [
   </section>
 </div>
 
+<script is:inline>
+  (function () {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      return;
+    }
+
+    const pin = document.querySelector("[data-gate-pin]");
+    if (!pin) {
+      return;
+    }
+
+    const max = pin.offsetHeight - window.innerHeight;
+    const top = pin.getBoundingClientRect().top;
+    const progress =
+      max <= 0 ? 0 : Math.min(1, Math.max(0, -top / max));
+
+    if (progress > 0.55) {
+      pin.setAttribute("data-gate-primed", "scrolled");
+    }
+  })();
+</script>
+
 <script>
   const EASE = "cubic-bezier(0.77, 0, 0.175, 1)";
 
@@ -242,6 +264,12 @@ const tools = [
     let ticking = false;
     let resizeFrame = 0;
 
+    const readProgress = () => {
+      const max = pin.offsetHeight - window.innerHeight;
+      const top = pin.getBoundingClientRect().top;
+      return max <= 0 ? 0 : Math.min(1, Math.max(0, -top / max));
+    };
+
     const createAnimations = () => {
       for (const animation of animations) {
         animation.cancel();
@@ -249,6 +277,7 @@ const tools = [
 
       const handoff = measureHandoff(pin);
       const keyframes = buildKeyframes(handoff);
+      const progress = readProgress();
 
       animations = pieces.flatMap((el) => {
         const name = el.dataset.gateAnim;
@@ -262,16 +291,14 @@ const tools = [
           easing: EASE,
         });
         animation.pause();
+        animation.currentTime = progress * 1000;
         return [animation];
       });
     };
 
     const update = () => {
       ticking = false;
-      const max = pin.offsetHeight - window.innerHeight;
-      const top = pin.getBoundingClientRect().top;
-      const progress =
-        max <= 0 ? 0 : Math.min(1, Math.max(0, -top / max));
+      const progress = readProgress();
 
       for (const animation of animations) {
         animation.currentTime = progress * 1000;
@@ -295,26 +322,14 @@ const tools = [
     const onResize = () => {
       cancelAnimationFrame(resizeFrame);
       resizeFrame = window.requestAnimationFrame(() => {
-        const progress =
-          pin.offsetHeight <= window.innerHeight
-            ? 0
-            : Math.min(
-                1,
-                Math.max(
-                  0,
-                  -pin.getBoundingClientRect().top /
-                    (pin.offsetHeight - window.innerHeight),
-                ),
-              );
         createAnimations();
-        for (const animation of animations) {
-          animation.currentTime = progress * 1000;
-        }
+        update();
       });
     };
 
     createAnimations();
     update();
+    pin.dataset.gateReady = "true";
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", onResize);
   }
