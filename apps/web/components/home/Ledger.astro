@@ -12,44 +12,87 @@ const { ui, signup, login } = Astro.props;
 ---
 
 <section class="ledger" aria-label={ui.features.title}>
-  <p class="ledger-contrast">{ui.problem.contrast}</p>
-
-  <div class="ledger-steps">
-    <ol class="ledger-loop">
-      {
-        ui.howItWorks.steps.map((step, index) => (
-          <li>
-            <span class="ledger-step-index">{index + 1}</span>
-            <span class="ledger-step-title">{step.title}</span>
-            <code class="ledger-step-artifact">{step.artifact}</code>
-          </li>
-        ))
-      }
-    </ol>
-    <p class="ledger-doors">
-      <span class="ledger-doors-join">{ui.workflows.join}</span>
-      <span>{ui.workflows.subtitle} {ui.workflows.sync}</span>
-    </p>
+  <div class="ledger-cut">
+    <aside>
+      <p class="ledger-cut-label">{ui.problem.leftoverLabel}</p>
+      <ul>
+        {ui.problem.bullets.map((bullet) => <li>{bullet.title}</li>)}
+      </ul>
+    </aside>
+    <aside class="ledger-cut-pass">
+      <p class="ledger-cut-label">{ui.problem.passedLabel}</p>
+      <p class="ledger-contrast">{ui.problem.contrast}</p>
+    </aside>
   </div>
 
-  <div class="ledger-cols">
-    <section class="ledger-col" id="features" aria-label={ui.features.title}>
-      <h3 class="ledger-label">{ui.features.title}</h3>
-      <ul>
+  <ol class="ledger-rail" aria-label={ui.howItWorks.subtitle}>
+    {
+      ui.howItWorks.steps.map((step, index) => (
+        <li>
+          <span class="ledger-rail-index">
+            {String(index + 1).padStart(2, "0")}
+          </span>
+          <span class="ledger-rail-title">{step.title}</span>
+          <code class={step.artifact.includes("/mcp/") ? "ledger-rail-url" : undefined}>
+            {step.artifact}
+          </code>
+        </li>
+      ))
+    }
+  </ol>
+
+  <div class="ledger-doors">
+    <article class="session-window" aria-labelledby="ledger-door-gui">
+      <div class="session-window-head">
+        <div class="session-window-who">
+          <span class="session-avatar">GUI</span>
+          <h3 id="ledger-door-gui">{ui.workflows.gui.title}</h3>
+        </div>
+      </div>
+      <ul class="ledger-door-list">
+        {ui.workflows.gui.bullets.map((bullet) => <li>{bullet}</li>)}
+      </ul>
+    </article>
+    <p class="ledger-sync">{ui.workflows.sync}</p>
+    <article class="session-window" aria-labelledby="ledger-door-mcp">
+      <div class="session-window-head">
+        <div class="session-window-who">
+          <span class="session-avatar session-avatar-work">MCP</span>
+          <h3 id="ledger-door-mcp">{ui.workflows.platformMcp.title}</h3>
+        </div>
+      </div>
+      <ul class="ledger-door-list">
+        {ui.workflows.platformMcp.bullets.map((bullet) => <li>{bullet}</li>)}
+      </ul>
+    </article>
+  </div>
+
+  <div class="session-window ledger-board">
+    <section class="ledger-band" id="features" aria-labelledby="ledger-features">
+      <h3 id="ledger-features">
+        <span class="ledger-live" aria-hidden="true">
+          <span class="session-live-dot"></span>
+        </span>
+        {ui.features.title}
+      </h3>
+      <p class="ledger-band-sub">{ui.features.subtitle}</p>
+      <ul class="ledger-pills">
         {ui.features.items.map((item) => <li>{item.title}</li>)}
       </ul>
     </section>
 
-    <section class="ledger-col" id="security" aria-label={ui.security.title}>
-      <h3 class="ledger-label">{ui.security.title}</h3>
-      <ul>
+    <section class="ledger-band" id="security" aria-labelledby="ledger-security">
+      <h3 id="ledger-security">{ui.security.title}</h3>
+      <p class="ledger-band-sub">{ui.security.subtitle}</p>
+      <ul class="ledger-pills ledger-pills-closed">
         {ui.security.bullets.map((bullet) => <li>{bullet.title}</li>)}
       </ul>
     </section>
 
-    <section class="ledger-col" id="roadmap" aria-label={ui.roadmap.title}>
-      <h3 class="ledger-label">{ui.roadmap.title}</h3>
-      <ul>
+    <section class="ledger-band" id="roadmap" aria-labelledby="ledger-roadmap">
+      <h3 id="ledger-roadmap">{ui.roadmap.title}</h3>
+      <p class="ledger-band-sub">{ui.roadmap.subtitle}</p>
+      <ul class="ledger-pills ledger-pills-wait">
         {
           ui.roadmap.items.map((item) => (
             <li>
@@ -64,23 +107,24 @@ const { ui, signup, login } = Astro.props;
         }
       </ul>
     </section>
-
-    <section class="ledger-col" aria-label={ui.audience.title}>
-      <h3 class="ledger-label">{ui.audience.title}</h3>
-      <ul>
-        {
-          ui.audience.personas.map((persona) => (
-            <li>
-              <strong>{persona.title}.</strong> {persona.desc}
-            </li>
-          ))
-        }
-      </ul>
-    </section>
   </div>
 
+  <section class="ledger-who" aria-labelledby="ledger-audience">
+    <h3 id="ledger-audience">{ui.audience.title}</h3>
+    <ul>
+      {
+        ui.audience.personas.map((persona) => (
+          <li>
+            <strong>{persona.title}</strong>
+            <span>{persona.desc}</span>
+          </li>
+        ))
+      }
+    </ul>
+  </section>
+
   <div class="ledger-faq" id="faq">
-    <h3 class="ledger-label">{ui.faq.title}</h3>
+    <h3>{ui.faq.title}</h3>
     {
       ui.faq.items.map((item) => (
         <details>
@@ -96,7 +140,7 @@ const { ui, signup, login } = Astro.props;
     }
   </div>
 
-  <nav class="ledger-cta" aria-label={ui.finalCta.title}>
+  <nav class="session-window ledger-cta" aria-label={ui.finalCta.title}>
     <p class="ledger-cta-title">{ui.finalCta.title}</p>
     <p class="ledger-cta-sub">{ui.finalCta.subtitle}</p>
     <div class="ledger-cta-row">

@@ -27,12 +27,12 @@ The marketing home page (`/` and `/es/`) SHALL present rest2mcp as a **hosted RE
 
 ### Requirement: Home page section structure
 
-The home page SHALL compose a scroll-driven Hero, then a Session section that demonstrates the product in three acts (an agent authors a tool in conversation, a config slip hands the connection to a second agent, and a specialist agent puts the tool to work), then a compressed Ledger that absorbs Problem positioning, the How It Works steps, Shipped Features, the two Workflows doors, Security, Roadmap, Audience, FAQ, and Final CTA so every required fact remains findable. The Session SHALL include an interactive picker of orphan endpoints that re-casts the demonstration. The home page SHALL NOT include the former TechStack or Architecture (repository layout) sections.
+The home page SHALL compose a scroll-driven Hero, then a short definition of rest2mcp as a hosted REST-to-MCP service, then a Session section that demonstrates the product in three acts (an agent authors a tool in conversation, a config slip hands the connection to a second agent, and a specialist agent puts the tool to work), then a compressed Ledger that absorbs Problem positioning, the How It Works steps, Shipped Features, the two Workflows doors, Security, Roadmap, Audience, FAQ, and Final CTA so every required fact remains findable. The Session SHALL include an interactive picker of orphan endpoints that re-casts the demonstration. The home page SHALL NOT include the former TechStack or Architecture (repository layout) sections.
 
 #### Scenario: Section order on English home
 
 - **WHEN** the English home page is rendered
-- **THEN** the Session (endpoint picker, BUILD and WORK windows, handshake slip) appears after Hero, the Ledger follows it, and Sign up / Log in remain available after FAQ
+- **THEN** a short definition of the service appears after Hero, the Session (endpoint picker, BUILD and WORK windows, handshake slip) follows it, the Ledger follows the Session, and Sign up / Log in remain available after FAQ
 
 #### Scenario: Session demonstrates real product capabilities
 

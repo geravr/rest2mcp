@@ -1,0 +1,14 @@
+---
+import type { UI } from "../../i18n";
+
+interface Props {
+  ui: UI;
+}
+
+const { ui } = Astro.props;
+---
+
+<section class="define" aria-labelledby="define-title">
+  <h2 id="define-title" class="define-title">{ui.define.title}</h2>
+  <p class="define-body">{ui.define.body}</p>
+</section>

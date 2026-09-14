@@ -57,7 +57,7 @@ export const es = {
     passedLabel: "Pasa",
     closedLabel: "Sigue cerrado",
     contrast:
-      "rest2mcp empieza con intención: menos herramientas, nombres que un agente puede usar, esquemas hechos para el trabajo.",
+      "Menos herramientas. Nombres que un agente entiende. Esquemas para el trabajo.",
   },
   howItWorks: {
     title: "El mismo día",
@@ -89,15 +89,28 @@ export const es = {
       },
     ],
   },
+  define: {
+    title: "rest2mcp es un servicio REST a MCP alojado.",
+    body: "Eliges unos pocos endpoints REST. Los convertimos en herramientas con nombre, hospedamos el MCP y te damos una URL para pegar en tu agente.",
+  },
   session: {
     title: "Un agente lo construye. Otro lo pone a trabajar.",
     pickerLabel: "Elige un endpoint huérfano",
-    buildHeader: "BUILD · tu agente → rest2mcp",
+    buildHeader: "tu agente → rest2mcp",
     workLabel: "WORK",
     liveLabel: "live",
-    guardNote: "protección de mutaciones — permite {method} en esta herramienta",
+    thinkingLabel: "Pensando",
+    toolLabel: "Ejecutó",
+    composerHint: "Escribe a rest2mcp",
+    composerWorkHint: "Escribe al especialista",
+    cardTitle: "Fragmento de conexión",
+    cardTransport: "Streamable HTTP",
+    cardAuthLabel: "Authorization",
+    guardNote:
+      "protección de mutaciones — permite {method} en esta herramienta",
     playgroundLabel: "playground",
-    handshakeCaption: "el handshake — pégalo una vez",
+    handshakeCaption:
+      "Pégalo una vez en Cursor, Claude Desktop o cualquier cliente Streamable HTTP.",
     origin: "https://api.example.com",
     serverUrl: "/mcp/srv_9f2c",
     cast: [
@@ -107,10 +120,21 @@ export const es = {
         tool: "list_webhooks",
         schema: "{ }",
         specialist: "especialista en operaciones",
-        task: "Lista nuestros webhooks y marca los que fallen.",
+        buildUser:
+          "No importes todo el recurso de webhooks. Solo necesito una herramienta que los liste y me diga cuáles fallan.",
+        buildThink:
+          "Una sola herramienta de lectura. Voy a mapear GET /v1/webhooks a list_webhooks con esquema vacío y correrla en el playground.",
+        buildTool: "create_tool",
+        buildToolDetail: "GET /v1/webhooks → list_webhooks { }",
+        buildPlay: "list_webhooks() · healthy",
+        buildReply:
+          "list_webhooks está en el servidor. La conexión va abajo — pégala una vez.",
+        workUser: "Lista nuestros webhooks y marca los que fallen.",
+        workThink:
+          "list_webhooks no pide argumentos. La llamo y leo failing del payload.",
         args: "{ }",
-        result: "200 · { \"webhooks\": 3, \"failing\": 0 }",
-        done: "Listo — 3 webhooks, todos healthy.",
+        result: '200 · { "webhooks": 3, "failing": 0 }',
+        workReply: "Tres webhooks, todos healthy. Ninguno falla.",
       },
       {
         method: "POST",
@@ -118,10 +142,21 @@ export const es = {
         tool: "replay_event",
         schema: "{ id: string }",
         specialist: "especialista en operaciones",
-        task: "Repite el evento evt_117 — el webhook nunca llegó.",
-        args: "{ \"id\": \"evt_117\" }",
-        result: "200 · { \"status\": \"replayed\", \"delivered\": true }",
-        done: "Listo — evt_117 repetido y entregado.",
+        buildUser:
+          "Se nos escapan entregas. Mapea POST /v1/events/{id}/replay a una sola herramienta. Deja las mutaciones bloqueadas hasta que yo las permita, y luego pruébala.",
+        buildThink:
+          "Es una mutación. Creo replay_event con id: string, dejo la protección puesta y lanzo el playground.",
+        buildTool: "create_tool",
+        buildToolDetail:
+          "POST /v1/events/{id}/replay → replay_event { id: string }",
+        buildPlay: 'replay_event({ "id": "evt_117" }) · healthy',
+        buildReply:
+          "replay_event está en el servidor. POST sigue bloqueado hasta que lo permitas. La conexión va abajo — pégala una vez.",
+        workUser: "Repite el evento evt_117 — el webhook nunca llegó.",
+        workThink: "replay_event pide un id. Lo llamo con evt_117.",
+        args: '{ "id": "evt_117" }',
+        result: '200 · { "status": "replayed", "delivered": true }',
+        workReply: "evt_117 se repitió y se entregó.",
       },
       {
         method: "DELETE",
@@ -129,10 +164,20 @@ export const es = {
         tool: "revoke_key",
         schema: "{ id: string }",
         specialist: "especialista en seguridad",
-        task: "Revoca la clave key_32 — se filtró en una captura.",
-        args: "{ \"id\": \"key_32\" }",
-        result: "200 · { \"status\": \"revoked\" }",
-        done: "Listo — key_32 revocada.",
+        buildUser:
+          "Necesito una herramienta justa para revocar una API key filtrada. Solo DELETE /v1/keys/{id} — no expongas el resto de keys. Protege la mutación.",
+        buildThink:
+          "Una herramienta destructiva. Mapeo revoke_key, dejo DELETE bloqueado hasta que opten, y la pruebo en el playground.",
+        buildTool: "create_tool",
+        buildToolDetail: "DELETE /v1/keys/{id} → revoke_key { id: string }",
+        buildPlay: 'revoke_key({ "id": "key_32" }) · healthy',
+        buildReply:
+          "revoke_key está en el servidor. DELETE sigue bloqueado hasta que lo permitas. La conexión va abajo — pégala una vez.",
+        workUser: "Revoca la clave key_32 — se filtró en una captura.",
+        workThink: "revoke_key pide un id. Lo llamo con key_32.",
+        args: '{ "id": "key_32" }',
+        result: '200 · { "status": "revoked" }',
+        workReply: "key_32 está revocada.",
       },
       {
         method: "GET",
@@ -140,10 +185,21 @@ export const es = {
         tool: "get_user_settings",
         schema: "{ id: string }",
         specialist: "especialista en soporte",
-        task: "Trae la configuración de usr_209.",
-        args: "{ \"id\": \"usr_209\" }",
-        result: "200 · { \"locale\": \"es\", \"theme\": \"light\" }",
-        done: "Listo — configuración de usr_209 obtenida.",
+        buildUser:
+          "Soporte pide todo el tiempo la configuración de un usuario. Dame GET /v1/users/{id}/settings como una herramienta nombrada como la pediría un agente.",
+        buildThink:
+          "Una lectura con un path param. Mapeo get_user_settings { id: string } y corro el playground.",
+        buildTool: "create_tool",
+        buildToolDetail:
+          "GET /v1/users/{id}/settings → get_user_settings { id: string }",
+        buildPlay: 'get_user_settings({ "id": "usr_209" }) · healthy',
+        buildReply:
+          "get_user_settings está en el servidor. La conexión va abajo — pégala una vez.",
+        workUser: "Trae la configuración de usr_209.",
+        workThink: "get_user_settings pide un id. Lo llamo con usr_209.",
+        args: '{ "id": "usr_209" }',
+        result: '200 · { "locale": "es", "theme": "light" }',
+        workReply: "usr_209 está en locale es, theme light.",
       },
       {
         method: "POST",
@@ -151,10 +207,22 @@ export const es = {
         tool: "void_invoice",
         schema: "{ id: string }",
         specialist: "especialista en facturación",
-        task: "Anula la factura inv_2041 y confirma la nota de crédito.",
-        args: "{ \"id\": \"inv_2041\" }",
-        result: "200 · { \"status\": \"voided\", \"credit_note\": \"cn_881\" }",
-        done: "Listo — inv_2041 anulada, nota de crédito cn_881 emitida.",
+        buildUser:
+          "Necesitamos anular facturas. No vuelques toda la API de billing — solo POST /v1/invoices/{id}/void. Deja las mutaciones bloqueadas hasta que yo las permita, y luego pruébala.",
+        buildThink:
+          "Una herramienta, no el catálogo de invoices. Mapeo ese POST a void_invoice, dejo la protección puesta y la corro en el playground.",
+        buildTool: "create_tool",
+        buildToolDetail:
+          "POST /v1/invoices/{id}/void → void_invoice { id: string }",
+        buildPlay: 'void_invoice({ "id": "inv_2041" }) · healthy',
+        buildReply:
+          "void_invoice está en el servidor. POST sigue bloqueado hasta que lo permitas. La conexión va abajo — pégala una vez.",
+        workUser: "Anula la factura inv_2041 y confirma la nota de crédito.",
+        workThink: "void_invoice pide un id. Lo llamo con inv_2041.",
+        args: '{ "id": "inv_2041" }',
+        result: '200 · { "status": "voided", "credit_note": "cn_881" }',
+        workReply:
+          "inv_2041 está anulada. Se emitió la nota de crédito cn_881.",
       },
       {
         method: "POST",
@@ -162,16 +230,27 @@ export const es = {
         tool: "cancel_order",
         schema: "{ id: string }",
         specialist: "especialista en soporte",
-        task: "Cancela el pedido ord_552 y notifica al cliente.",
-        args: "{ \"id\": \"ord_552\" }",
-        result: "200 · { \"status\": \"cancelled\", \"notified\": true }",
-        done: "Listo — ord_552 cancelado, cliente notificado.",
+        buildUser:
+          "Soporte necesita cancelar un pedido y avisar al cliente. Mapea POST /v1/orders/{id}/cancel. Protege la mutación. No traigas el resto de orders.",
+        buildThink:
+          "Una sola mutación con id. Creo cancel_order, dejo POST bloqueado y la pruebo.",
+        buildTool: "create_tool",
+        buildToolDetail:
+          "POST /v1/orders/{id}/cancel → cancel_order { id: string }",
+        buildPlay: 'cancel_order({ "id": "ord_552" }) · healthy',
+        buildReply:
+          "cancel_order está en el servidor. POST sigue bloqueado hasta que lo permitas. La conexión va abajo — pégala una vez.",
+        workUser: "Cancela el pedido ord_552 y notifica al cliente.",
+        workThink: "cancel_order pide un id. Lo llamo con ord_552.",
+        args: '{ "id": "ord_552" }',
+        result: '200 · { "status": "cancelled", "notified": true }',
+        workReply: "ord_552 está cancelado y el cliente fue notificado.",
       },
     ],
   },
   features: {
-    title: "Disponible en la consola",
-    subtitle: "Lo que puedes usar hoy — no un roadmap.",
+    title: "Live",
+    subtitle: "En la consola ahora.",
     items: [
       {
         title: "Importación curl con vista previa",
@@ -237,8 +316,8 @@ export const es = {
     },
   },
   security: {
-    title: "Lo que permanece cerrado",
-    subtitle: "La abertura se queda estrecha hasta que la abres.",
+    title: "Cerrado",
+    subtitle: "Hasta que lo abras.",
     bullets: [
       {
         title: "Secretos cifrados",
@@ -264,7 +343,7 @@ export const es = {
   },
   roadmap: {
     title: "Aún no",
-    subtitle: "Lo que sigue — etiquetado, no publicado.",
+    subtitle: "Etiquetado. No publicado.",
     statusLabels: {
       planned: "Planificado",
       exploring: "Explorando",
@@ -304,8 +383,7 @@ export const es = {
   },
   audience: {
     title: "Para quién es",
-    subtitle:
-      "Quienes necesitan un MCP cuidadoso, no un volcado de toda la API.",
+    subtitle: "Un MCP cuidadoso, no un volcado de toda la API.",
     personas: [
       {
         title: "Consultor / implementador",
@@ -331,27 +409,27 @@ export const es = {
     items: [
       {
         q: "¿Necesito una spec OpenAPI?",
-        a: "No. Empieza hoy con importación curl o definiciones manuales de herramientas. La importación OpenAPI está en el roadmap.",
+        a: "No. Empieza con curl o una herramienta a mano. La importación OpenAPI está planificada.",
       },
       {
         q: "¿rest2mcp reemplaza MCPs oficiales?",
-        a: "Normalmente no—los complementa. Usa MCPs oficiales donde existan y rest2mcp para APIs y flujos que no cubren.",
+        a: "No. Usa MCPs oficiales donde existan; rest2mcp cubre los huecos.",
       },
       {
         q: "¿Puedo conectar software local u on-prem?",
-        a: "Hoy el gateway alojado llama a endpoints HTTPS públicos que configures. Un conector on-prem está en el roadmap para APIs detrás de un firewall.",
+        a: "Hoy el gateway llama a endpoints HTTPS públicos. Un conector on-prem está en exploración.",
       },
       {
         q: "¿Cuántas herramientas puede tener un servidor?",
-        a: "Cada servidor admite hasta 50 herramientas—un límite deliberado que mantiene catálogos amigables para agentes.",
+        a: "50. Un tope duro para que los catálogos sigan siendo útiles para agentes.",
       },
       {
         q: "¿Qué clientes MCP son compatibles?",
-        a: "Cualquier cliente que hable Streamable HTTP con autenticación Bearer. Pega tu URL de gateway y token de agente en Cursor, Claude Desktop u hosts compatibles.",
+        a: "Cualquier cliente Streamable HTTP con Bearer — Cursor, Claude Desktop y hosts compatibles.",
       },
       {
         q: "¿Qué pasa cuando pauso un servidor?",
-        a: "Un servidor pausado rechaza la ejecución de herramientas a través del gateway y muestra un semáforo en pausa hasta que lo reanudes. Los agentes pueden seguir conectados, pero las llamadas fallarán hasta que el servidor vuelva a estar activo.",
+        a: "El gateway rechaza las llamadas hasta que lo reanudes. Los agentes pueden seguir conectados.",
       },
     ],
   },

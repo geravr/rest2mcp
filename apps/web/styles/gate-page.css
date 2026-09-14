@@ -1,16 +1,17 @@
 :root {
-  --page-ink: #0b0b0b;
-  --page-paper: #ffffff;
-  --page-soft: color-mix(in srgb, #0b0b0b 62%, #ffffff);
-  --page-rule: color-mix(in srgb, #0b0b0b 14%, #ffffff);
-  --page-chip: #d8d8d8;
-  --page-chip-ink: #3a3a3a;
+  --page-ink: #edeae4;
+  --page-paper: #0b0b0b;
+  --page-soft: color-mix(in srgb, #edeae4 62%, #0b0b0b);
+  --page-rule: color-mix(in srgb, #edeae4 16%, #0b0b0b);
+  --page-chip: #2a2a2a;
+  --page-chip-ink: #c8c4bb;
+  --page-gate: #fd410b;
   --page-mono: "JetBrains Mono", ui-monospace, monospace;
   --page-sans: Inter, ui-sans-serif, system-ui, sans-serif;
 }
 
 ::selection {
-  background: #0b0b0b;
+  background: #fd410b;
   color: #ffffff;
 }
 
@@ -470,22 +471,22 @@
 }
 
 .page-cta-signup {
-  background: #0b0b0b;
+  background: var(--page-gate);
   color: #ffffff;
 }
 
 .page-cta-signup:hover {
-  background: #2a2a2a;
+  background: color-mix(in srgb, var(--page-gate) 86%, #fff);
 }
 
 .page-cta-login {
-  border: 1px solid #0b0b0b;
-  background: #ffffff;
-  color: #0b0b0b;
+  border: 1px solid var(--page-ink);
+  background: transparent;
+  color: var(--page-ink);
 }
 
 .page-cta-login:hover {
-  background: #f4f4f4;
+  background: color-mix(in srgb, var(--page-ink) 8%, var(--page-paper));
 }
 
 .page-footer {
@@ -578,7 +579,7 @@
 }
 
 .page-lang-link:hover {
-  background: #f4f4f4;
+  background: color-mix(in srgb, var(--page-ink) 10%, var(--page-paper));
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -626,4 +627,3 @@
     border-top: 1px solid var(--page-ink);
   }
 }
-

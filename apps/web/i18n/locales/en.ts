@@ -56,8 +56,7 @@ export const en = {
     leftoverLabel: "Does not pass",
     passedLabel: "Passes",
     closedLabel: "Stays closed",
-    contrast:
-      "rest2mcp starts with intention: fewer tools, names an agent can use, schemas built for the job.",
+    contrast: "Fewer tools. Names an agent can use. Schemas built for the job.",
   },
   howItWorks: {
     title: "The same day",
@@ -88,15 +87,27 @@ export const en = {
       },
     ],
   },
+  define: {
+    title: "rest2mcp is a hosted REST-to-MCP service.",
+    body: "You pick a few REST endpoints. We turn them into named tools, host the MCP, and give you a URL to paste into your agent.",
+  },
   session: {
     title: "One agent builds it. Another puts it to work.",
     pickerLabel: "Pick an orphan endpoint",
-    buildHeader: "BUILD · your agent → rest2mcp",
+    buildHeader: "your agent → rest2mcp",
     workLabel: "WORK",
     liveLabel: "live",
+    thinkingLabel: "Thinking",
+    toolLabel: "Ran",
+    composerHint: "Message rest2mcp",
+    composerWorkHint: "Message the specialist",
+    cardTitle: "Connection snippet",
+    cardTransport: "Streamable HTTP",
+    cardAuthLabel: "Authorization",
     guardNote: "mutation guard — allow {method} for this tool",
     playgroundLabel: "playground",
-    handshakeCaption: "the handshake — paste once",
+    handshakeCaption:
+      "Paste once into Cursor, Claude Desktop, or any Streamable HTTP client.",
     origin: "https://api.example.com",
     serverUrl: "/mcp/srv_9f2c",
     cast: [
@@ -106,10 +117,21 @@ export const en = {
         tool: "list_webhooks",
         schema: "{ }",
         specialist: "ops specialist",
-        task: "List our webhooks and flag any that are failing.",
+        buildUser:
+          "Don't import the whole webhooks resource. I just need a tool that lists them and tells me which ones are failing.",
+        buildThink:
+          "One read tool. I'll map GET /v1/webhooks to list_webhooks with an empty schema, then run it in the playground.",
+        buildTool: "create_tool",
+        buildToolDetail: "GET /v1/webhooks → list_webhooks { }",
+        buildPlay: "list_webhooks() · healthy",
+        buildReply:
+          "list_webhooks is on the server. Connection below — paste it once.",
+        workUser: "List our webhooks and flag any that are failing.",
+        workThink:
+          "list_webhooks takes no arguments. I'll call it and read failing from the payload.",
         args: "{ }",
-        result: "200 · { \"webhooks\": 3, \"failing\": 0 }",
-        done: "Done — 3 webhooks, all healthy.",
+        result: '200 · { "webhooks": 3, "failing": 0 }',
+        workReply: "Three webhooks, all healthy. Nothing failing.",
       },
       {
         method: "POST",
@@ -117,10 +139,21 @@ export const en = {
         tool: "replay_event",
         schema: "{ id: string }",
         specialist: "ops specialist",
-        task: "Replay event evt_117 — the webhook never landed.",
-        args: "{ \"id\": \"evt_117\" }",
-        result: "200 · { \"status\": \"replayed\", \"delivered\": true }",
-        done: "Done — evt_117 replayed and delivered.",
+        buildUser:
+          "We keep missing deliveries. Map POST /v1/events/{id}/replay to a single tool. Keep mutations blocked until I allow them, then test it.",
+        buildThink:
+          "A mutation. I'll create replay_event with id: string, leave the guard on, and invoke the playground.",
+        buildTool: "create_tool",
+        buildToolDetail:
+          "POST /v1/events/{id}/replay → replay_event { id: string }",
+        buildPlay: 'replay_event({ "id": "evt_117" }) · healthy',
+        buildReply:
+          "replay_event is on the server. POST stays blocked until you allow it. Connection below — paste it once.",
+        workUser: "Replay event evt_117 — the webhook never landed.",
+        workThink: "replay_event wants an id. I'll call it with evt_117.",
+        args: '{ "id": "evt_117" }',
+        result: '200 · { "status": "replayed", "delivered": true }',
+        workReply: "evt_117 was replayed and delivered.",
       },
       {
         method: "DELETE",
@@ -128,10 +161,20 @@ export const en = {
         tool: "revoke_key",
         schema: "{ id: string }",
         specialist: "security specialist",
-        task: "Revoke key key_32 — it leaked in a screenshot.",
-        args: "{ \"id\": \"key_32\" }",
-        result: "200 · { \"status\": \"revoked\" }",
-        done: "Done — key_32 revoked.",
+        buildUser:
+          "I need a tight tool to revoke a leaked API key. DELETE /v1/keys/{id} only — don't expose the rest of the keys API. Guard the mutation.",
+        buildThink:
+          "One destructive tool. I'll map revoke_key, keep DELETE blocked until they opt in, and test in the playground.",
+        buildTool: "create_tool",
+        buildToolDetail: "DELETE /v1/keys/{id} → revoke_key { id: string }",
+        buildPlay: 'revoke_key({ "id": "key_32" }) · healthy',
+        buildReply:
+          "revoke_key is on the server. DELETE stays blocked until you allow it. Connection below — paste it once.",
+        workUser: "Revoke key key_32 — it leaked in a screenshot.",
+        workThink: "revoke_key takes an id. I'll call it with key_32.",
+        args: '{ "id": "key_32" }',
+        result: '200 · { "status": "revoked" }',
+        workReply: "key_32 is revoked.",
       },
       {
         method: "GET",
@@ -139,10 +182,21 @@ export const en = {
         tool: "get_user_settings",
         schema: "{ id: string }",
         specialist: "support specialist",
-        task: "Fetch settings for user usr_209.",
-        args: "{ \"id\": \"usr_209\" }",
-        result: "200 · { \"locale\": \"es\", \"theme\": \"light\" }",
-        done: "Done — settings for usr_209 retrieved.",
+        buildUser:
+          "Support keeps asking for a user's settings. Give me GET /v1/users/{id}/settings as one tool named the way an agent would ask for it.",
+        buildThink:
+          "A read with one path param. I'll map get_user_settings { id: string } and run the playground.",
+        buildTool: "create_tool",
+        buildToolDetail:
+          "GET /v1/users/{id}/settings → get_user_settings { id: string }",
+        buildPlay: 'get_user_settings({ "id": "usr_209" }) · healthy',
+        buildReply:
+          "get_user_settings is on the server. Connection below — paste it once.",
+        workUser: "Fetch settings for user usr_209.",
+        workThink: "get_user_settings wants an id. I'll call it with usr_209.",
+        args: '{ "id": "usr_209" }',
+        result: '200 · { "locale": "es", "theme": "light" }',
+        workReply: "usr_209 is on locale es, theme light.",
       },
       {
         method: "POST",
@@ -150,10 +204,21 @@ export const en = {
         tool: "void_invoice",
         schema: "{ id: string }",
         specialist: "billing specialist",
-        task: "Void invoice inv_2041 and confirm the credit note.",
-        args: "{ \"id\": \"inv_2041\" }",
-        result: "200 · { \"status\": \"voided\", \"credit_note\": \"cn_881\" }",
-        done: "Done — inv_2041 voided, credit note cn_881 issued.",
+        buildUser:
+          "We need a way to void invoices. Don't dump the whole billing API — just POST /v1/invoices/{id}/void. Keep mutations blocked until I allow them, then test it.",
+        buildThink:
+          "One tool, not the invoices catalog. I'll map that POST to void_invoice, leave the mutation guard on, and run it in the playground.",
+        buildTool: "create_tool",
+        buildToolDetail:
+          "POST /v1/invoices/{id}/void → void_invoice { id: string }",
+        buildPlay: 'void_invoice({ "id": "inv_2041" }) · healthy',
+        buildReply:
+          "void_invoice is on the server. POST stays blocked until you allow it. Connection below — paste it once.",
+        workUser: "Void invoice inv_2041 and confirm the credit note.",
+        workThink: "void_invoice takes an id. I'll call it with inv_2041.",
+        args: '{ "id": "inv_2041" }',
+        result: '200 · { "status": "voided", "credit_note": "cn_881" }',
+        workReply: "inv_2041 is voided. Credit note cn_881 was issued.",
       },
       {
         method: "POST",
@@ -161,16 +226,27 @@ export const en = {
         tool: "cancel_order",
         schema: "{ id: string }",
         specialist: "support specialist",
-        task: "Cancel order ord_552 and notify the customer.",
-        args: "{ \"id\": \"ord_552\" }",
-        result: "200 · { \"status\": \"cancelled\", \"notified\": true }",
-        done: "Done — ord_552 cancelled, customer notified.",
+        buildUser:
+          "Support needs to cancel an order and notify the customer. Map POST /v1/orders/{id}/cancel. Guard the mutation. Don't pull in the rest of orders.",
+        buildThink:
+          "A single mutation with an id. I'll create cancel_order, keep POST blocked, and test it.",
+        buildTool: "create_tool",
+        buildToolDetail:
+          "POST /v1/orders/{id}/cancel → cancel_order { id: string }",
+        buildPlay: 'cancel_order({ "id": "ord_552" }) · healthy',
+        buildReply:
+          "cancel_order is on the server. POST stays blocked until you allow it. Connection below — paste it once.",
+        workUser: "Cancel order ord_552 and notify the customer.",
+        workThink: "cancel_order wants an id. I'll call it with ord_552.",
+        args: '{ "id": "ord_552" }',
+        result: '200 · { "status": "cancelled", "notified": true }',
+        workReply: "ord_552 is cancelled and the customer was notified.",
       },
     ],
   },
   features: {
-    title: "Shipped in the console",
-    subtitle: "What you can use today — not a roadmap.",
+    title: "Live",
+    subtitle: "In the console now.",
     items: [
       {
         title: "Curl import with preview",
@@ -235,8 +311,8 @@ export const en = {
     },
   },
   security: {
-    title: "What stays closed",
-    subtitle: "The opening stays narrow until you open it.",
+    title: "Closed",
+    subtitle: "Until you open it.",
     bullets: [
       {
         title: "Encrypted secrets",
@@ -262,7 +338,7 @@ export const en = {
   },
   roadmap: {
     title: "Not yet",
-    subtitle: "What comes next — labeled, not shipped.",
+    subtitle: "Labeled. Not shipped.",
     statusLabels: {
       planned: "Planned",
       exploring: "Exploring",
@@ -302,7 +378,7 @@ export const en = {
   },
   audience: {
     title: "Who it's for",
-    subtitle: "People who need a careful MCP, not a dump of the whole API.",
+    subtitle: "A careful MCP, not a dump of the whole API.",
     personas: [
       {
         title: "Consultant / implementer",
@@ -328,27 +404,27 @@ export const en = {
     items: [
       {
         q: "Do I need an OpenAPI spec?",
-        a: "No. Start with curl import or manual tool definitions today. OpenAPI import is on the roadmap.",
+        a: "No. Start with curl or a manual tool. OpenAPI import is planned.",
       },
       {
         q: "Does rest2mcp replace official MCPs?",
-        a: "Usually not—it complements them. Use official MCPs where they exist and rest2mcp for APIs and workflows they do not cover.",
+        a: "No. Use official MCPs where they exist; rest2mcp fills the gaps.",
       },
       {
         q: "Can I connect to local or on-prem software?",
-        a: "Today the hosted gateway calls public HTTPS endpoints you configure. An on-prem connector is on the roadmap for APIs behind a firewall.",
+        a: "Today the gateway calls public HTTPS endpoints. An on-prem connector is exploring.",
       },
       {
         q: "How many tools can one server have?",
-        a: "Each server supports up to 50 tools—a deliberate limit that keeps catalogs agent-friendly.",
+        a: "50. A hard cap so catalogs stay agent-friendly.",
       },
       {
         q: "Which MCP clients are supported?",
-        a: "Any client that speaks Streamable HTTP with Bearer authentication. Paste your gateway URL and agent token into Cursor, Claude Desktop, or compatible hosts.",
+        a: "Any Streamable HTTP client with Bearer auth — Cursor, Claude Desktop, and compatible hosts.",
       },
       {
         q: "What happens when I pause a server?",
-        a: "A paused server rejects tool execution through the gateway and shows a paused traffic light until you resume it. Agents may still connect, but calls will fail until the server is live again.",
+        a: "The gateway rejects tool calls until you resume. Agents can still connect.",
       },
     ],
   },

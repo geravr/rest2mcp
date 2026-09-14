@@ -24,7 +24,7 @@ const ogLocale = Astro.currentLocale === "es" ? "es_ES" : "en_US";
 ---
 
 <!doctype html>
-<html lang={Astro.currentLocale ?? "en"} class="scroll-smooth">
+<html lang={Astro.currentLocale ?? "en"} class="dark scroll-smooth">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -80,8 +80,8 @@ const ogLocale = Astro.currentLocale === "es" ? "es_ES" : "en_US";
     />
     <meta name="generator" content={Astro.generator} />
     <meta name="robots" content="index,follow" />
-    <meta name="color-scheme" content="light" />
-    <meta name="theme-color" content="#ffffff" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0b0b0b" />
     <title>{title}</title>
     <meta name="title" content={title} />
     <meta name="description" content={description} />
@@ -99,14 +99,14 @@ const ogLocale = Astro.currentLocale === "es" ? "es_ES" : "en_US";
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={socialImageUrl} />
   </head>
-  <body class="overflow-x-hidden bg-white text-[#0b0b0b] antialiased">
+  <body class="overflow-x-hidden bg-[#0b0b0b] text-[#edeae4] antialiased">
     <a
       href="#main"
-      class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[60] focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:text-[#0b0b0b] focus:ring-2 focus:ring-[#fd410b]"
+      class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[60] focus:bg-[#0b0b0b] focus:px-3 focus:py-2 focus:text-sm focus:text-[#edeae4] focus:ring-2 focus:ring-[#fd410b]"
     >
       {t.header.skipToContent}
     </a>
-    <div class="flex min-h-screen flex-col bg-white">
+    <div class="flex min-h-screen flex-col bg-[#0b0b0b]">
       <main id="main" class="flex-1">
         <slot />
       </main>
