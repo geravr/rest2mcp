@@ -1,0 +1,107 @@
+---
+import type { UI } from "../../i18n";
+import { spaUrl } from "../../lib/spa-url";
+
+interface Props {
+  ui: UI;
+  signup: string;
+  login: string;
+}
+
+const { ui, signup, login } = Astro.props;
+---
+
+<section class="ledger" aria-label={ui.features.title}>
+  <p class="ledger-contrast">{ui.problem.contrast}</p>
+
+  <div class="ledger-steps">
+    <ol class="ledger-loop">
+      {
+        ui.howItWorks.steps.map((step, index) => (
+          <li>
+            <span class="ledger-step-index">{index + 1}</span>
+            <span class="ledger-step-title">{step.title}</span>
+            <code class="ledger-step-artifact">{step.artifact}</code>
+          </li>
+        ))
+      }
+    </ol>
+    <p class="ledger-doors">
+      <span class="ledger-doors-join">{ui.workflows.join}</span>
+      <span>{ui.workflows.subtitle} {ui.workflows.sync}</span>
+    </p>
+  </div>
+
+  <div class="ledger-cols">
+    <section class="ledger-col" id="features" aria-label={ui.features.title}>
+      <h3 class="ledger-label">{ui.features.title}</h3>
+      <ul>
+        {ui.features.items.map((item) => <li>{item.title}</li>)}
+      </ul>
+    </section>
+
+    <section class="ledger-col" id="security" aria-label={ui.security.title}>
+      <h3 class="ledger-label">{ui.security.title}</h3>
+      <ul>
+        {ui.security.bullets.map((bullet) => <li>{bullet.title}</li>)}
+      </ul>
+    </section>
+
+    <section class="ledger-col" id="roadmap" aria-label={ui.roadmap.title}>
+      <h3 class="ledger-label">{ui.roadmap.title}</h3>
+      <ul>
+        {
+          ui.roadmap.items.map((item) => (
+            <li>
+              <span>{item.title}</span>
+              <span class="ledger-status">
+                {item.status === "planned" || item.status === "exploring"
+                  ? ui.roadmap.statusLabels[item.status]
+                  : item.status}
+              </span>
+            </li>
+          ))
+        }
+      </ul>
+    </section>
+
+    <section class="ledger-col" aria-label={ui.audience.title}>
+      <h3 class="ledger-label">{ui.audience.title}</h3>
+      <ul>
+        {
+          ui.audience.personas.map((persona) => (
+            <li>
+              <strong>{persona.title}.</strong> {persona.desc}
+            </li>
+          ))
+        }
+      </ul>
+    </section>
+  </div>
+
+  <div class="ledger-faq" id="faq">
+    <h3 class="ledger-label">{ui.faq.title}</h3>
+    {
+      ui.faq.items.map((item) => (
+        <details>
+          <summary>
+            <span>{item.q}</span>
+            <span class="ledger-faq-mark" aria-hidden="true">
+              +
+            </span>
+          </summary>
+          <p>{item.a}</p>
+        </details>
+      ))
+    }
+  </div>
+
+  <nav class="ledger-cta" aria-label={ui.finalCta.title}>
+    <p class="ledger-cta-title">{ui.finalCta.title}</p>
+    <p class="ledger-cta-sub">{ui.finalCta.subtitle}</p>
+    <div class="ledger-cta-row">
+      <a class="page-cta-signup" href={spaUrl("/signup")}>{signup}</a>
+      <a class="page-cta-login" href={spaUrl("/login")}>{login}</a>
+    </div>
+  </nav>
+</section>

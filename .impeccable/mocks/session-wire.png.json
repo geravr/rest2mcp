@@ -1,0 +1,7 @@
+{
+  "prompt": "Below-fold 'session' concept, variant WIRE: picker row of six orphan-endpoint chips (POST /v1/invoices/{id}/void selected), then two side-by-side panels — BUILD (agent authors via platform MCP: curl paste → void_invoice tool card → playground healthy) and WORK (billing specialist: task → tools/call → 200 voided → done) — with a small config card (mcp url + Bearer) centered on the gutter as the handshake. Ledger (Shipped today / Stays closed / Not yet / Before you connect) and final CTA below. Strict Ink/Paper/gray palette, Inter + system mono, hairlines, sharp rectangles. Identity anchored on gate-cut.webp.",
+  "concept": "session",
+  "variant": "wire",
+  "approved": true,
+  "approvalNote": "Approved in combination with session-acts.png: wire supplies the topology (two windows + handshake on the gutter + picker + ledger); acts supplies the three-act scroll choreography (ACT 1 build → ACT 2 handshake → ACT 3 work) and the single-column stacking for narrow viewports. Color decision: Gate Orange becomes a functional accent beyond the 2 — handshake URL, live/healthy pulse, selected picker chip — everything else stays Ink/Paper/gray."
+}

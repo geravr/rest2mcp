@@ -2,7 +2,8 @@
 import { getTranslations } from "../i18n";
 import Layout from "../Layout.astro";
 import Hero from "../components/home/Hero.astro";
-import Cull from "../components/home/Cull.astro";
+import Session from "../components/home/Session.astro";
+import Ledger from "../components/home/Ledger.astro";
 
 const t = getTranslations(Astro.currentLocale);
 ---
@@ -14,5 +15,6 @@ const t = getTranslations(Astro.currentLocale);
     signup={t.header.signup}
     login={t.header.login}
   />
-  <Cull ui={t} signup={t.header.signup} login={t.header.login} />
+  <Session ui={t} />
+  <Ledger ui={t} signup={t.header.signup} login={t.header.login} />
 </Layout>

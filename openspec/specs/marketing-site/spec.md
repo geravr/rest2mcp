@@ -27,12 +27,17 @@ The marketing home page (`/` and `/es/`) SHALL present rest2mcp as a **hosted RE
 
 ### Requirement: Home page section structure
 
-The home page SHALL compose a scroll-driven Hero, then a two-column cull (what does not pass vs the same-day bench) that absorbs Problem, How It Works, Shipped Features, Workflows, Security, Roadmap, Audience, FAQ, and Final CTA so every required fact remains findable. The home page SHALL NOT include the former TechStack or Architecture (repository layout) sections.
+The home page SHALL compose a scroll-driven Hero, then a Session section that demonstrates the product in three acts (an agent authors a tool in conversation, a config slip hands the connection to a second agent, and a specialist agent puts the tool to work), then a compressed Ledger that absorbs Problem positioning, the How It Works steps, Shipped Features, the two Workflows doors, Security, Roadmap, Audience, FAQ, and Final CTA so every required fact remains findable. The Session SHALL include an interactive picker of orphan endpoints that re-casts the demonstration. The home page SHALL NOT include the former TechStack or Architecture (repository layout) sections.
 
 #### Scenario: Section order on English home
 
 - **WHEN** the English home page is rendered
-- **THEN** the cull (problem / leftover inventory) appears after Hero and Sign up / Log in remain available after FAQ
+- **THEN** the Session (endpoint picker, BUILD and WORK windows, handshake slip) appears after Hero, the Ledger follows it, and Sign up / Log in remain available after FAQ
+
+#### Scenario: Session demonstrates real product capabilities
+
+- **WHEN** a visitor reads or interacts with the Session
+- **THEN** the build act reflects platform-MCP authoring, the handshake shows the hosted /mcp/{serverId} URL and one-time token convention, and mutation-guard copy appears for POST/PUT/PATCH/DELETE endpoints but not for GET endpoints
 
 #### Scenario: Template stack sections removed
 
@@ -83,12 +88,12 @@ The Problem section SHALL explain why large auto-generated MCP catalogs hurt age
 
 ### Requirement: How-it-works loop
 
-The How It Works section SHALL describe a four-step loop: create server (base URL and variables), map tools (curl or manual form), test in playground (traffic light and logs), connect agent (MCP URL and token). Steps SHALL be numbered or ordered consistently in both locales.
+The home page SHALL describe a four-step loop: create server (base URL and variables), map tools (curl or manual form), test in playground (traffic light and logs), connect agent (MCP URL and token). The Session section performs this loop as its three-act demonstration, and the Ledger SHALL list the four ordered steps with titles and artifacts. Steps SHALL be ordered consistently in both locales.
 
 #### Scenario: Four steps present
 
-- **WHEN** the How It Works section is rendered
-- **THEN** exactly four ordered steps are shown with titles and short descriptions
+- **WHEN** the Ledger is rendered
+- **THEN** exactly four ordered steps are shown with titles and artifact lines
 
 ### Requirement: Workflows section covers GUI and platform MCP
 

@@ -1,0 +1,367 @@
+---
+import type { UI } from "../../i18n";
+
+interface Props {
+  ui: UI;
+}
+
+const { ui } = Astro.props;
+const session = ui.session;
+const defaultIndex = session.cast.findIndex(
+  (entry) => entry.path === "/v1/invoices/{id}/void",
+);
+const selected = defaultIndex >= 0 ? defaultIndex : 0;
+const blocked = ["POST", "PUT", "PATCH", "DELETE"];
+const entry = session.cast[selected] ?? session.cast[0];
+const curlLine = `curl -X ${entry.method} ${session.origin}${entry.path}`;
+const guardLine = session.guardNote.replace("{method}", entry.method);
+const playgroundLine = `${session.playgroundLabel} ▶ ${entry.tool}(${entry.args})`;
+const callLine = `tools/call ${entry.tool} ${entry.args}`;
+const guardHidden = !blocked.includes(entry.method);
+
+const payload = {
+  cast: session.cast,
+  guardNote: session.guardNote,
+  origin: session.origin,
+  playgroundLabel: session.playgroundLabel,
+};
+---
+
+<section
+  class="session"
+  id="how-it-works"
+  aria-label={ui.howItWorks.title}
+  data-session
+  data-selected={selected}
+>
+  <header class="session-head">
+    <p class="session-kicker">{ui.howItWorks.title}</p>
+    <h2 class="session-title">{session.title}</h2>
+  </header>
+
+  <div class="session-picker" role="group" aria-label={session.pickerLabel}>
+    <span class="session-picker-label">{session.pickerLabel}</span>
+    <ul class="session-chips">
+      {
+        session.cast.map((entry, index) => (
+          <li>
+            <button
+              type="button"
+              class="session-chip"
+              data-chip={index}
+              aria-pressed={index === selected ? "true" : "false"}
+            >
+              <span class="session-chip-method">{entry.method}</span>
+              <code>{entry.path}</code>
+            </button>
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+
+  <div class="session-pin" data-session-pin>
+    <div class="session-sticky">
+      <div class="session-stage">
+        <article class="session-window" aria-label={session.buildHeader}>
+          <header class="session-window-head">
+            <span>{session.buildHeader}</span>
+          </header>
+          <div class="session-transcript">
+            <p class="session-bubble" data-anim="b1">
+              <code data-cast="curl">{curlLine}</code>
+            </p>
+            <div class="session-tool" data-anim="b2">
+              <code class="session-tool-name" data-cast="tool">{entry.tool}</code>
+              <code class="session-tool-schema" data-cast="schema">{entry.schema}</code>
+            </div>
+            <p class="session-guard" data-anim="b3" data-cast-guard hidden={guardHidden}>
+              <code data-cast="guard">{guardLine}</code>
+            </p>
+            <p class="session-playground" data-anim="b4">
+              <code data-cast="playground">{playgroundLine}</code>
+              <strong class="session-healthy">
+                {ui.howItWorks.steps[2]?.artifact}
+              </strong>
+            </p>
+          </div>
+        </article>
+
+        <aside class="session-slip" data-anim="slip" aria-label={session.handshakeCaption}>
+          <p class="session-slip-url" data-anim="slip-url">
+            <code>{session.serverUrl}</code>
+          </p>
+          <p class="session-slip-token">
+            <code>Authorization: {ui.howItWorks.token}</code>
+          </p>
+          <p class="session-slip-caption" data-anim="slip-caption">
+            {session.handshakeCaption}
+          </p>
+        </aside>
+
+        <article class="session-window" aria-label={session.workLabel}>
+          <header class="session-window-head">
+            <span>
+              {session.workLabel} · <span data-cast="specialist">{entry.specialist}</span>
+            </span>
+            <span class="session-live" data-anim="live">
+              <span class="session-live-dot" aria-hidden="true"></span>
+              {session.liveLabel}
+            </span>
+          </header>
+          <div class="session-transcript">
+            <p class="session-bubble" data-anim="w1">
+              <span data-cast="task">{entry.task}</span>
+            </p>
+            <p class="session-frame" data-anim="w2">
+              <code data-cast="call">{callLine}</code>
+            </p>
+            <p class="session-frame session-frame-result" data-anim="w3">
+              <code data-cast="result">{entry.result}</code>
+            </p>
+            <p class="session-done" data-anim="w4">
+              <span data-cast="done">{entry.done}</span>
+            </p>
+          </div>
+        </article>
+      </div>
+    </div>
+  </div>
+
+  <script type="application/json" data-session-payload set:html={JSON.stringify(payload)} />
+</section>
+
+<script>
+  const EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
+  const DURATION = 1000;
+
+  interface CastEntry {
+    method: string;
+    path: string;
+    tool: string;
+    schema: string;
+    specialist: string;
+    task: string;
+    args: string;
+    result: string;
+    done: string;
+  }
+
+  interface Payload {
+    cast: CastEntry[];
+    guardNote: string;
+    origin: string;
+    playgroundLabel: string;
+  }
+
+  const IN: Keyframe[] = [
+    { opacity: 0, transform: "translateY(8px)" },
+    { opacity: 1, transform: "translateY(0)" },
+  ];
+
+  function at(
+    from: number,
+    to: number,
+    frames: Keyframe[] = IN,
+  ): Keyframe[] {
+    const first = frames[0] ?? {};
+    const last = frames[frames.length - 1] ?? {};
+    return [
+      { ...first, offset: 0 },
+      { ...first, offset: from },
+      ...frames.slice(1, -1).map((frame, index) => ({
+        ...frame,
+        offset:
+          from + ((to - from) * (index + 1)) / Math.max(frames.length - 1, 1),
+      })),
+      { ...last, offset: to },
+      { ...last, offset: 1 },
+    ];
+  }
+
+  function setup(root: HTMLElement) {
+    const payloadEl = root.querySelector<HTMLScriptElement>(
+      "[data-session-payload]",
+    );
+    const payload: Payload | null = payloadEl?.textContent
+      ? JSON.parse(payloadEl.textContent)
+      : null;
+
+    const chips = [...root.querySelectorAll<HTMLButtonElement>("[data-chip]")];
+    const castNodes = [
+      ...root.querySelectorAll<HTMLElement>("[data-cast]"),
+    ];
+    const guardRow = root.querySelector<HTMLElement>("[data-cast-guard]");
+
+    function render(entry: CastEntry) {
+      if (!payload) {
+        return;
+      }
+      const values: Record<string, string> = {
+        curl: `curl -X ${entry.method} ${payload.origin}${entry.path}`,
+        tool: entry.tool,
+        schema: entry.schema,
+        guard: payload.guardNote.replace("{method}", entry.method),
+        playground: `${payload.playgroundLabel} ▶ ${entry.tool}(${entry.args})`,
+        specialist: entry.specialist,
+        task: entry.task,
+        call: `tools/call ${entry.tool} ${entry.args}`,
+        result: entry.result,
+        done: entry.done,
+      };
+      for (const node of castNodes) {
+        const key = node.dataset.cast;
+        if (!key || !(key in values)) {
+          continue;
+        }
+        node.textContent = values[key];
+        node.animate(
+          [{ opacity: 0.15 }, { opacity: 1 }],
+          { duration: 280, easing: EASE },
+        );
+      }
+      if (guardRow) {
+        guardRow.hidden = !["POST", "PUT", "PATCH", "DELETE"].includes(
+          entry.method,
+        );
+      }
+    }
+
+    if (payload) {
+      for (const chip of chips) {
+        chip.addEventListener("click", () => {
+          const entry = payload.cast[Number(chip.dataset.chip)];
+          if (!entry) {
+            return;
+          }
+          for (const other of chips) {
+            other.setAttribute("aria-pressed", String(other === chip));
+          }
+          render(entry);
+        });
+      }
+    }
+
+    const reduce = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    const wide = window.matchMedia("(min-width: 900px)").matches;
+    const pin = root.querySelector<HTMLElement>("[data-session-pin]");
+    if (reduce || !wide || !pin) {
+      return;
+    }
+
+    const stage = root.querySelector<HTMLElement>(".session-stage");
+    const slip = root.querySelector<HTMLElement>("[data-anim='slip']");
+    const buildWindow = root.querySelector<HTMLElement>(".session-window");
+
+    const animations: Animation[] = [];
+    const bind = (
+      name: string,
+      frames: Keyframe[],
+      easing: string = EASE,
+    ) => {
+      const el = root.querySelector<HTMLElement>(`[data-anim='${name}']`);
+      if (!el) {
+        return;
+      }
+      const animation = el.animate(frames, {
+        duration: DURATION,
+        fill: "both",
+        easing,
+      });
+      animation.pause();
+      animations.push(animation);
+    };
+
+    bind("b1", at(0.02, 0.12));
+    bind("b2", at(0.14, 0.26));
+    bind("b3", at(0.27, 0.33));
+    bind("b4", at(0.36, 0.47));
+    bind("slip-caption", at(0.64, 0.72));
+    bind(
+      "slip-url",
+      at(0.58, 0.7, [
+        { opacity: 1, color: "#0b0b0b" },
+        { opacity: 1, color: "#fd410b" },
+      ]),
+      "linear",
+    );
+    bind("live", at(0.76, 0.8));
+    bind("w1", at(0.78, 0.84));
+    bind("w2", at(0.84, 0.89));
+    bind("w3", at(0.89, 0.94));
+    bind("w4", at(0.94, 0.99));
+
+    let slipAnimation: Animation | null = null;
+
+    const buildSlipTravel = () => {
+      if (!stage || !slip || !buildWindow) {
+        return;
+      }
+      slipAnimation?.cancel();
+      const slipRect = slip.getBoundingClientRect();
+      const buildRect = buildWindow.getBoundingClientRect();
+      const dx =
+        buildRect.left +
+        buildRect.width / 2 -
+        (slipRect.left + slipRect.width / 2);
+      const dy =
+        buildRect.bottom -
+        110 -
+        (slipRect.top + slipRect.height / 2);
+      const frames: Keyframe[] = [
+        { offset: 0, opacity: 0, transform: `translate(${dx}px, ${dy}px) scale(0.96)` },
+        { offset: 0.48, opacity: 0, transform: `translate(${dx}px, ${dy}px) scale(0.96)` },
+        { offset: 0.56, opacity: 1, transform: `translate(${dx}px, ${dy}px) scale(1)` },
+        { offset: 0.7, opacity: 1, transform: "translate(0, 0) scale(1)" },
+        { offset: 1, opacity: 1, transform: "translate(0, 0) scale(1)" },
+      ];
+      slipAnimation = slip.animate(frames, {
+        duration: DURATION,
+        fill: "both",
+        easing: EASE,
+      });
+      slipAnimation.pause();
+      slipAnimation.currentTime = lastProgress * DURATION;
+    };
+
+    let lastProgress = 0;
+    let ticking = false;
+
+    const update = () => {
+      ticking = false;
+      const max = pin.offsetHeight - window.innerHeight;
+      const top = pin.getBoundingClientRect().top;
+      lastProgress =
+        max <= 0 ? 1 : Math.min(1, Math.max(0, -top / max));
+      for (const animation of animations) {
+        animation.currentTime = lastProgress * DURATION;
+      }
+      if (slipAnimation) {
+        slipAnimation.currentTime = lastProgress * DURATION;
+      }
+    };
+
+    const onScroll = () => {
+      if (ticking) {
+        return;
+      }
+      ticking = true;
+      window.requestAnimationFrame(update);
+    };
+
+    buildSlipTravel();
+    update();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", () => {
+      buildSlipTravel();
+      onScroll();
+    });
+  }
+
+  const root = document.querySelector<HTMLElement>("[data-session]");
+  if (root) {
+    setup(root);
+  }
+</script>
