@@ -1,7 +1,0 @@
-{
-  "files": ["apps/app/index.html", "apps/web/Layout.astro"],
-  "exclude": ["apps/email/**"],
-  "insertBefore": "</body>",
-  "commentSyntax": "html",
-  "cspChecked": true
-}
