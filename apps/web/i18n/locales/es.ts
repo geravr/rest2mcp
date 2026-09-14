@@ -90,8 +90,29 @@ export const es = {
     ],
   },
   define: {
-    title: "rest2mcp es un servicio REST a MCP alojado.",
-    body: "Eliges unos pocos endpoints REST. Los convertimos en herramientas con nombre, hospedamos el MCP y te damos una URL para pegar en tu agente.",
+    title:
+      "Haz que tu API REST hable con tu agente de IA en menos de 10 minutos.",
+    beats: [
+      {
+        index: "01",
+        label: "Eliges",
+        method: "GET",
+        artifact: "/v1/invoices/{id}",
+        desc: "Importa un curl o elige un endpoint. Sin spec completa, sin setup largo.",
+      },
+      {
+        index: "02",
+        label: "Listo",
+        artifact: "get_invoice",
+        desc: "Le ponemos nombre y esquema. Tu agente ya sabe qué invocar.",
+      },
+      {
+        index: "03",
+        label: "Conectas",
+        artifact: "/mcp/{serverId}",
+        desc: "Copia la URL. Pégala en tu agente — ya puede llamar tu API.",
+      },
+    ],
   },
   session: {
     title: "Un agente lo construye. Otro lo pone a trabajar.",

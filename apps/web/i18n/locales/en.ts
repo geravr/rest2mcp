@@ -88,8 +88,28 @@ export const en = {
     ],
   },
   define: {
-    title: "rest2mcp is a hosted REST-to-MCP service.",
-    body: "You pick a few REST endpoints. We turn them into named tools, host the MCP, and give you a URL to paste into your agent.",
+    title: "Make your REST API talk to your AI agent in under 10 minutes.",
+    beats: [
+      {
+        index: "01",
+        label: "You pick",
+        method: "GET",
+        artifact: "/v1/invoices/{id}",
+        desc: "Import a curl or pick an endpoint. No full spec, no long setup.",
+      },
+      {
+        index: "02",
+        label: "Ready",
+        artifact: "get_invoice",
+        desc: "We name it and bound the schema. Your agent knows what to call.",
+      },
+      {
+        index: "03",
+        label: "You connect",
+        artifact: "/mcp/{serverId}",
+        desc: "Copy the URL. Paste it into your agent — it can call your API now.",
+      },
+    ],
   },
   session: {
     title: "One agent builds it. Another puts it to work.",

@@ -6,9 +6,49 @@ interface Props {
 }
 
 const { ui } = Astro.props;
+const { title, beats } = ui.define;
 ---
 
 <section class="define" aria-labelledby="define-title">
-  <h2 id="define-title" class="define-title">{ui.define.title}</h2>
-  <p class="define-body">{ui.define.body}</p>
+  <h2 id="define-title" class="define-title define-title-wide">{title}</h2>
+  <ol class="define-triptych">
+    {
+      beats.flatMap((beat, index) => {
+        const items = [];
+
+        if (index > 0) {
+          items.push(
+            <li class="define-triptych-arrow" aria-hidden="true">
+              →
+            </li>,
+          );
+        }
+
+        items.push(
+          <li class="define-triptych-beat">
+            <span class="define-triptych-index">
+              {beat.index} · {beat.label}
+            </span>
+            <p class="define-triptych-artifact">
+              {"method" in beat && beat.method ? (
+                <>
+                  <span class="define-method" data-method={beat.method}>
+                    {beat.method}
+                  </span>
+                  <code>{beat.artifact}</code>
+                </>
+              ) : index === beats.length - 1 ? (
+                <code class="define-artifact-url">{beat.artifact}</code>
+              ) : (
+                <code>{beat.artifact}</code>
+              )}
+            </p>
+            <p class="define-triptych-desc">{beat.desc}</p>
+          </li>,
+        );
+
+        return items;
+      })
+    }
+  </ol>
 </section>

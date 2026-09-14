@@ -10,7 +10,7 @@
 .define {
   width: min(86rem, calc(100% - 8vw));
   margin: 0 auto;
-  padding: 4.75rem 0 0;
+  padding: 4.75rem 0 4.5rem;
   background: var(--page-paper);
   color: var(--page-ink);
   font-family: var(--page-sans);
@@ -26,12 +26,111 @@
   text-wrap: balance;
 }
 
-.define-body {
-  margin: 0.7rem 0 0;
-  max-width: 42ch;
-  font-size: 1.05rem;
+.define-title-wide {
+  max-width: 28ch;
+}
+
+.define-triptych {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+  margin: 1.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.define-triptych-beat {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 0;
+  padding: 1.15rem 1.25rem;
+  border: 1px solid color-mix(in srgb, var(--page-ink) 14%, var(--page-paper));
+  border-radius: 0.35rem;
+  background: var(--page-lift);
+}
+
+.define-triptych-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  font-family: var(--page-mono);
+  font-size: 1.1rem;
+  color: var(--page-gate);
+  list-style: none;
+}
+
+.define-triptych-index {
+  font-family: var(--page-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  color: var(--page-soft);
+}
+
+.define-triptych-artifact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0;
+  min-width: 0;
+}
+
+.define-triptych-artifact code {
+  font-family: var(--page-mono);
+  font-size: clamp(0.82rem, 1.4vw, 0.95rem);
+  font-weight: 500;
+  color: var(--page-ink);
+  overflow-wrap: anywhere;
+}
+
+.define-artifact-url {
+  color: var(--page-gate);
+}
+
+.define-method {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 3.1rem;
+  padding: 0.18rem 0.35rem;
+  border-radius: 0.25rem;
+  background: #2a2a2a;
+  font-family: var(--page-mono);
+  font-size: 0.62rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  color: #c8c4bb;
+}
+
+.define-triptych-desc {
+  margin: 0;
+  max-width: 34ch;
+  font-size: 0.92rem;
   line-height: 1.45;
   color: var(--page-soft);
+}
+
+@media (min-width: 900px) {
+  .define-triptych {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(
+        0,
+        1fr
+      );
+    align-items: stretch;
+    gap: 0.85rem;
+  }
+
+  .define-triptych-beat {
+    padding: 1.25rem 1.35rem;
+  }
+
+  .define-triptych-arrow {
+    align-self: center;
+    padding-top: 0.5rem;
+  }
 }
 
 /* ---------- session stage ---------- */
