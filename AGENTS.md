@@ -95,7 +95,6 @@ bun db:studio            # Launches Drizzle Studio
 - Prefer compact shadcn composition over decorative density. Remove filler copy instead of rewriting it.
 - SPA loading feedback follows the decision tree in [apps/app/AGENTS.md](apps/app/AGENTS.md) (skeleton composites, control spinners, or the auth bootstrap screen). Do not invent overlays or text-only loading cards for known layouts.
 - When in doubt, start sparse and extensible rather than populated and fake.
-- The zinc UI is an anonymous scaffold, not product identity. Once a product exists, `/impeccable init` is the first identity step.
 
 ## New Code Direction
 

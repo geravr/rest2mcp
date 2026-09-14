@@ -26,8 +26,6 @@ Maintained by [Charro Digital](https://charrodigital.com). Questions: [hola@char
 - **Observability:** PostHog with consent-aware browser/server capture.
 - **Email:** React Email templates with Resend integration.
 
-When this clone has a product, run `/impeccable init` to define visual identity.
-
 ## Commands
 
 All commands can be run from the root of the repository:

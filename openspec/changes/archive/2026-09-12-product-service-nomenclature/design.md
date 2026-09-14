@@ -21,7 +21,7 @@ Internal code names (`mcp-studio`, `mcp-studio-service.ts`) remain accurate as e
 - Renaming OpenSpec capability ids, API modules, or database artifacts.
 - Rewriting hero/problem positioning beyond nomenclature (curated vs bulk generation stays).
 - SPA dashboard copy unless a stray "studio" string is found during audit.
-- Impeccable visual identity work.
+- Visual identity or branding work.
 
 ## Decisions
 

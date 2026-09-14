@@ -1,6 +1,6 @@
 ## Context
 
-`apps/web` is a static Astro 5 site with en/es locales in `i18n/locales/*.ts`. Home composition lives in `pages/index.astro` and `pages/es/index.astro`, importing section components from `components/home/`. Current copy still describes the Charro Digital monorepo template (Better Auth, Drizzle, repo tree). The MCP studio product is implemented in `apps/app` and specified in `openspec/specs/mcp-studio`, `mcp-gateway`, `mcp-observability`, `mcp-platform`, and `mcp-templates`. Visual identity remains the zinc starter scaffold; Impeccable runs later on real product screens.
+`apps/web` is a static Astro 5 site with en/es locales in `i18n/locales/*.ts`. Home composition lives in `pages/index.astro` and `pages/es/index.astro`, importing section components from `components/home/`. Current copy still describes the Charro Digital monorepo template (Better Auth, Drizzle, repo tree). The MCP studio product is implemented in `apps/app` and specified in `openspec/specs/mcp-studio`, `mcp-gateway`, `mcp-observability`, `mcp-platform`, and `mcp-templates`. Visual identity remains the zinc starter scaffold until a later branding pass on real product screens.
 
 ## Goals / Non-Goals
 
@@ -14,7 +14,7 @@
 
 **Non-Goals:**
 
-- Visual redesign, custom typography, motion systems, or Impeccable `DESIGN.md`.
+- Visual redesign, custom typography, motion systems, or a formal design-system document.
 - Pricing, docs, blog, case studies, screenshots, or video.
 - New routes beyond home (unless footer anchor links only).
 - API/backend changes.
@@ -75,7 +75,7 @@ Add Astro components under `components/home/`:
 
 Reuse existing Tailwind utility patterns from current sections (border-b, max-w-7xl, semantic tokens). No new dependencies.
 
-**Rationale:** Content change now; Impeccable reshapes layout later without rewriting copy.
+**Rationale:** Content change now; a later layout/branding pass can reshape presentation without rewriting copy.
 
 ### 5. In-page anchors for secondary CTA
 
@@ -109,4 +109,4 @@ Rollback: revert `apps/web` changes only; no migrations or API impact.
 ## Open Questions
 
 - **Pricing FAQ:** Omit until pricing exists, or add honest "pricing TBD" answer — recommend omit.
-- **Header nav anchors:** Add product section links in header now vs wait for Impeccable — recommend minimal (hero CTA anchor only) in this change.
+- **Header nav anchors:** Add product section links in header now vs wait for a layout/branding pass — recommend minimal (hero CTA anchor only) in this change.

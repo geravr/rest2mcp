@@ -1,6 +1,6 @@
 ## Why
 
-The Astro marketing site still describes rest2mcp as Charro Digital's internal Bun monorepo template (auth, tRPC, repo layout). The product now ships an MCP studio with a hosted gateway, observability, and platform MCP. Visitors cannot understand what rest2mcp does or why it exists. The site must sell the product truthfully—shipped capabilities today, roadmap items clearly labeled—before visual identity work (Impeccable) begins.
+The Astro marketing site still describes rest2mcp as Charro Digital's internal Bun monorepo template (auth, tRPC, repo layout). The product now ships an MCP studio with a hosted gateway, observability, and platform MCP. Visitors cannot understand what rest2mcp does or why it exists. The site must sell the product truthfully—shipped capabilities today, roadmap items clearly labeled—before a dedicated visual identity pass begins.
 
 ## What Changes
 
@@ -10,7 +10,7 @@ The Astro marketing site still describes rest2mcp as Charro Digital's internal B
 - Rewrite meta title/description, header/footer taglines, and en/es locale modules with full parity.
 - Add section components and i18n keys for new blocks; keep existing Layout, LanguageSwitcher, and static Astro build model.
 
-**Non-goals:** Visual redesign or Impeccable identity (`/impeccable init`, tokens, typography, motion). Pricing pages, docs site, blog, case studies (e.g. GHL), screenshots or demo video, dynamic data fetching, SEO beyond meta tags on the home page.
+**Non-goals:** Visual redesign (tokens, typography, motion). Pricing pages, docs site, blog, case studies (e.g. GHL), screenshots or demo video, dynamic data fetching, SEO beyond meta tags on the home page.
 
 ## Capabilities
 

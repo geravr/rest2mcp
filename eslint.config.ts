@@ -20,9 +20,6 @@ export default defineConfig(
       "**/.react-email",
       "**/dist",
       "**/node_modules",
-      ".agents/skills/impeccable/**",
-      ".claude/skills/impeccable/**",
-      ".cursor/skills/impeccable/**",
     ],
   },
 
