@@ -27,12 +27,12 @@ The marketing home page (`/` and `/es/`) SHALL present rest2mcp as a **hosted RE
 
 ### Requirement: Home page section structure
 
-The home page SHALL compose these sections in order: Hero, Problem, How It Works, Shipped Features, Workflows, Security, Roadmap, Audience, FAQ, Final CTA. The home page SHALL NOT include the former TechStack or Architecture (repository layout) sections.
+The home page SHALL compose a scroll-driven Hero, then a two-column cull (what does not pass vs the same-day bench) that absorbs Problem, How It Works, Shipped Features, Workflows, Security, Roadmap, Audience, FAQ, and Final CTA so every required fact remains findable. The home page SHALL NOT include the former TechStack or Architecture (repository layout) sections.
 
 #### Scenario: Section order on English home
 
 - **WHEN** the English home page is rendered
-- **THEN** Problem appears after Hero and Final CTA appears after FAQ
+- **THEN** the cull (problem / leftover inventory) appears after Hero and Sign up / Log in remain available after FAQ
 
 #### Scenario: Template stack sections removed
 
