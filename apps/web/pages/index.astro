@@ -2,15 +2,7 @@
 import { getTranslations } from "../i18n";
 import Layout from "../Layout.astro";
 import Hero from "../components/home/Hero.astro";
-import Problem from "../components/home/Problem.astro";
-import HowItWorks from "../components/home/HowItWorks.astro";
-import Features from "../components/home/Features.astro";
-import Workflows from "../components/home/Workflows.astro";
-import Security from "../components/home/Security.astro";
-import Roadmap from "../components/home/Roadmap.astro";
-import Audience from "../components/home/Audience.astro";
-import FAQ from "../components/home/FAQ.astro";
-import FinalCta from "../components/home/FinalCta.astro";
+import Cull from "../components/home/Cull.astro";
 
 const t = getTranslations(Astro.currentLocale);
 ---
@@ -22,13 +14,5 @@ const t = getTranslations(Astro.currentLocale);
     signup={t.header.signup}
     login={t.header.login}
   />
-  <Problem problem={t.problem} />
-  <HowItWorks howItWorks={t.howItWorks} />
-  <Features features={t.features} />
-  <Workflows workflows={t.workflows} />
-  <Security security={t.security} />
-  <Roadmap roadmap={t.roadmap} />
-  <Audience audience={t.audience} />
-  <FAQ faq={t.faq} />
-  <FinalCta finalCta={t.finalCta} />
+  <Cull ui={t} signup={t.header.signup} login={t.header.login} />
 </Layout>

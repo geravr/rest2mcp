@@ -20,7 +20,7 @@ export const en = {
   footer: {
     tagline: "rest2mcp · REST-to-MCP service",
     description:
-      "Build intentional MCP tools from your APIs, test in a playground, and connect any Streamable HTTP client. Built with a modern web stack.",
+      "Map the endpoints that matter, test them in the playground, and hand any Streamable HTTP client a hosted MCP URL.",
     startHeading: "Get started",
     navLabel: "Account links",
     copyright: "All rights reserved.",
@@ -37,62 +37,72 @@ export const en = {
     ctaDocs: "How it works",
   },
   problem: {
-    title: "Auto-generated MCP catalogs break agents",
-    body: "Dumping every OpenAPI operation into a server gives agents hundreds of poorly named tools. They waste tokens, pick the wrong call, and sometimes trigger destructive mutations.",
+    title: "A dump is not a catalog an agent can use",
+    body: "Dumping every OpenAPI operation into a server hands an agent hundreds of poorly named tools. Context fills with noise. The model picks the wrong call — and sometimes a destructive one.",
     bullets: [
       {
         title: "Too many tools",
-        desc: "Large catalogs dilute context and confuse model selection.",
+        desc: "Large catalogs dilute context and confuse which call to make.",
       },
       {
         title: "Poor names and schemas",
-        desc: "Generated labels rarely match how agents reason about tasks.",
+        desc: "Generated labels rarely match how an agent reasons about a task.",
       },
       {
         title: "Risky by default",
-        desc: "Bulk exposure increases the chance of wrong or destructive calls.",
+        desc: "Bulk exposure raises the chance of a wrong or destructive call.",
       },
     ],
+    leftoverLabel: "Does not pass",
+    passedLabel: "Passes",
+    closedLabel: "Stays closed",
     contrast:
-      "rest2mcp starts with intention: fewer tools, clear names, and schemas designed for agent success.",
+      "rest2mcp starts with intention: fewer tools, names an agent can use, schemas built for the job.",
   },
   howItWorks: {
-    title: "How it works",
-    subtitle: "Four steps from API to agent-ready MCP.",
+    title: "The same day",
+    subtitle: "Create a server, map a tool, test it, connect an agent.",
+    curlCommand: "curl -X GET",
+    curlPath: "/v1/invoices/{id}",
+    token: "Bearer •••••",
     steps: [
       {
         title: "Create a server",
-        desc: "Set your base URL, default headers, and variables—including encrypted secrets.",
+        desc: "Set the HTTPS origin, default headers, and variables — including encrypted secrets.",
+        artifact: "https://api.example.com",
       },
       {
-        title: "Map tools",
-        desc: "Import from curl with preview or define tools manually with params and input schemas.",
+        title: "Map a tool",
+        desc: "Import from curl with preview, or define the method, path, params, and input schema by hand.",
+        artifact: "get_invoice",
       },
       {
         title: "Test in the playground",
-        desc: "Run calls with a traffic light, review redacted logs, and tune before going live.",
+        desc: "Invoke the tool, read the traffic light, and check redacted logs before it goes live.",
+        artifact: "healthy",
       },
       {
         title: "Connect your agent",
-        desc: "Use your hosted MCP URL and a one-time agent token with Streamable HTTP.",
+        desc: "Paste the hosted /mcp/{serverId} URL and a one-time Bearer token into any Streamable HTTP client.",
+        artifact: "/mcp/{serverId}",
       },
     ],
   },
   features: {
-    title: "Shipped today",
-    subtitle: "Capabilities available in the console now—not roadmap promises.",
+    title: "Shipped in the console",
+    subtitle: "What you can use today — not a roadmap.",
     items: [
       {
         title: "Curl import with preview",
-        desc: "Paste a curl command, preview the request, and mark up fields before saving as a tool.",
+        desc: "Paste a curl command, preview the request, and mark fields before saving it as a tool.",
       },
       {
         title: "Tool params & schemas",
-        desc: "Define query, path, body, and headers with typed input schemas agents can follow.",
+        desc: "Query, path, body, and headers with typed input schemas an agent can follow.",
       },
       {
         title: "Variables & secrets",
-        desc: "Store server variables with encrypted secret handling—never returned in reads or logs.",
+        desc: "Server variables with encrypted secrets — never returned on reads or shown in logs.",
       },
       {
         title: "Hosted MCP gateway",
@@ -100,52 +110,52 @@ export const en = {
       },
       {
         title: "Playground & traffic light",
-        desc: "Execute tools in-browser with clear success, warning, and error signals.",
+        desc: "Run tools in the browser with healthy, unstable, failing, paused, and draft signals.",
       },
       {
         title: "Redacted call logs",
-        desc: "Review request history with secrets stripped from displayed logs.",
+        desc: "Paginated request history with secrets stripped from what you see.",
       },
       {
         title: "Mutation guard",
-        desc: "POST, PUT, PATCH, and DELETE stay blocked on each tool until you explicitly allow mutations for that tool.",
+        desc: "POST, PUT, PATCH, and DELETE stay blocked on each tool until you allow that tool to mutate.",
       },
       {
         title: "Platform MCP",
-        desc: "Author servers from an external agent via /api/platform-mcp—changes sync with the GUI.",
+        desc: "Create and update servers from an external agent at /api/platform-mcp — changes sync with the GUI.",
       },
       {
         title: "Custom server icons",
-        desc: "Upload an icon or use an auto-generated fallback for each server.",
+        desc: "Upload an icon, or keep the automatic fallback.",
       },
     ],
   },
   workflows: {
-    title: "Two ways to build",
-    subtitle:
-      "Use the GUI or configure from your agent—same servers, same tools.",
+    title: "Two doors",
+    subtitle: "Author in the GUI or from an agent. Same servers. Same tools.",
+    join: "Web GUI  |  Platform MCP",
     gui: {
       title: "Web GUI",
-      desc: "Visual authoring for consultants and developers who want full control.",
+      desc: "Visual authoring when you want the full console in front of you.",
       bullets: [
-        "Import curl and fine-tune tool mappings",
-        "Run the playground and read traffic-light results",
+        "Import curl and tune the mapping",
+        "Run the playground and read the traffic light",
         "Manage variables, headers, and mutation settings",
       ],
     },
     platformMcp: {
       title: "Platform MCP",
-      desc: "Let an external agent create and update servers in conversation.",
+      desc: "Let an external agent create and update the same servers in conversation.",
       bullets: [
-        "Connect via /api/platform-mcp with your agent token",
-        "Create servers, tools, and variables programmatically",
-        "See every change reflected instantly in the GUI",
+        "Connect at /api/platform-mcp with your agent token",
+        "Create servers, tools, and variables from the agent",
+        "See every change land in the GUI",
       ],
     },
   },
   security: {
-    title: "Built for trust",
-    subtitle: "Security boundaries that keep your API keys and agents safe.",
+    title: "What stays closed",
+    subtitle: "The opening stays narrow until you open it.",
     bullets: [
       {
         title: "Encrypted secrets",
@@ -153,25 +163,25 @@ export const en = {
       },
       {
         title: "SSRF allowlist",
-        desc: "Outbound requests only reach hosts you allow—no arbitrary URL fetches.",
+        desc: "Outbound calls only reach hosts you allow — no arbitrary URL fetches.",
       },
       {
         title: "Mutation guard",
-        desc: "POST, PUT, PATCH, and DELETE stay disabled on each tool until you opt in per tool.",
+        desc: "POST, PUT, PATCH, and DELETE stay off on each tool until you opt in for that tool.",
       },
       {
         title: "One-time agent tokens",
-        desc: "Tokens are shown once at creation—store them in your agent config.",
+        desc: "Tokens are shown once at creation. Store them in the agent config.",
       },
       {
-        title: "Per-user isolation",
-        desc: "Servers, tools, and logs belong to your account only.",
+        title: "Per-account isolation",
+        desc: "Servers, tools, tokens, and logs belong to your account only.",
       },
     ],
   },
   roadmap: {
-    title: "Roadmap",
-    subtitle: "What we are exploring next—clearly labeled, not shipped yet.",
+    title: "Not yet",
+    subtitle: "What comes next — labeled, not shipped.",
     statusLabels: {
       planned: "Planned",
       exploring: "Exploring",
@@ -211,12 +221,11 @@ export const en = {
   },
   audience: {
     title: "Who it's for",
-    subtitle:
-      "Teams and individuals who need curated MCP tools, not bulk API dumps.",
+    subtitle: "People who need a careful MCP, not a dump of the whole API.",
     personas: [
       {
         title: "Consultant / implementer",
-        desc: "Ship MCP integrations for clients without maintaining custom proxy code.",
+        desc: "Ship MCP integrations for clients without writing or hosting a custom proxy.",
       },
       {
         title: "Developer with your own API",
@@ -224,18 +233,17 @@ export const en = {
       },
       {
         title: "Agent power user",
-        desc: "Fill gaps in official MCPs with tools tailored to how you actually work.",
+        desc: "Fill gaps in official MCPs with tools that match how you actually work.",
       },
     ],
   },
   finalCta: {
-    title: "Start building your MCP",
-    subtitle:
-      "Sign up, create a server, and connect your first agent in minutes.",
+    title: "Create a server today",
+    subtitle: "Map one tool. Copy a URL. Connect an agent.",
     cta: "Sign up",
   },
   faq: {
-    title: "Frequently Asked Questions",
+    title: "Before you connect",
     items: [
       {
         q: "Do I need an OpenAPI spec?",

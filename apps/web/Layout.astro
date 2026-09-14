@@ -111,36 +111,20 @@ const ogLocale = Astro.currentLocale === "es" ? "es_ES" : "en_US";
         <slot />
       </main>
 
-      <footer class="border-t border-[#0b0b0b]/10 bg-white">
-        <div class="mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-          <div class="grid gap-8 md:grid-cols-2">
-            <div class="max-w-xl">
-              <p class="text-sm font-medium text-[#0b0b0b]">
-                {t.footer.tagline}
-              </p>
-              <p class="mt-2 text-sm leading-6 text-[#0b0b0b]/70">
-                {t.footer.description}
-              </p>
+      <footer class="page-footer">
+        <div class="page-wrap">
+          <div class="page-footer-grid">
+            <div>
+              <p class="page-footer-title">{t.footer.tagline}</p>
+              <p class="page-footer-copy">{t.footer.description}</p>
             </div>
-            <nav class="flex flex-col gap-2" aria-label={t.footer.navLabel}>
-              <p class="text-sm font-medium text-[#0b0b0b]">
-                {t.footer.startHeading}
-              </p>
-              <a
-                href={spaUrl("/signup")}
-                class="text-sm text-[#0b0b0b]/70 transition-colors hover:text-[#0b0b0b]"
-                >{t.footer.links.signup}</a
-              >
-              <a
-                href={spaUrl("/login")}
-                class="text-sm text-[#0b0b0b]/70 transition-colors hover:text-[#0b0b0b]"
-                >{t.footer.links.login}</a
-              >
+            <nav aria-label={t.footer.navLabel}>
+              <p class="page-footer-title">{t.footer.startHeading}</p>
+              <a href={spaUrl("/signup")}>{t.footer.links.signup}</a>
+              <a href={spaUrl("/login")}>{t.footer.links.login}</a>
             </nav>
           </div>
-          <div
-            class="mt-8 border-t border-[#0b0b0b]/10 pt-6 text-sm text-[#0b0b0b]/70"
-          >
+          <div class="page-footer-meta">
             <div class="flex flex-wrap items-center justify-between gap-4">
               <p>
                 &copy; {new Date().getFullYear()}

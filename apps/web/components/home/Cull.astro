@@ -1,0 +1,241 @@
+---
+import type { UI } from "../../i18n";
+import { spaUrl } from "../../lib/spa-url";
+
+interface Props {
+  ui: UI;
+  signup: string;
+  login: string;
+}
+
+const { ui, signup, login } = Astro.props;
+
+const leftover = [
+  { method: "GET", path: "/v1/webhooks" },
+  { method: "POST", path: "/v1/events/{id}/replay" },
+  { method: "DELETE", path: "/v1/keys/{id}" },
+  { method: "GET", path: "/v1/users/{id}/settings" },
+  { method: "POST", path: "/v1/invoices/{id}/void" },
+  { method: "POST", path: "/v1/orders/{id}/cancel" },
+] as const;
+
+const blocked = ["POST", "PUT", "PATCH", "DELETE"] as const;
+
+const origin = ui.howItWorks.steps[0];
+const mapTool = ui.howItWorks.steps[1];
+const playground = ui.howItWorks.steps[2];
+const connect = ui.howItWorks.steps[3];
+const consultant = ui.audience.personas[0];
+const developer = ui.audience.personas[1];
+const powerUser = ui.audience.personas[2];
+---
+
+<div class="cull">
+  <header class="cull-head">
+    <h2 class="cull-title">{ui.howItWorks.title}</h2>
+    <p class="cull-lede">{ui.howItWorks.subtitle}</p>
+  </header>
+
+  <section class="cull-reject" id="problem">
+    <h3 class="cull-label">{ui.problem.leftoverLabel}</h3>
+    <p class="cull-note">{ui.problem.body}</p>
+    <ul class="cull-endpoints">
+      {
+        leftover.map((row) => (
+          <li>
+            <span class="cull-method">{row.method}</span>
+            <code>{row.path}</code>
+          </li>
+        ))
+      }
+    </ul>
+    <ul class="cull-reasons">
+      {
+        ui.problem.bullets.map((bullet) => (
+          <li>
+            <strong>{bullet.title}.</strong> {bullet.desc}
+          </li>
+        ))
+      }
+    </ul>
+
+    <section id="security">
+      <h3 class="cull-label">{ui.problem.closedLabel}</h3>
+      <p class="cull-blocked">
+        {
+          blocked.map((method) => (
+            <span class="cull-method">{method}</span>
+          ))
+        }
+        <span>{ui.security.bullets[2]?.desc}</span>
+      </p>
+      <ul class="cull-closed">
+        {
+          ui.security.bullets
+            .filter((_, index) => index !== 2)
+            .map((bullet) => (
+              <li>
+                <strong>{bullet.title}.</strong> {bullet.desc}
+              </li>
+            ))
+        }
+      </ul>
+    </section>
+
+    <section id="roadmap">
+      <h3 class="cull-label">{ui.roadmap.title}</h3>
+      <ul class="cull-roadmap">
+        {
+          ui.roadmap.items.map((item) => (
+            <li>
+              <span>{item.title}</span>
+              <span class="cull-status">
+                {item.status === "planned" || item.status === "exploring"
+                  ? ui.roadmap.statusLabels[item.status]
+                  : item.status}
+              </span>
+            </li>
+          ))
+        }
+      </ul>
+    </section>
+  </section>
+
+  <div class="cull-pass">
+    <section id="how-it-works" class="cull-bench" aria-label={ui.howItWorks.title}>
+      {
+        origin ? (
+          <p class="cull-origin">
+            <span class="cull-step">{origin.title}</span>
+            <code>{origin.artifact}</code>
+          </p>
+        ) : null
+      }
+      {
+        mapTool ? (
+          <p class="cull-curl">
+            <span class="cull-step">{mapTool.title}</span>
+            <code>
+              {ui.howItWorks.curlCommand}
+              {" → "}
+              {mapTool.artifact}
+            </code>
+            <span class="cull-curl-path">{ui.howItWorks.curlPath}</span>
+          </p>
+        ) : null
+      }
+      {
+        playground ? (
+          <p class="cull-healthy">
+            <span class="cull-step">{playground.title}</span>
+            <strong>{playground.artifact}</strong>
+          </p>
+        ) : null
+      }
+      {
+        connect ? (
+          <p class="cull-slip">
+            <span class="cull-step">{connect.title}</span>
+            <code>{connect.artifact}</code>
+            <code>{ui.howItWorks.token}</code>
+          </p>
+        ) : null
+      }
+    </section>
+
+    <section id="features" class="cull-shipped">
+      <h3 class="cull-label">{ui.features.title}</h3>
+      <p class="cull-note">{ui.features.subtitle}</p>
+      <dl>
+        {
+          ui.features.items.map((item) => (
+            <div>
+              <dt>{item.title}</dt>
+              <dd>{item.desc}</dd>
+            </div>
+          ))
+        }
+      </dl>
+    </section>
+
+    <section class="cull-doors">
+      <h3 class="cull-doors-join">{ui.workflows.join}</h3>
+      <p class="cull-note">{ui.workflows.subtitle}</p>
+      <div class="cull-door-grid">
+        <article>
+          <h4>{ui.workflows.gui.title}</h4>
+          <p>{ui.workflows.gui.desc}</p>
+          <ul>
+            {ui.workflows.gui.bullets.map((bullet) => (
+              <li>{bullet}</li>
+            ))}
+          </ul>
+        </article>
+        <article>
+          <h4>{ui.workflows.platformMcp.title}</h4>
+          <p>{ui.workflows.platformMcp.desc}</p>
+          <ul>
+            {ui.workflows.platformMcp.bullets.map((bullet) => (
+              <li>{bullet}</li>
+            ))}
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="cull-who">
+      <h3 class="cull-label">{ui.audience.title}</h3>
+      {
+        consultant ? (
+          <p>
+            <strong>{consultant.title}.</strong> {consultant.desc}
+          </p>
+        ) : null
+      }
+      {
+        powerUser ? (
+          <p>
+            <strong>{powerUser.title}.</strong> {powerUser.desc}
+          </p>
+        ) : null
+      }
+      {
+        developer ? (
+          <p class="cull-who-quiet">
+            <strong>{developer.title}.</strong> {developer.desc}
+          </p>
+        ) : null
+      }
+    </section>
+
+    <section id="faq" class="cull-faq">
+      <h3 class="cull-label">{ui.faq.title}</h3>
+      {
+        ui.faq.items.map((item) => (
+          <details>
+            <summary>
+              <span>{item.q}</span>
+              <span class="cull-faq-mark" aria-hidden="true">
+                +
+              </span>
+            </summary>
+            <p>{item.a}</p>
+          </details>
+        ))
+      }
+    </section>
+
+    <nav class="cull-cta" aria-label={ui.finalCta.title}>
+      <p class="cull-cta-title">{ui.finalCta.title}</p>
+      <p class="cull-note">{ui.finalCta.subtitle}</p>
+      <div class="cull-cta-row">
+        <a class="page-cta-signup" href={spaUrl("/signup")}>
+          {signup}
+        </a>
+        <a class="page-cta-login" href={spaUrl("/login")}>
+          {login}
+        </a>
+      </div>
+    </nav>
+  </div>
+</div>

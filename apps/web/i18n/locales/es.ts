@@ -20,7 +20,7 @@ export const es = {
   footer: {
     tagline: "rest2mcp · servicio REST a MCP",
     description:
-      "Construye herramientas MCP intencionales desde tus APIs, prueba en un playground y conecta cualquier cliente Streamable HTTP. Construido con un stack web moderno.",
+      "Mapea los endpoints que importan, pruébalos en el playground y entrega a cualquier cliente Streamable HTTP una URL MCP alojada.",
     startHeading: "Empezar",
     navLabel: "Enlaces de cuenta",
     copyright: "Todos los derechos reservados.",
@@ -37,63 +37,73 @@ export const es = {
     ctaDocs: "Cómo funciona",
   },
   problem: {
-    title: "Los catálogos MCP auto-generados rompen a los agentes",
-    body: "Volcar cada operación OpenAPI en un servidor da a los agentes cientos de herramientas mal nombradas. Desperdician tokens, eligen la llamada incorrecta y a veces disparan mutaciones destructivas.",
+    title: "Un volcado no es un catálogo que un agente pueda usar",
+    body: "Volcar cada operación OpenAPI en un servidor entrega al agente cientos de herramientas mal nombradas. El contexto se llena de ruido. El modelo elige la llamada incorrecta — y a veces una destructiva.",
     bullets: [
       {
         title: "Demasiadas herramientas",
-        desc: "Los catálogos grandes diluyen el contexto y confunden la selección del modelo.",
+        desc: "Los catálogos grandes diluyen el contexto y confunden qué llamada hacer.",
       },
       {
         title: "Nombres y esquemas pobres",
-        desc: "Las etiquetas generadas rara vez coinciden con cómo razonan los agentes sobre las tareas.",
+        desc: "Las etiquetas generadas rara vez coinciden con cómo un agente razona sobre una tarea.",
       },
       {
         title: "Riesgo por defecto",
-        desc: "La exposición masiva aumenta la probabilidad de llamadas incorrectas o destructivas.",
+        desc: "La exposición masiva aumenta la probabilidad de una llamada incorrecta o destructiva.",
       },
     ],
+    leftoverLabel: "No pasa",
+    passedLabel: "Pasa",
+    closedLabel: "Sigue cerrado",
     contrast:
-      "rest2mcp empieza con intención: menos herramientas, nombres claros y esquemas diseñados para el éxito del agente.",
+      "rest2mcp empieza con intención: menos herramientas, nombres que un agente puede usar, esquemas hechos para el trabajo.",
   },
   howItWorks: {
-    title: "Cómo funciona",
-    subtitle: "Cuatro pasos de la API al MCP listo para agentes.",
+    title: "El mismo día",
+    subtitle:
+      "Crea un servidor, mapea una herramienta, pruébala, conecta un agente.",
+    curlCommand: "curl -X GET",
+    curlPath: "/v1/invoices/{id}",
+    token: "Bearer •••••",
     steps: [
       {
         title: "Crea un servidor",
-        desc: "Configura tu URL base, headers por defecto y variables—incluyendo secretos cifrados.",
+        desc: "Configura el origen HTTPS, los headers por defecto y las variables — incluidos los secretos cifrados.",
+        artifact: "https://api.example.com",
       },
       {
-        title: "Mapea herramientas",
-        desc: "Importa desde curl con vista previa o define herramientas manualmente con params y esquemas de entrada.",
+        title: "Mapea una herramienta",
+        desc: "Importa desde curl con vista previa, o define el método, la ruta, los params y el esquema de entrada a mano.",
+        artifact: "get_invoice",
       },
       {
         title: "Prueba en el playground",
-        desc: "Ejecuta llamadas con semáforo, revisa logs redactados y ajusta antes de publicar.",
+        desc: "Invoca la herramienta, lee el semáforo y revisa los logs redactados antes de publicarla.",
+        artifact: "healthy",
       },
       {
         title: "Conecta tu agente",
-        desc: "Usa tu URL MCP alojada y un token de agente de un solo uso con Streamable HTTP.",
+        desc: "Pega la URL alojada /mcp/{serverId} y un token Bearer de un solo uso en cualquier cliente Streamable HTTP.",
+        artifact: "/mcp/{serverId}",
       },
     ],
   },
   features: {
-    title: "Disponible hoy",
-    subtitle:
-      "Capacidades disponibles en la consola ahora—no promesas del roadmap.",
+    title: "Disponible en la consola",
+    subtitle: "Lo que puedes usar hoy — no un roadmap.",
     items: [
       {
         title: "Importación curl con vista previa",
-        desc: "Pega un comando curl, previsualiza la petición y marca campos antes de guardar como herramienta.",
+        desc: "Pega un comando curl, previsualiza la petición y marca campos antes de guardarla como herramienta.",
       },
       {
         title: "Params y esquemas de herramientas",
-        desc: "Define query, path, body y headers con esquemas de entrada tipados que los agentes pueden seguir.",
+        desc: "Query, path, body y headers con esquemas de entrada tipados que un agente puede seguir.",
       },
       {
         title: "Variables y secretos",
-        desc: "Almacena variables de servidor con manejo cifrado de secretos—nunca devueltos en lecturas ni logs.",
+        desc: "Variables de servidor con secretos cifrados — nunca devueltos en lecturas ni mostrados en logs.",
       },
       {
         title: "Gateway MCP alojado",
@@ -101,52 +111,53 @@ export const es = {
       },
       {
         title: "Playground y semáforo",
-        desc: "Ejecuta herramientas en el navegador con señales claras de éxito, advertencia y error.",
+        desc: "Ejecuta herramientas en el navegador con señales healthy, unstable, failing, paused y draft.",
       },
       {
         title: "Logs de llamadas redactados",
-        desc: "Revisa el historial de peticiones con secretos eliminados de los logs mostrados.",
+        desc: "Historial paginado de peticiones con secretos eliminados de lo que ves.",
       },
       {
         title: "Protección de mutaciones",
-        desc: "POST, PUT, PATCH y DELETE permanecen bloqueados en cada herramienta hasta que permitas mutaciones para esa herramienta.",
+        desc: "POST, PUT, PATCH y DELETE permanecen bloqueados en cada herramienta hasta que permitas que esa herramienta mute.",
       },
       {
         title: "Platform MCP",
-        desc: "Autoriza servidores desde un agente externo vía /api/platform-mcp—los cambios se sincronizan con la GUI.",
+        desc: "Crea y actualiza servidores desde un agente externo en /api/platform-mcp — los cambios se sincronizan con la GUI.",
       },
       {
         title: "Iconos personalizados",
-        desc: "Sube un icono o usa un fallback auto-generado para cada servidor.",
+        desc: "Sube un icono o quédate con el fallback automático.",
       },
     ],
   },
   workflows: {
-    title: "Dos formas de construir",
+    title: "Dos puertas",
     subtitle:
-      "Usa la GUI o configura desde tu agente—mismos servidores, mismas herramientas.",
+      "Trabaja en la GUI o desde un agente. Mismos servidores. Mismas herramientas.",
+    join: "GUI web  |  Platform MCP",
     gui: {
       title: "GUI web",
-      desc: "Autoría visual para consultores y desarrolladores que quieren control total.",
+      desc: "Autoría visual cuando quieres la consola completa delante.",
       bullets: [
-        "Importa curl y ajusta mapeos de herramientas",
-        "Ejecuta el playground y lee resultados del semáforo",
+        "Importa curl y ajusta el mapeo",
+        "Ejecuta el playground y lee el semáforo",
         "Gestiona variables, headers y configuración de mutaciones",
       ],
     },
     platformMcp: {
       title: "Platform MCP",
-      desc: "Deja que un agente externo cree y actualice servidores en conversación.",
+      desc: "Deja que un agente externo cree y actualice los mismos servidores en conversación.",
       bullets: [
-        "Conéctate vía /api/platform-mcp con tu token de agente",
-        "Crea servidores, herramientas y variables programáticamente",
-        "Ve cada cambio reflejado al instante en la GUI",
+        "Conéctate en /api/platform-mcp con tu token de agente",
+        "Crea servidores, herramientas y variables desde el agente",
+        "Ve cada cambio reflejado en la GUI",
       ],
     },
   },
   security: {
-    title: "Diseñado para confianza",
-    subtitle: "Límites de seguridad que protegen tus claves de API y agentes.",
+    title: "Lo que permanece cerrado",
+    subtitle: "La abertura se queda estrecha hasta que la abres.",
     bullets: [
       {
         title: "Secretos cifrados",
@@ -154,26 +165,25 @@ export const es = {
       },
       {
         title: "Allowlist SSRF",
-        desc: "Las peticiones salientes solo llegan a hosts que permites—sin fetch a URLs arbitrarias.",
+        desc: "Las llamadas salientes solo llegan a hosts que permites — sin fetch a URLs arbitrarias.",
       },
       {
         title: "Protección de mutaciones",
-        desc: "POST, PUT, PATCH y DELETE permanecen deshabilitados en cada herramienta hasta que optes por herramienta.",
+        desc: "POST, PUT, PATCH y DELETE permanecen desactivados en cada herramienta hasta que optes por esa herramienta.",
       },
       {
         title: "Tokens de agente de un solo uso",
-        desc: "Los tokens se muestran una vez al crearlos—guárdalos en la config de tu agente.",
+        desc: "Los tokens se muestran una vez al crearlos. Guárdalos en la config del agente.",
       },
       {
-        title: "Aislamiento por usuario",
-        desc: "Servidores, herramientas y logs pertenecen solo a tu cuenta.",
+        title: "Aislamiento por cuenta",
+        desc: "Servidores, herramientas, tokens y logs pertenecen solo a tu cuenta.",
       },
     ],
   },
   roadmap: {
-    title: "Roadmap",
-    subtitle:
-      "Lo que exploramos a continuación—claramente etiquetado, aún no disponible.",
+    title: "Aún no",
+    subtitle: "Lo que sigue — etiquetado, no publicado.",
     statusLabels: {
       planned: "Planificado",
       exploring: "Explorando",
@@ -214,11 +224,11 @@ export const es = {
   audience: {
     title: "Para quién es",
     subtitle:
-      "Equipos e individuos que necesitan herramientas MCP curadas, no volcados masivos de API.",
+      "Quienes necesitan un MCP cuidadoso, no un volcado de toda la API.",
     personas: [
       {
         title: "Consultor / implementador",
-        desc: "Entrega integraciones MCP para clientes sin mantener código proxy personalizado.",
+        desc: "Entrega integraciones MCP para clientes sin escribir ni alojar un proxy propio.",
       },
       {
         title: "Desarrollador con tu propia API",
@@ -226,18 +236,17 @@ export const es = {
       },
       {
         title: "Power user de agentes",
-        desc: "Cierra huecos en MCPs oficiales con herramientas adaptadas a cómo trabajas realmente.",
+        desc: "Cierra huecos en MCPs oficiales con herramientas que coinciden con cómo trabajas.",
       },
     ],
   },
   finalCta: {
-    title: "Empieza a construir tu MCP",
-    subtitle:
-      "Regístrate, crea un servidor y conecta tu primer agente en minutos.",
+    title: "Crea un servidor hoy",
+    subtitle: "Mapea una herramienta. Copia una URL. Conecta un agente.",
     cta: "Registrarse",
   },
   faq: {
-    title: "Preguntas frecuentes",
+    title: "Antes de conectar",
     items: [
       {
         q: "¿Necesito una spec OpenAPI?",

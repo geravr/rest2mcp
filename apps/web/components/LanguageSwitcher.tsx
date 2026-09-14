@@ -21,21 +21,15 @@ export function LanguageSwitcher({ locale, labels }: Props) {
   const isEn = locale !== "es";
 
   return (
-    <nav
-      className="flex rounded-md border border-border"
-      aria-label={labels.ariaLabel}
-    >
+    <nav className="page-lang" aria-label={labels.ariaLabel}>
       {isEn ? (
-        <span
-          className="rounded-l-md bg-secondary px-3 py-2 text-xs font-medium text-secondary-foreground"
-          aria-current="page"
-        >
+        <span className="page-lang-current" aria-current="page">
           {labels.en}
         </span>
       ) : (
         <a
           href="/"
-          className="rounded-l-md px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="page-lang-link"
           aria-label={labels.enAriaLabel}
           onClick={() => setLangCookie("en")}
         >
@@ -43,16 +37,13 @@ export function LanguageSwitcher({ locale, labels }: Props) {
         </a>
       )}
       {!isEn ? (
-        <span
-          className="rounded-r-md bg-secondary px-3 py-2 text-xs font-medium text-secondary-foreground"
-          aria-current="page"
-        >
+        <span className="page-lang-current" aria-current="page">
           {labels.es}
         </span>
       ) : (
         <a
           href="/es/"
-          className="rounded-r-md px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="page-lang-link"
           aria-label={labels.esAriaLabel}
           onClick={() => setLangCookie("es")}
         >
