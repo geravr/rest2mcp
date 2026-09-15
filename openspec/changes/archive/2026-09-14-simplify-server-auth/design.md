@@ -42,12 +42,12 @@ basic   { type: "basic"; username: string; password: string }
 
 `createServer` accepts optional `auth` (omit or `none` → no mapping). Settings calls `setServerAuth` with the same object. Mapping:
 
-| Type   | Variable     | Default |
-| ------ | ------------ | ------- |
-| bearer | `api_token`  | `Authorization: Bearer {{api_token}}` |
-| header | slug of header, else `api_key` | `{headerName}: {{name}}` |
-| query  | slug of param, else `api_key` | `defaultQuery[paramName] = {{name}}` |
-| basic  | `basic_auth` | `Authorization: Basic {{basic_auth}}` where the stored secret is Base64(`username:password`) |
+| Type   | Variable                       | Default                                                                                      |
+| ------ | ------------------------------ | -------------------------------------------------------------------------------------------- |
+| bearer | `api_token`                    | `Authorization: Bearer {{api_token}}`                                                        |
+| header | slug of header, else `api_key` | `{headerName}: {{name}}`                                                                     |
+| query  | slug of param, else `api_key`  | `defaultQuery[paramName] = {{name}}`                                                         |
+| basic  | `basic_auth`                   | `Authorization: Basic {{basic_auth}}` where the stored secret is Base64(`username:password`) |
 
 Reads infer the type from defaults + variable names using the same rules as tool origin inference. Unrecognized combinations are **Custom**: the Auth card does not pretend to edit them; the existing default-header/query editors remain the source of truth.
 
