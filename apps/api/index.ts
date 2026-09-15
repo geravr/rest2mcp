@@ -33,6 +33,10 @@ export type {
   UpdateServerInput,
   UpdateToolInput,
 } from "./services/mcp-studio-service.js";
+export type {
+  InferredServerAuth,
+  ServerAuthRecipe,
+} from "./lib/mcp-auth-recipe.js";
 // Re-export context type to fix TypeScript portability issues
 export type * from "./lib/context.js";
 

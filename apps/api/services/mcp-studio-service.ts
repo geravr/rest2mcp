@@ -15,6 +15,15 @@ import {
 import { and, count, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { APP_ERROR_CODES, AppError, appError } from "../lib/app-error.js";
+import {
+  allCredentialMappingKeys,
+  inferServerAuth,
+  inferredAuthOwnedKeys,
+  recipeToMapping,
+  serverHasMappedAuth,
+  templatesReferenceVariable,
+  type ServerAuthRecipe,
+} from "../lib/mcp-auth-recipe.js";
 import { generateAgentToken, hashAgentToken } from "../lib/mcp-agent-token.js";
 import { encryptCredential } from "../lib/mcp-crypto.js";
 import { isAuthHeaderName, parseCurlCommand } from "../lib/mcp-curl.js";
@@ -42,11 +51,14 @@ export type McpToolSource = "manual" | "curl";
 export type McpHttpMethod =
   "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
 
+export type { ServerAuthRecipe };
+
 export type CreateServerInput = {
   name: string;
   description?: string | null;
   baseUrl: string;
   slug?: string;
+  auth?: ServerAuthRecipe;
 };
 
 export type UpdateServerInput = {
@@ -377,28 +389,50 @@ export async function createServer(
   db: DB,
   userId: string,
   input: CreateServerInput,
+  credentialSecret?: string,
 ) {
   const parsed = parseBaseUrl(input.baseUrl);
   const baseUrl = formatBaseUrl(parsed);
   const slug = slugifyName(input.slug ?? input.name);
   const allowedHosts = deriveAllowedHosts(baseUrl);
+  const auth = input.auth ?? { type: "none" as const };
+
+  if (auth.type !== "none" && !credentialSecret) {
+    throw appError({
+      appCode: APP_ERROR_CODES.INVALID_INPUT,
+      message: "Credential secret is required to store server authentication.",
+      status: 500,
+    });
+  }
+
+  // Validate the recipe before inserting so empty tokens never leave a row.
+  if (auth.type !== "none") {
+    recipeToMapping(auth);
+  }
 
   try {
-    const [created] = await db
-      .insert(mcpServer)
-      .values({
-        userId,
-        name: input.name.trim(),
-        slug,
-        description: input.description?.trim() || null,
-        baseUrl,
-        allowedHosts,
-        status: "draft",
-      })
-      .returning();
+    return await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(mcpServer)
+        .values({
+          userId,
+          name: input.name.trim(),
+          slug,
+          description: input.description?.trim() || null,
+          baseUrl,
+          allowedHosts,
+          status: "draft",
+        })
+        .returning();
 
-    const [withMeta] = await attachTrafficLight(db, [created]);
-    return withMeta;
+      const server =
+        auth.type !== "none" && credentialSecret
+          ? await applyAuthRecipe(tx, created, auth, credentialSecret)
+          : created;
+
+      const [withMeta] = await attachTrafficLight(tx, [server]);
+      return withMeta;
+    });
   } catch (error) {
     if (isUniqueViolation(error)) {
       throw appError({
@@ -409,6 +443,151 @@ export async function createServer(
     }
     throw error;
   }
+}
+
+function collectServerTemplateStrings(
+  server: Pick<McpServer, "defaultHeaders" | "defaultQuery">,
+  tools: Array<{
+    pathTemplate: string;
+    requestTemplate: McpRequestTemplate | null;
+  }>,
+): string[] {
+  const templates: string[] = [
+    ...Object.values(server.defaultHeaders ?? {}),
+    ...Object.values(server.defaultQuery ?? {}),
+  ];
+  for (const tool of tools) {
+    templates.push(tool.pathTemplate);
+    const request = tool.requestTemplate;
+    if (!request) continue;
+    templates.push(...Object.values(request.headers ?? {}));
+    templates.push(...Object.values(request.query ?? {}));
+    if (request.body) templates.push(request.body);
+  }
+  return templates;
+}
+
+async function upsertSecretVariable(
+  db: DB,
+  serverId: string,
+  name: string,
+  plaintext: string,
+  credentialSecret: string,
+): Promise<void> {
+  await upsertCapturedVariable(
+    db,
+    serverId,
+    name,
+    plaintext,
+    true,
+    credentialSecret,
+  );
+}
+
+/**
+ * Apply an auth recipe onto an already-loaded server row inside a transaction.
+ * Replaces previous recipe keys only; unrelated defaults (e.g. Version) stay.
+ * `none` clears every credential default (including Custom multi-key setups).
+ */
+export async function applyAuthRecipe(
+  db: DB,
+  server: McpServer,
+  recipe: ServerAuthRecipe,
+  credentialSecret: string,
+): Promise<McpServer> {
+  const mapping = recipeToMapping(recipe);
+  const previous = inferServerAuth(server.defaultHeaders, server.defaultQuery);
+  const typedOwned = inferredAuthOwnedKeys(previous);
+  const previousOwned =
+    recipe.type === "none"
+      ? allCredentialMappingKeys(server.defaultHeaders, server.defaultQuery)
+      : {
+          headerKeys: typedOwned.headerKeys,
+          queryKeys: typedOwned.queryKeys,
+          variableNames: typedOwned.variableName
+            ? [typedOwned.variableName]
+            : [],
+        };
+
+  const nextHeaders: Record<string, string> = {
+    ...(server.defaultHeaders ?? {}),
+  };
+  for (const key of previousOwned.headerKeys) {
+    delete nextHeaders[key];
+  }
+  Object.assign(nextHeaders, mapping.defaultHeadersPatch);
+
+  const nextQuery: Record<string, string> = {
+    ...(server.defaultQuery ?? {}),
+  };
+  for (const key of previousOwned.queryKeys) {
+    delete nextQuery[key];
+  }
+  Object.assign(nextQuery, mapping.defaultQueryPatch);
+
+  if (mapping.variableName && mapping.plaintext !== null) {
+    await upsertSecretVariable(
+      db,
+      server.id,
+      mapping.variableName,
+      mapping.plaintext,
+      credentialSecret,
+    );
+  }
+
+  const [updated] = await db
+    .update(mcpServer)
+    .set({
+      defaultHeaders: Object.keys(nextHeaders).length > 0 ? nextHeaders : null,
+      defaultQuery: Object.keys(nextQuery).length > 0 ? nextQuery : null,
+      updatedAt: new Date(),
+    })
+    .where(eq(mcpServer.id, server.id))
+    .returning();
+
+  const tools = await db
+    .select({
+      pathTemplate: mcpTool.pathTemplate,
+      requestTemplate: mcpTool.requestTemplate,
+    })
+    .from(mcpTool)
+    .where(eq(mcpTool.serverId, server.id));
+
+  const remainingTemplates = collectServerTemplateStrings(updated, tools);
+  for (const priorVariable of previousOwned.variableNames) {
+    if (priorVariable === mapping.variableName) continue;
+    if (templatesReferenceVariable(priorVariable, remainingTemplates)) {
+      continue;
+    }
+    await db
+      .delete(mcpServerVariable)
+      .where(
+        and(
+          eq(mcpServerVariable.serverId, server.id),
+          eq(mcpServerVariable.name, priorVariable),
+        ),
+      );
+  }
+
+  return updated;
+}
+
+export async function setServerAuth(
+  db: DB,
+  userId: string,
+  serverId: string,
+  recipe: ServerAuthRecipe,
+  credentialSecret: string,
+) {
+  const server = await requireOwnedServer(db, userId, serverId);
+  return db.transaction(async (tx) => {
+    const updated = await applyAuthRecipe(tx, server, recipe, credentialSecret);
+    const [withMeta] = await attachTrafficLight(tx, [updated]);
+    return {
+      ...withMeta,
+      auth: inferServerAuth(updated.defaultHeaders, updated.defaultQuery),
+    };
+  });
 }
 
 export async function getServer(db: DB, userId: string, serverId: string) {
@@ -425,6 +604,7 @@ export async function getServer(db: DB, userId: string, serverId: string) {
     ...withMeta,
     tools,
     variables,
+    auth: inferServerAuth(server.defaultHeaders, server.defaultQuery),
     recipe: toRecipeTemplate({
       name: server.name,
       description: server.description,
@@ -1061,6 +1241,7 @@ export async function createToolFromCurl(
   const capturedVariables: string[] = [];
   let capturedVariable: string | null = null;
   let capturedHeader: string | null = null;
+  let existingAuthKept = false;
 
   if (suggestion) {
     const authMarking = markings.find(
@@ -1069,19 +1250,20 @@ export async function createToolFromCurl(
     capturedHeader = suggestion.headerName;
     const renderHeaderValue = (name: string) =>
       suggestion.scheme === "bearer" ? `Bearer {{${name}}}` : `{{${name}}}`;
+    const keepExistingAuth = serverHasMappedAuth(
+      server.defaultHeaders,
+      server.defaultQuery,
+    );
 
     if (authMarking?.as === "param") {
-      substituteAuth(suggestion.value, authMarking.name);
+      // Agent-param credentials stay on the tool request only — never on
+      // server defaults. Auth was peeled from parsed headers, so put the
+      // templated header back onto the tool template.
+      headers[suggestion.headerName] = renderHeaderValue(authMarking.name);
       params.push({ name: authMarking.name, required: true, type: "string" });
       capturedParams.push(authMarking.name);
-      const defaultHeaders = {
-        ...(server.defaultHeaders ?? {}),
-        [suggestion.headerName]: renderHeaderValue(authMarking.name),
-      };
-      await db
-        .update(mcpServer)
-        .set({ defaultHeaders })
-        .where(eq(mcpServer.id, server.id));
+    } else if (keepExistingAuth) {
+      existingAuthKept = true;
     } else {
       const variableName =
         authMarking?.name ??
@@ -1154,6 +1336,7 @@ export async function createToolFromCurl(
     capturedHeader,
     capturedVariables,
     capturedParams,
+    existingAuthKept,
   };
 }
 

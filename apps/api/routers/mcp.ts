@@ -1,5 +1,6 @@
 import { paginationInputSchema } from "@repo/core";
 import { z } from "zod";
+import { serverAuthRecipeSchema } from "../lib/mcp-auth-recipe.js";
 import { protectedProcedure, router } from "../lib/trpc.js";
 import { executeMappedTool } from "../services/mcp-executor-service.js";
 import {
@@ -24,6 +25,7 @@ import {
   resolveApiOrigin,
   revokePlatformToken,
   revokeServerToken,
+  setServerAuth,
   testConnection,
   updateServer,
   updateTool,
@@ -82,10 +84,32 @@ export const mcpRouter = router({
         description: z.string().trim().max(2000).nullable().optional(),
         baseUrl: z.url(),
         slug: z.string().trim().min(1).max(64).optional(),
+        auth: serverAuthRecipeSchema.optional(),
       }),
     )
     .mutation(({ ctx, input }) =>
-      createServer(ctx.dbDirect, ctx.user.id, input),
+      createServer(
+        ctx.dbDirect,
+        ctx.user.id,
+        input,
+        ctx.env.MCP_CREDENTIAL_SECRET,
+      ),
+    ),
+
+  setServerAuth: protectedProcedure
+    .input(
+      serverIdInput.extend({
+        auth: serverAuthRecipeSchema,
+      }),
+    )
+    .mutation(({ ctx, input }) =>
+      setServerAuth(
+        ctx.dbDirect,
+        ctx.user.id,
+        input.serverId,
+        input.auth,
+        ctx.env.MCP_CREDENTIAL_SECRET,
+      ),
     ),
 
   getServer: protectedProcedure

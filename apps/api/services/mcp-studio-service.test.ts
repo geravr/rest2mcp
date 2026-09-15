@@ -96,6 +96,7 @@ import {
   mutationDefaults,
   parseCurlPreview,
   previewCurlImport,
+  setServerAuth,
   setVariable,
   testConnection,
   toRecipeTemplate,
@@ -410,6 +411,9 @@ describe("mcp-studio ownership", () => {
           },
         }),
       })),
+      transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
+        fn(db),
+      ),
     };
 
     await expect(
@@ -456,6 +460,241 @@ describe("mcp-studio servers", () => {
       baseUrl: "https://api.example.com/v2",
       allowedHosts: ["api.example.com"],
     });
+  });
+
+  it("creates a server with bearer auth as a secret variable", async () => {
+    const secret = "s".repeat(32);
+    const created = {
+      id: "mcs_1",
+      userId: "user-a",
+      name: "CRM",
+      status: "draft",
+      allowedHosts: ["api.example.com"],
+      defaultHeaders: null,
+      defaultQuery: null,
+    };
+    const withAuth = {
+      ...created,
+      defaultHeaders: { Authorization: "Bearer {{api_token}}" },
+    };
+    const db = makeDb([
+      [created],
+      [],
+      [],
+      [withAuth],
+      [{ count: 0 }],
+      [],
+      [],
+      [],
+    ]);
+
+    const result = await createServer(
+      db as never,
+      "user-a",
+      {
+        name: "CRM",
+        baseUrl: "https://api.example.com",
+        auth: { type: "bearer", token: "sk_live_123" },
+      },
+      secret,
+    );
+
+    expect(result.defaultHeaders).toEqual({
+      Authorization: "Bearer {{api_token}}",
+    });
+    expect(JSON.stringify(db.insertedValues)).not.toContain("sk_live_123");
+    const variableInsert = db.insertedValues.find(
+      (row) =>
+        row &&
+        typeof row === "object" &&
+        "name" in row &&
+        (row as { name: string }).name === "api_token",
+    ) as { ciphertext: string; isSecret: boolean };
+    expect(variableInsert.isSecret).toBe(true);
+    expect(decryptCredential(variableInsert.ciphertext, secret)).toBe(
+      "sk_live_123",
+    );
+  });
+
+  it("creates a server with none auth and no secret variable", async () => {
+    const db = makeDb([
+      [
+        {
+          id: "mcs_1",
+          userId: "user-a",
+          name: "CRM",
+          status: "draft",
+          allowedHosts: ["api.example.com"],
+          defaultHeaders: null,
+        },
+      ],
+      [{ count: 0 }],
+      [],
+      [],
+      [],
+    ]);
+
+    await createServer(db as never, "user-a", {
+      name: "CRM",
+      baseUrl: "https://api.example.com",
+      auth: { type: "none" },
+    });
+
+    expect(db.insertedValues).toHaveLength(1);
+    expect(db.updatedValues).toHaveLength(0);
+  });
+
+  it("rejects empty bearer token on create before writing", async () => {
+    const db = makeDb([]);
+
+    await expect(
+      createServer(
+        db as never,
+        "user-a",
+        {
+          name: "CRM",
+          baseUrl: "https://api.example.com",
+          auth: { type: "bearer", token: "   " },
+        },
+        "s".repeat(32),
+      ),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.appCode === APP_ERROR_CODES.INVALID_INPUT,
+    );
+    expect(db.transaction).not.toHaveBeenCalled();
+  });
+
+  it("switches bearer to header without dropping unrelated Version", async () => {
+    const secret = "s".repeat(32);
+    const server = {
+      id: "mcs_1",
+      userId: "user-a",
+      name: "CRM",
+      status: "draft",
+      baseUrl: "https://api.example.com",
+      allowedHosts: ["api.example.com"],
+      defaultHeaders: {
+        Authorization: "Bearer {{api_token}}",
+        Version: "2024-01",
+      },
+      defaultQuery: null,
+    };
+    const updated = {
+      ...server,
+      defaultHeaders: {
+        Version: "2024-01",
+        "X-API-Key": "{{api_key}}",
+      },
+    };
+    const db = makeDb([
+      [server],
+      [],
+      [],
+      [updated],
+      [],
+      [],
+      [{ count: 0 }],
+      [],
+      [],
+      [],
+    ]);
+
+    const result = await setServerAuth(
+      db as never,
+      "user-a",
+      "mcs_1",
+      { type: "header", headerName: "X-API-Key", value: "key_123" },
+      secret,
+    );
+
+    expect(result.defaultHeaders).toEqual({
+      Version: "2024-01",
+      "X-API-Key": "{{api_key}}",
+    });
+    expect(db.delete).toHaveBeenCalled();
+  });
+
+  it("clears unreferenced api_token when set to none", async () => {
+    const server = {
+      id: "mcs_1",
+      userId: "user-a",
+      name: "CRM",
+      status: "draft",
+      baseUrl: "https://api.example.com",
+      allowedHosts: ["api.example.com"],
+      defaultHeaders: { Authorization: "Bearer {{api_token}}" },
+      defaultQuery: null,
+    };
+    const updated = {
+      ...server,
+      defaultHeaders: null,
+    };
+    const db = makeDb([
+      [server],
+      [updated],
+      [],
+      [],
+      [{ count: 0 }],
+      [],
+      [],
+      [],
+    ]);
+
+    const result = await setServerAuth(
+      db as never,
+      "user-a",
+      "mcs_1",
+      { type: "none" },
+      "s".repeat(32),
+    );
+
+    expect(result.defaultHeaders).toBeNull();
+    expect(db.delete).toHaveBeenCalled();
+  });
+
+  it("clears all Custom credential defaults when set to none", async () => {
+    const server = {
+      id: "mcs_1",
+      userId: "user-a",
+      name: "CRM",
+      status: "draft",
+      baseUrl: "https://api.example.com",
+      allowedHosts: ["api.example.com"],
+      defaultHeaders: {
+        Authorization: "Bearer {{api_token}}",
+        "X-Partner-Key": "{{partner}}",
+        Version: "2024-01",
+      },
+      defaultQuery: null,
+    };
+    const updated = {
+      ...server,
+      defaultHeaders: { Version: "2024-01" },
+    };
+    const db = makeDb([
+      [server],
+      [updated],
+      [],
+      [],
+      [],
+      [{ count: 0 }],
+      [],
+      [],
+      [],
+    ]);
+
+    const result = await setServerAuth(
+      db as never,
+      "user-a",
+      "mcs_1",
+      { type: "none" },
+      "s".repeat(32),
+    );
+
+    expect(result.defaultHeaders).toEqual({ Version: "2024-01" });
+    expect(db.delete).toHaveBeenCalled();
   });
 
   it("preserves the baseUrl path prefix on update", async () => {
@@ -513,6 +752,38 @@ describe("mcp-studio servers", () => {
         "mcs_1",
         {
           defaultHeaders: { Authorization: "Bearer sk_live_123" },
+        },
+        "http://localhost:5173",
+      ),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.appCode === APP_ERROR_CODES.MCP_PLAINTEXT_SECRET,
+    );
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects literal Shopify access-token headers as plaintext secrets", async () => {
+    const db = makeDb([
+      [
+        {
+          id: "mcs_1",
+          userId: "user-a",
+          name: "CRM",
+          status: "draft",
+          baseUrl: "https://api.example.com",
+          allowedHosts: ["api.example.com"],
+        },
+      ],
+    ]);
+
+    await expect(
+      updateServer(
+        db as never,
+        "user-a",
+        "mcs_1",
+        {
+          defaultHeaders: { "X-Shopify-Access-Token": "shpat_123" },
         },
         "http://localhost:5173",
       ),
@@ -815,6 +1086,84 @@ describe("mcp-studio tools", () => {
     });
     const toolInsert = db.insertedValues.at(-1);
     expect(JSON.stringify(toolInsert)).not.toContain("Authorization");
+  });
+
+  it("keeps existing Bearer auth when importing curl with a different token", async () => {
+    const server = {
+      id: "mcs_1",
+      userId: "user-a",
+      status: "live",
+      baseUrl: "https://api.example.com",
+      defaultHeaders: { Authorization: "Bearer {{api_token}}" },
+      defaultQuery: null,
+    };
+    const db = makeDb([
+      [server],
+      [server],
+      [{ count: 0 }],
+      [],
+      [{ id: "mct_1" }],
+    ]);
+
+    const result = await createToolFromCurl(
+      db as never,
+      "user-a",
+      "mcs_1",
+      {
+        curl: `curl -H 'Authorization: Bearer other-secret' https://api.example.com/contacts`,
+      },
+      "s".repeat(32),
+    );
+
+    expect(result.existingAuthKept).toBe(true);
+    expect(result.capturedVariable).toBeNull();
+    expect(db.updatedValues).toHaveLength(0);
+    expect(JSON.stringify(db.insertedValues)).not.toContain("other-secret");
+    const toolInsert = db.insertedValues.at(-1);
+    expect(JSON.stringify(toolInsert)).not.toContain("Authorization");
+    expect(JSON.stringify(toolInsert)).not.toContain("other-secret");
+  });
+
+  it("does not write agent-param credentials into server Authorization", async () => {
+    const server = {
+      id: "mcs_1",
+      userId: "user-a",
+      status: "live",
+      baseUrl: "https://api.example.com",
+      defaultHeaders: null,
+      defaultQuery: null,
+    };
+    const db = makeDb([
+      [server],
+      [server],
+      [{ count: 0 }],
+      [],
+      [{ id: "mct_1" }],
+    ]);
+
+    const result = await createToolFromCurl(
+      db as never,
+      "user-a",
+      "mcs_1",
+      {
+        curl: `curl -H 'Authorization: Bearer super-secret' https://api.example.com/contacts`,
+        markings: [
+          { value: "super-secret", as: "param", name: "access_token" },
+        ],
+      },
+      "s".repeat(32),
+    );
+
+    expect(result.capturedParams).toEqual(["access_token"]);
+    expect(result.capturedVariable).toBeNull();
+    expect(db.updatedValues).toHaveLength(0);
+    expect(JSON.stringify(db.insertedValues)).not.toContain("super-secret");
+    expect(db.insertedValues.at(-1)).toMatchObject({
+      params: [{ name: "access_token", required: true, type: "string" }],
+      requestTemplate: {
+        headers: { Authorization: "Bearer {{access_token}}" },
+      },
+    });
   });
 
   it("captures api-key curl headers without a Bearer prefix", async () => {
