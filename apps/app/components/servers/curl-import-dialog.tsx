@@ -75,6 +75,7 @@ export function CurlImportDialog({
   const [report, setReport] = useState<{
     variables: number;
     params: number;
+    existingAuthKept: boolean;
   } | null>(null);
 
   const preview = parsePreview.data ?? null;
@@ -148,6 +149,7 @@ export function CurlImportDialog({
           setReport({
             variables: result.capturedVariables.length,
             params: result.capturedParams.length,
+            existingAuthKept: result.existingAuthKept,
           });
         },
       },
@@ -170,9 +172,11 @@ export function CurlImportDialog({
           <>
             <Alert>
               <AlertDescription>
-                {t.servers.captureReport
-                  .replace("{variables}", String(report.variables))
-                  .replace("{params}", String(report.params))}
+                {report.existingAuthKept
+                  ? t.servers.existingAuthKept
+                  : t.servers.captureReport
+                      .replace("{variables}", String(report.variables))
+                      .replace("{params}", String(report.params))}
               </AlertDescription>
             </Alert>
             <DialogFooter>

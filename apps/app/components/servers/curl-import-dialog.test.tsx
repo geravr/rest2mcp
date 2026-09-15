@@ -41,12 +41,14 @@ const createMutate = vi.fn(
       onSuccess?: (result: {
         capturedVariables: string[];
         capturedParams: string[];
+        existingAuthKept: boolean;
       }) => void;
     },
   ) => {
     options?.onSuccess?.({
       capturedVariables: ["authorization_token"],
       capturedParams: [],
+      existingAuthKept: false,
     });
   },
 );
@@ -114,6 +116,41 @@ describe("CurlImportDialog", () => {
     // Capture report phase.
     expect(
       screen.getByText(/captured 1 variables and 0 params/i),
+    ).toBeInTheDocument();
+  });
+
+  it("reports when existing server auth was kept", async () => {
+    createMutate.mockImplementationOnce(
+      (
+        _input: unknown,
+        options?: {
+          onSuccess?: (result: {
+            capturedVariables: string[];
+            capturedParams: string[];
+            existingAuthKept: boolean;
+          }) => void;
+        },
+      ) => {
+        options?.onSuccess?.({
+          capturedVariables: [],
+          capturedParams: [],
+          existingAuthKept: true,
+        });
+      },
+    );
+
+    const user = userEvent.setup();
+    render(<CurlImportDialog serverId="mcs_1" onClose={() => {}} />);
+
+    await user.type(
+      screen.getByLabelText(/curl command/i),
+      "curl https://api.example.com/v1/contacts/123 -H 'Authorization: Bearer sk_live_123'",
+    );
+    await user.click(screen.getByRole("button", { name: /^parse$/i }));
+    await user.click(screen.getByRole("button", { name: /create tool/i }));
+
+    expect(
+      screen.getByText(/existing server authentication was kept/i),
     ).toBeInTheDocument();
   });
 
