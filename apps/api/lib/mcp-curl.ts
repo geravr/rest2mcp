@@ -1,4 +1,7 @@
 import { APP_ERROR_CODES, appError } from "./app-error.js";
+import { isAuthHeaderName } from "./mcp-auth-recipe.js";
+
+export { isAuthHeaderName };
 
 export type ParsedCurl = {
   method: string;
@@ -12,23 +15,6 @@ export type ParsedCurl = {
     value: string;
   } | null;
 };
-
-const AUTH_HEADER_NAMES = new Set([
-  "authorization",
-  "proxy-authorization",
-  "x-api-key",
-  "x-apikey",
-  "api-key",
-  "apikey",
-  "x-auth-token",
-  "x-access-token",
-]);
-
-export function isAuthHeaderName(name: string): boolean {
-  const normalized = name.toLowerCase();
-  if (AUTH_HEADER_NAMES.has(normalized)) return true;
-  return /api[-_]?key/i.test(normalized);
-}
 
 function stripQuotes(value: string): string {
   if (
