@@ -73,9 +73,7 @@ describe("KeyValueEditor", () => {
 
     render(<Harness />);
 
-    const input = screen.getByPlaceholderText(
-      /value or \{\{variable\}\}/i,
-    ) as HTMLInputElement;
+    const input = screen.getByPlaceholderText(/^value$/i) as HTMLInputElement;
     // Set value and caret through the native setter so React's onChange
     // observes both (user-event parses `{{` as a key descriptor).
     const setter = Object.getOwnPropertyDescriptor(
@@ -108,9 +106,7 @@ describe("KeyValueEditor", () => {
 
     render(<Harness />);
 
-    const input = screen.getByPlaceholderText(
-      /value or \{\{variable\}\}/i,
-    ) as HTMLInputElement;
+    const input = screen.getByPlaceholderText(/^value$/i) as HTMLInputElement;
     const setter = Object.getOwnPropertyDescriptor(
       window.HTMLInputElement.prototype,
       "value",
@@ -151,9 +147,7 @@ describe("KeyValueEditor", () => {
 
     render(<Harness />);
 
-    const input = screen.getByPlaceholderText(
-      /value or \{\{variable\}\}/i,
-    ) as HTMLInputElement;
+    const input = screen.getByPlaceholderText(/^value$/i) as HTMLInputElement;
     const setter = Object.getOwnPropertyDescriptor(
       window.HTMLInputElement.prototype,
       "value",
