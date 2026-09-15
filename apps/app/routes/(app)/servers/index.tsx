@@ -31,6 +31,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  Field,
   Input,
   Label,
 } from "@repo/ui";
@@ -346,7 +347,7 @@ function ServersPage() {
                   );
                 }}
               >
-                <div className="space-y-2">
+                <Field>
                   <Label htmlFor="server-name">{t.servers.name}</Label>
                   <Input
                     id="server-name"
@@ -355,8 +356,8 @@ function ServersPage() {
                     placeholder={t.servers.namePlaceholder}
                     required
                   />
-                </div>
-                <div className="space-y-2">
+                </Field>
+                <Field>
                   <Label htmlFor="server-base">{t.servers.baseUrl}</Label>
                   <Input
                     id="server-base"
@@ -365,8 +366,8 @@ function ServersPage() {
                     placeholder={t.servers.baseUrlPlaceholder}
                     required
                   />
-                </div>
-                <div className="space-y-2">
+                </Field>
+                <Field>
                   <Label htmlFor="server-description">
                     {t.servers.descriptionLabel}
                   </Label>
@@ -376,7 +377,7 @@ function ServersPage() {
                     onChange={(event) => setDescription(event.target.value)}
                     placeholder={t.servers.optionalDescription}
                   />
-                </div>
+                </Field>
                 <DialogFooter>
                   <Button
                     type="button"

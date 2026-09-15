@@ -5,6 +5,7 @@ import { resolveErrorMessage } from "@/lib/errors";
 import { cn } from "@repo/ui";
 import {
   Button,
+  Field,
   Input,
   Label,
   Select,
@@ -118,7 +119,7 @@ export function ServerPlaygroundTab({ serverId }: { serverId: string }) {
         submit();
       }}
     >
-      <div className="space-y-2">
+      <Field>
         <Label>{t.servers.selectTool}</Label>
         <Select
           value={toolId}
@@ -149,7 +150,7 @@ export function ServerPlaygroundTab({ serverId }: { serverId: string }) {
             ))}
           </SelectContent>
         </Select>
-      </div>
+      </Field>
 
       {params.map((param) => {
         const raw = values[param.name];
@@ -158,7 +159,7 @@ export function ServerPlaygroundTab({ serverId }: { serverId: string }) {
         const showInvalidJson = invalidJsonParams.has(param.name);
         const showInvalidNumber = invalidNumberParams.has(param.name);
         return (
-          <div key={param.name} className="space-y-2">
+          <Field key={param.name}>
             <Label htmlFor={`play-param-${param.name}`}>
               <code className="font-mono text-xs">{param.name}</code>
               {param.required ? (
@@ -212,7 +213,7 @@ export function ServerPlaygroundTab({ serverId }: { serverId: string }) {
                 {t.servers.invalidNumber}
               </p>
             ) : null}
-          </div>
+          </Field>
         );
       })}
 

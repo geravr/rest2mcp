@@ -11,6 +11,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  Field,
   Input,
   Label,
   Select,
@@ -202,17 +203,19 @@ export function CurlImportDialog({
               );
             }}
           >
-            <Label htmlFor="curl-import-input">{t.servers.curlLabel}</Label>
-            <Textarea
-              id="curl-import-input"
-              value={curl}
-              onChange={(event) => setCurl(event.target.value)}
-              placeholder={t.servers.curlPlaceholder}
-              rows={5}
-              spellCheck={false}
-              className="font-mono text-xs"
-              required
-            />
+            <Field>
+              <Label htmlFor="curl-import-input">{t.servers.curlLabel}</Label>
+              <Textarea
+                id="curl-import-input"
+                value={curl}
+                onChange={(event) => setCurl(event.target.value)}
+                placeholder={t.servers.curlPlaceholder}
+                rows={5}
+                spellCheck={false}
+                className="font-mono text-xs"
+                required
+              />
+            </Field>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={onClose}>
                 {t.servers.cancel}
