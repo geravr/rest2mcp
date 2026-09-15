@@ -1111,6 +1111,69 @@ describe("mcp-studio variables", () => {
     });
   });
 
+  it("rejects clearing secrecy without a new value", async () => {
+    const db = makeDb([
+      [{ id: "mcs_1" }],
+      [{ id: "msv_1", name: "api_token", isSecret: true }],
+    ]);
+
+    await expect(
+      updateVariable(
+        db as never,
+        "user-a",
+        "mcs_1",
+        "api_token",
+        { isSecret: false },
+        "s".repeat(32),
+      ),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.appCode === APP_ERROR_CODES.INVALID_INPUT &&
+        error.status === 400,
+    );
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it("encrypts the current plaintext when flipping a variable to secret", async () => {
+    const db = makeDb([
+      [{ id: "mcs_1" }],
+      [
+        {
+          id: "msv_2",
+          name: "region",
+          isSecret: false,
+          value: "mx-visible",
+          ciphertext: null,
+        },
+      ],
+      [],
+    ]);
+
+    const result = await updateVariable(
+      db as never,
+      "user-a",
+      "mcs_1",
+      "region",
+      { isSecret: true },
+      "s".repeat(32),
+    );
+
+    expect(result).toEqual({
+      name: "region",
+      isSecret: true,
+      hasValue: true,
+    });
+    expect(JSON.stringify(result)).not.toContain("mx-visible");
+    const update = db.updatedValues[0] as Record<string, unknown>;
+    expect(update).toMatchObject({ isSecret: true, value: null });
+    expect(typeof update.ciphertext).toBe("string");
+    expect(decryptCredential(update.ciphertext as string, "s".repeat(32))).toBe(
+      "mx-visible",
+    );
+    expect(JSON.stringify(db.updatedValues)).not.toContain("mx-visible");
+  });
+
   it("rejects updates to variables that do not exist", async () => {
     const db = makeDb([[{ id: "mcs_1" }], []]);
 

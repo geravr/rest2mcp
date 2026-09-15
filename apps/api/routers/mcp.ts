@@ -252,7 +252,8 @@ export const mcpRouter = router({
     .input(
       serverIdInput.extend({
         name: variableNameSchema,
-        value: z.string().max(8_000),
+        value: z.string().max(8_000).optional(),
+        isSecret: z.boolean().optional(),
       }),
     )
     .mutation(({ ctx, input }) =>
@@ -261,7 +262,7 @@ export const mcpRouter = router({
         ctx.user.id,
         input.serverId,
         input.name,
-        { value: input.value },
+        { value: input.value, isSecret: input.isSecret },
         ctx.env.MCP_CREDENTIAL_SECRET,
       ),
     ),

@@ -18,4 +18,14 @@ describe("mcp router lifecycle procedures", () => {
     expect(source).toContain("markings");
     expect(source).toMatch(/as:\s*z\.enum\(\["param", "variable"\]\)/);
   });
+
+  it("accepts optional isSecret on updateVariable", () => {
+    expect(source).toContain("updateVariable: protectedProcedure");
+    expect(source).toMatch(
+      /updateVariable:[\s\S]*?isSecret:\s*z\.boolean\(\)\.optional\(\)/,
+    );
+    expect(source).toMatch(
+      /updateVariable:[\s\S]*?value:\s*z\.string\(\)\.max\(8_000\)\.optional\(\)/,
+    );
+  });
 });

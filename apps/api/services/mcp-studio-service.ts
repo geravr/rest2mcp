@@ -1408,14 +1408,15 @@ export async function createVariable(
 
 /**
  * Write-only value rotation; the stored value is never read back. Passing
- * `isSecret` (upsert path) also transitions the storage mode.
+ * `isSecret` also transitions the storage mode. A secret row requires a new
+ * value. Flipping plaintext to secret may reuse the visible stored value.
  */
 export async function updateVariable(
   db: DB,
   userId: string,
   serverId: string,
   name: string,
-  input: { value: string; isSecret?: boolean },
+  input: { value?: string; isSecret?: boolean },
   credentialSecret: string,
 ) {
   await requireOwnedServer(db, userId, serverId);
@@ -1438,6 +1439,17 @@ export async function updateVariable(
   }
 
   const nextIsSecret = input.isSecret ?? existing.isSecret;
+  const hasValue = input.value !== undefined;
+  if ((existing.isSecret || !nextIsSecret) && !hasValue) {
+    throw appError({
+      appCode: APP_ERROR_CODES.INVALID_INPUT,
+      message:
+        "A new value is required to rotate a secret or to store a variable as plaintext.",
+      status: 400,
+    });
+  }
+
+  const nextValue = (hasValue ? input.value : existing.value) ?? "";
   await db
     .update(mcpServerVariable)
     .set(
@@ -1445,9 +1457,9 @@ export async function updateVariable(
         ? {
             isSecret: true,
             value: null,
-            ciphertext: encryptCredential(input.value, credentialSecret),
+            ciphertext: encryptCredential(nextValue, credentialSecret),
           }
-        : { isSecret: false, value: input.value, ciphertext: null },
+        : { isSecret: false, value: nextValue, ciphertext: null },
     )
     .where(eq(mcpServerVariable.id, existing.id));
 
