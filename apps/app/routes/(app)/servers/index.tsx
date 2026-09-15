@@ -1,6 +1,7 @@
 import { FeatureErrorBoundary } from "@/components/feature-error-boundary";
 import { AdminListPagination } from "@/components/admin-list";
 import { ServerCardsSkeleton } from "@/components/loading";
+import { CreateServerForm } from "@/components/servers/create-server-form";
 import { ServerIcon } from "@/components/servers/server-icon";
 import { TrafficLightBadge } from "@/components/servers/traffic-light";
 import {
@@ -31,9 +32,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  Field,
-  Input,
-  Label,
 } from "@repo/ui";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Copy, LoaderCircle, Pause, Play, Plus, Wrench } from "lucide-react";
@@ -60,15 +58,9 @@ function ServersPage() {
   const updateServer = useUpdateMcpServer();
   const testConnection = useTestMcpConnection();
   const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [baseUrl, setBaseUrl] = useState("");
-  const [description, setDescription] = useState("");
   const [created, setCreated] = useState<CreatedServer | null>(null);
 
   const resetDialog = () => {
-    setName("");
-    setBaseUrl("");
-    setDescription("");
     setCreated(null);
     testConnection.reset();
   };
@@ -298,6 +290,19 @@ function ServersPage() {
                 <Button
                   type="button"
                   variant="outline"
+                  disabled={testConnection.isPending}
+                  onClick={() =>
+                    testConnection.mutate({ serverId: created.id })
+                  }
+                >
+                  {testConnection.isPending ? (
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                  ) : null}
+                  {t.servers.testConnection}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
                   onClick={() => setOpen(false)}
                 >
                   {t.servers.cancel}
@@ -326,76 +331,17 @@ function ServersPage() {
                   {t.servers.createDescription}
                 </DialogDescription>
               </DialogHeader>
-              <form
-                className="space-y-4"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  createServer.mutate(
-                    {
-                      name,
-                      baseUrl,
-                      ...(description.trim()
-                        ? { description: description.trim() }
-                        : {}),
+              <CreateServerForm
+                pending={createServer.isPending}
+                onCancel={() => setOpen(false)}
+                onSubmit={(values) => {
+                  createServer.mutate(values, {
+                    onSuccess: (server) => {
+                      setCreated({ id: server.id, name: server.name });
                     },
-                    {
-                      onSuccess: (server) => {
-                        setCreated({ id: server.id, name: server.name });
-                        testConnection.mutate({ serverId: server.id });
-                      },
-                    },
-                  );
+                  });
                 }}
-              >
-                <Field>
-                  <Label htmlFor="server-name">{t.servers.name}</Label>
-                  <Input
-                    id="server-name"
-                    value={name}
-                    onChange={(event) => setName(event.target.value)}
-                    placeholder={t.servers.namePlaceholder}
-                    required
-                  />
-                </Field>
-                <Field>
-                  <Label htmlFor="server-base">{t.servers.baseUrl}</Label>
-                  <Input
-                    id="server-base"
-                    value={baseUrl}
-                    onChange={(event) => setBaseUrl(event.target.value)}
-                    placeholder={t.servers.baseUrlPlaceholder}
-                    required
-                  />
-                </Field>
-                <Field>
-                  <Label htmlFor="server-description">
-                    {t.servers.descriptionLabel}
-                  </Label>
-                  <Input
-                    id="server-description"
-                    value={description}
-                    onChange={(event) => setDescription(event.target.value)}
-                    placeholder={t.servers.optionalDescription}
-                  />
-                </Field>
-                <DialogFooter>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setOpen(false)}
-                  >
-                    {t.servers.cancel}
-                  </Button>
-                  <Button type="submit" disabled={createServer.isPending}>
-                    {createServer.isPending ? (
-                      <LoaderCircle className="h-4 w-4 animate-spin" />
-                    ) : null}
-                    {createServer.isPending
-                      ? t.servers.creating
-                      : t.servers.create}
-                  </Button>
-                </DialogFooter>
-              </form>
+              />
             </>
           )}
         </DialogContent>

@@ -5,6 +5,8 @@ import { ServerSettingsTab } from "./settings-tab";
 
 const createVariableMutate = vi.fn();
 const updateServerMutate = vi.fn();
+const setServerAuthMutate = vi.fn();
+const testConnectionMutate = vi.fn();
 
 vi.mock("@/hooks/use-mcp", () => ({
   useMcpVariables: () => ({
@@ -35,6 +37,16 @@ vi.mock("@/hooks/use-mcp", () => ({
     mutate: updateServerMutate,
     isPending: false,
   }),
+  useSetMcpServerAuth: () => ({
+    mutate: setServerAuthMutate,
+    isPending: false,
+  }),
+  useTestMcpConnection: () => ({
+    mutate: testConnectionMutate,
+    data: undefined,
+    isPending: false,
+    reset: vi.fn(),
+  }),
 }));
 
 const server = {
@@ -45,10 +57,14 @@ const server = {
   iconImage: null,
 };
 
+const noneAuth = { type: "none" as const };
+
 describe("ServerSettingsTab", () => {
   beforeEach(() => {
     createVariableMutate.mockClear();
     updateServerMutate.mockClear();
+    setServerAuthMutate.mockClear();
+    testConnectionMutate.mockClear();
   });
 
   it("keeps identity and defaults save disabled until the form is dirty", () => {
@@ -57,6 +73,7 @@ describe("ServerSettingsTab", () => {
         server={server}
         defaultHeaders={null}
         defaultQuery={null}
+        auth={noneAuth}
       />,
     );
 
@@ -75,6 +92,7 @@ describe("ServerSettingsTab", () => {
         server={server}
         defaultHeaders={null}
         defaultQuery={null}
+        auth={noneAuth}
       />,
     );
 
@@ -95,6 +113,7 @@ describe("ServerSettingsTab", () => {
         server={server}
         defaultHeaders={null}
         defaultQuery={null}
+        auth={noneAuth}
       />,
     );
 
@@ -118,6 +137,7 @@ describe("ServerSettingsTab", () => {
         server={server}
         defaultHeaders={null}
         defaultQuery={null}
+        auth={noneAuth}
       />,
     );
 
@@ -132,6 +152,7 @@ describe("ServerSettingsTab", () => {
         server={server}
         defaultHeaders={null}
         defaultQuery={null}
+        auth={noneAuth}
       />,
     );
 
@@ -150,5 +171,79 @@ describe("ServerSettingsTab", () => {
         defaultHeaders: { Version: "{{api_version}}" },
       }),
     );
+  });
+
+  it("infers Bearer and does not display the stored token", () => {
+    render(
+      <ServerSettingsTab
+        server={server}
+        defaultHeaders={{ Authorization: "Bearer {{api_token}}" }}
+        defaultQuery={null}
+        auth={{ type: "bearer", variableName: "api_token" }}
+      />,
+    );
+
+    expect(screen.getByText(/bearer token/i)).toBeInTheDocument();
+    const tokenInput = screen.getByLabelText(/^token$/i);
+    expect(tokenInput).toHaveAttribute("type", "password");
+    expect(tokenInput).toHaveValue("");
+    expect(screen.queryByDisplayValue(/sk_/i)).not.toBeInTheDocument();
+  });
+
+  it("saves None auth through setServerAuth", async () => {
+    const user = userEvent.setup();
+    render(
+      <ServerSettingsTab
+        server={server}
+        defaultHeaders={{ Authorization: "Bearer {{api_token}}" }}
+        defaultQuery={null}
+        auth={{ type: "bearer", variableName: "api_token" }}
+      />,
+    );
+
+    await user.click(screen.getByLabelText(/^authentication$/i));
+    await user.click(screen.getByRole("option", { name: /^none$/i }));
+    await user.click(
+      screen.getByRole("button", { name: /save authentication/i }),
+    );
+
+    expect(setServerAuthMutate).toHaveBeenCalledWith({
+      serverId: "mcs_1",
+      auth: { type: "none" },
+    });
+  });
+
+  it("runs Test connection with the current server id", async () => {
+    const user = userEvent.setup();
+    render(
+      <ServerSettingsTab
+        server={server}
+        defaultHeaders={{ Authorization: "Bearer {{api_token}}" }}
+        defaultQuery={null}
+        auth={{ type: "bearer", variableName: "api_token" }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /test connection/i }));
+    expect(testConnectionMutate).toHaveBeenCalledWith({ serverId: "mcs_1" });
+  });
+
+  it("shows Custom without enabling a typed recipe save", () => {
+    render(
+      <ServerSettingsTab
+        server={server}
+        defaultHeaders={{
+          Authorization: "Bearer {{api_token}}",
+          "X-Partner-Key": "{{partner}}",
+        }}
+        defaultQuery={null}
+        auth={{ type: "custom" }}
+      />,
+    );
+
+    expect(screen.getByText(/custom auth setup/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /save authentication/i }),
+    ).toBeDisabled();
   });
 });

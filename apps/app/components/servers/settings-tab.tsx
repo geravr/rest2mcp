@@ -2,6 +2,10 @@ import { SettingsFormSkeleton } from "@/components/loading";
 import { DeleteServerDialog } from "@/components/servers/delete-server-dialog";
 import { DeleteVariableDialog } from "@/components/servers/delete-variable-dialog";
 import { EditVariableDialog } from "@/components/servers/edit-variable-dialog";
+import {
+  authResetKey,
+  ServerAuthCard,
+} from "@/components/servers/server-auth-card";
 import { SourceRowEditor } from "@/components/servers/source-row-editor";
 import {
   useCreateMcpVariable,
@@ -9,6 +13,7 @@ import {
   useMcpVariables,
   useUpdateMcpServer,
 } from "@/hooks/use-mcp";
+import type { InferredAuth } from "@/lib/server-auth";
 import {
   compileMap,
   inferDefaultMapRows,
@@ -155,15 +160,17 @@ function ServerDefaultsCard({
   );
 }
 
-/** Server-owned configuration: identity, variables, and request defaults. */
+/** Server-owned configuration: identity, auth, variables, and request defaults. */
 export function ServerSettingsTab({
   server,
   defaultHeaders,
   defaultQuery,
+  auth,
 }: {
   server: ServerIdentity;
   defaultHeaders: Record<string, string> | null;
   defaultQuery: Record<string, string> | null;
+  auth: InferredAuth;
 }) {
   const { t } = useTranslations();
   const variables = useMcpVariables(server.id);
@@ -404,6 +411,12 @@ export function ServerSettingsTab({
           </form>
         </CardContent>
       </Card>
+
+      <ServerAuthCard
+        key={authResetKey(auth)}
+        serverId={server.id}
+        auth={auth}
+      />
 
       <Card>
         <CardHeader>

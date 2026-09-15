@@ -181,6 +181,43 @@ export const esServers = {
     createdNextStep:
       "Servidor creado. Siguiente paso: añade tu primera herramienta.",
     addFirstTool: "Añadir la primera herramienta",
+    testConnection: "Probar conexión",
+    authType: "Autenticación",
+    authTypeNone: "Ninguna",
+    authTypeBearer: "Token Bearer",
+    authTypeHeader: "API key en header",
+    authTypeQuery: "API key en query",
+    authTypeBasic: "Basic",
+    authTypeCustom: "Personalizada",
+    authToken: "Token",
+    authTokenPlaceholder: "Pega el token",
+    authHeaderName: "Nombre del header",
+    authHeaderNamePlaceholder: "X-API-Key",
+    authHeaderValue: "Valor del header",
+    authParamName: "Parámetro de query",
+    authParamNamePlaceholder: "api_key",
+    authParamValue: "Valor del parámetro",
+    authValuePlaceholder: "Pega el secreto",
+    authUsername: "Usuario",
+    authPassword: "Contraseña",
+    authCustomHelp:
+      "Este servidor usa una autenticación personalizada. Edita los headers o query por defecto abajo, o elige un tipo simple para reemplazar la credencial mapeada.",
+    authTitle: "Autenticación",
+    authDescription:
+      "Las credenciales se guardan como secretos cifrados. No verás el valor de nuevo después de guardar.",
+    authSave: "Guardar autenticación",
+    authSaving: "Guardando…",
+    authRequiredFields: "Completa los campos de autenticación requeridos.",
+    authSaved: "Autenticación guardada.",
+    existingAuthKept:
+      "Herramienta creada. Se mantuvo la autenticación del servidor — la credencial del curl no se guardó.",
+    invokeDisabledTool:
+      "Esta herramienta está desactivada. Actívala en Herramientas para invocarla.",
+    invokeMutationBlocked:
+      "Las mutaciones no están permitidas para esta herramienta. Activa Permitir mutación en Herramientas.",
+    invokeServerPaused:
+      "Este servidor está en pausa. Reanúdalo para invocar herramientas.",
+    resultStatus: "HTTP {status}",
     saveChanges: "Guardar cambios",
     savingChanges: "Guardando…",
     dangerZoneTitle: "Zona de peligro",

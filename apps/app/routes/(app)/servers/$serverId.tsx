@@ -165,7 +165,10 @@ function ServerDetailPage() {
                 />
               </TabsContent>
               <TabsContent value="playground">
-                <ServerPlaygroundTab serverId={serverId} />
+                <ServerPlaygroundTab
+                  serverId={serverId}
+                  serverStatus={data.status as "draft" | "live" | "paused"}
+                />
               </TabsContent>
               <TabsContent value="logs">
                 <ServerLogsTab
@@ -209,6 +212,7 @@ function ServerDetailPage() {
                   server={data}
                   defaultHeaders={data.defaultHeaders}
                   defaultQuery={data.defaultQuery}
+                  auth={data.auth}
                 />
               </TabsContent>
             </Tabs>

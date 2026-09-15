@@ -112,6 +112,24 @@ export function useCreateMcpServer() {
   });
 }
 
+export function useSetMcpServerAuth() {
+  const { t } = useTranslations();
+  const invalidate = useInvalidateMcp();
+  const baseOptions = api.mcp.setServerAuth.mutationOptions();
+  return useMutation({
+    ...baseOptions,
+    onSuccess: async (...args) => {
+      baseOptions.onSuccess?.(...args);
+      await invalidate();
+      toast.success(t.servers.authSaved);
+    },
+    onError: (error, ...rest) => {
+      baseOptions.onError?.(error, ...rest);
+      toast.error(resolveErrorMessage(error, t));
+    },
+  });
+}
+
 export function useUpdateMcpServer() {
   const { t } = useTranslations();
   const invalidate = useInvalidateMcp();
@@ -345,7 +363,6 @@ export function useInvokeMcpTool() {
       await queryClient.invalidateQueries(api.mcp.callLogs.pathFilter());
       await queryClient.invalidateQueries(api.mcp.getServer.pathFilter());
       await queryClient.invalidateQueries(api.mcp.servers.pathFilter());
-      toast.success(t.toasts.servers.invoked);
     },
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);
