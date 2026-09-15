@@ -548,12 +548,12 @@ describe("executeMappedTool", () => {
     expect(headers.get("content-type")).toBeNull();
   });
 
-  it("maps upstream 401 to MCP_UPSTREAM_ERROR without leaking secrets", async () => {
+  it("returns upstream 401 as a result with error log and no secret leak", async () => {
     lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response("Bearer abc-secret rejected", {
+      new Response(JSON.stringify({ error: "unauthorized" }), {
         status: 401,
-        headers: { "content-type": "text/plain" },
+        headers: { "content-type": "application/json" },
       }),
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -576,24 +576,72 @@ describe("executeMappedTool", () => {
           ciphertext: tokenCipher,
         },
       ],
-      [],
+      [{ id: "log_401" }],
     ]);
 
-    await expect(
-      executeMappedTool(db as never, {
-        serverId: "mcs_1",
-        ownerUserId: "usr_owner",
-        toolId: "mct_1",
-        args: { id: "1" },
-        source: "playground",
-        credentialSecret: SECRET,
-      }),
-    ).rejects.toSatisfy((error: unknown) => {
-      if (!(error instanceof AppError)) return false;
-      if (error.appCode !== APP_ERROR_CODES.MCP_UPSTREAM_ERROR) return false;
-      return !JSON.stringify(error).includes("abc-secret");
+    const result = await executeMappedTool(db as never, {
+      serverId: "mcs_1",
+      ownerUserId: "usr_owner",
+      toolId: "mct_1",
+      args: { id: "1" },
+      source: "playground",
+      credentialSecret: SECRET,
     });
+
+    expect(result).toMatchObject({
+      ok: false,
+      httpStatus: 401,
+      body: JSON.stringify({ error: "unauthorized" }),
+      callLogId: "log_401",
+    });
+    expect(JSON.stringify(result)).not.toContain("abc-secret");
     expect(JSON.stringify(db.insertedValues)).not.toContain("abc-secret");
+    expect(db.insertedValues[0]).toMatchObject({ status: "error" });
+  });
+
+  it("redacts reflected secrets from upstream error bodies returned to callers", async () => {
+    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "bad token abc-secret" }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const tokenCipher = encryptCredential("abc-secret", SECRET);
+    const tool = {
+      ...getTool,
+      requestTemplate: {
+        headers: { Authorization: "Bearer {{api_token}}" },
+      },
+    };
+    const db = makeDb([
+      [liveServer],
+      [tool],
+      [
+        {
+          name: "api_token",
+          isSecret: true,
+          value: null,
+          ciphertext: tokenCipher,
+        },
+      ],
+      [{ id: "log_401b" }],
+    ]);
+
+    const result = await executeMappedTool(db as never, {
+      serverId: "mcs_1",
+      ownerUserId: "usr_owner",
+      toolId: "mct_1",
+      args: { id: "1" },
+      source: "agent",
+      credentialSecret: SECRET,
+    });
+
+    expect(result.httpStatus).toBe(401);
+    expect(result.body).toContain("[REDACTED]");
+    expect(result.body).not.toContain("abc-secret");
   });
 
   it("rejects playground invoke for another user's server", async () => {

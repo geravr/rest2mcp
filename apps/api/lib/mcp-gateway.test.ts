@@ -220,12 +220,44 @@ describe("product MCP gateway", () => {
       }
     });
 
+    it("returns upstream 401 as a tool result with httpStatus", async () => {
+      executeMappedTool.mockResolvedValue({
+        ok: false,
+        httpStatus: 401,
+        truncated: false,
+        body: JSON.stringify({ error: "unauthorized" }),
+        durationMs: 12,
+        contentType: "application/json",
+        callLogId: "log_1",
+      });
+      const client = await connectClient();
+      try {
+        const result = await client.callTool({
+          name: "get_contact",
+          arguments: { id: "1" },
+        });
+
+        expect(result.isError).toBeFalsy();
+        const text = (
+          result.content as Array<{ type: string; text: string }>
+        )[0].text;
+        const payload = JSON.parse(text) as {
+          httpStatus: number;
+          body: string;
+        };
+        expect(payload).toMatchObject({ httpStatus: 401 });
+        expect(JSON.parse(payload.body)).toEqual({ error: "unauthorized" });
+      } finally {
+        await client.close();
+      }
+    });
+
     it("maps executor AppErrors to tool errors with appCode", async () => {
       executeMappedTool.mockRejectedValue(
         appError({
-          appCode: APP_ERROR_CODES.MCP_UPSTREAM_ERROR,
-          message: "Upstream rejected the request.",
-          status: 502,
+          appCode: APP_ERROR_CODES.MCP_MUTATION_NOT_ALLOWED,
+          message: "Mutations are not allowed.",
+          status: 403,
         }),
       );
       const client = await connectClient();
@@ -239,8 +271,8 @@ describe("product MCP gateway", () => {
         const text = (
           result.content as Array<{ type: string; text: string }>
         )[0].text;
-        expect(text).toContain(APP_ERROR_CODES.MCP_UPSTREAM_ERROR);
-        expect(text).toContain("Upstream rejected the request.");
+        expect(text).toContain(APP_ERROR_CODES.MCP_MUTATION_NOT_ALLOWED);
+        expect(text).toContain("Mutations are not allowed.");
       } finally {
         await client.close();
       }

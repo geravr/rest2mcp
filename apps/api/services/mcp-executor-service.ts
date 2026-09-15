@@ -19,6 +19,7 @@ import {
   capResponseBody,
   MCP_RESPONSE_LIMIT,
   MCP_UPSTREAM_TIMEOUT_MS,
+  redactText,
   summarizeForLog,
 } from "../lib/mcp-redact.js";
 import {
@@ -359,34 +360,20 @@ export async function executeMappedTool(
     const capped = capResponseBody(rawBody);
     const responseSummary = summarizeForLog(capped.text, secrets());
     const durationMs = Date.now() - started;
-
-    if (!response.ok) {
-      await persistLog({
-        status: "error",
-        httpStatus: response.status,
-        appCode: APP_ERROR_CODES.MCP_UPSTREAM_ERROR,
-        requestSummary,
-        responseSummary,
-      });
-      throw appError({
-        appCode: APP_ERROR_CODES.MCP_UPSTREAM_ERROR,
-        message: `Upstream responded with ${response.status}.`,
-        status: 502,
-      });
-    }
+    const ok = response.ok;
 
     const callLogId = await persistLog({
-      status: "success",
+      status: ok ? "success" : "error",
       httpStatus: response.status,
-      appCode: null,
+      appCode: ok ? null : APP_ERROR_CODES.MCP_UPSTREAM_ERROR,
       requestSummary,
       responseSummary,
     });
 
     return {
-      ok: true,
+      ok,
       httpStatus: response.status,
-      body: capped.text,
+      body: redactText(capped.text, secrets()),
       truncated: capped.truncated,
       durationMs,
       contentType: response.headers.get("content-type"),
