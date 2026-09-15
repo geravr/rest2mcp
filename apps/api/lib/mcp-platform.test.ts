@@ -15,6 +15,9 @@ vi.mock("./posthog.js", () => ({
 
 const authenticateAgentToken = vi.hoisted(() => vi.fn());
 const setVariable = vi.hoisted(() => vi.fn());
+const setServerAuth = vi.hoisted(() => vi.fn());
+const createServer = vi.hoisted(() => vi.fn());
+const createToolFromCurl = vi.hoisted(() => vi.fn());
 const listVariables = vi.hoisted(() => vi.fn());
 const deleteVariable = vi.hoisted(() => vi.fn());
 const deleteServer = vi.hoisted(() => vi.fn());
@@ -28,6 +31,9 @@ vi.mock("../services/mcp-studio-service.js", async () => {
     ...actual,
     authenticateAgentToken,
     setVariable,
+    setServerAuth,
+    createServer,
+    createToolFromCurl,
     listVariables,
     deleteVariable,
     deleteServer,
@@ -124,7 +130,7 @@ describe("platform MCP", () => {
       return client;
     }
 
-    it("lists exactly the thirteen platform tools", async () => {
+    it("lists exactly the fourteen platform tools", async () => {
       const client = await connectClient();
       try {
         const { tools } = await client.listTools();
@@ -143,6 +149,7 @@ describe("platform MCP", () => {
             "list_servers",
             "list_tools",
             "list_variables",
+            "set_server_auth",
             "set_variable",
             "test_tool",
           ].sort(),
@@ -155,6 +162,115 @@ describe("platform MCP", () => {
         >;
         expect(properties).toHaveProperty("requestTemplate");
         expect(properties).toHaveProperty("params");
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("creates a server with bearer auth without echoing the secret", async () => {
+      createServer.mockResolvedValue({
+        id: "mcs_1",
+        name: "CRM",
+        defaultHeaders: { Authorization: "Bearer {{api_token}}" },
+      });
+      const client = await connectClient();
+      try {
+        const result = await client.callTool({
+          name: "create_server",
+          arguments: {
+            name: "CRM",
+            baseUrl: "https://api.example.com",
+            auth: { type: "bearer", token: "sk_live_123" },
+          },
+        });
+
+        expect(result.isError).toBeFalsy();
+        const text = (
+          result.content as Array<{ type: string; text: string }>
+        )[0].text;
+        expect(text).not.toContain("sk_live_123");
+        expect(createServer).toHaveBeenCalledWith(
+          expect.anything(),
+          "usr_1",
+          expect.objectContaining({
+            name: "CRM",
+            auth: { type: "bearer", token: "sk_live_123" },
+          }),
+          "s".repeat(32),
+        );
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("routes set_server_auth payloads to the studio service", async () => {
+      setServerAuth.mockResolvedValue({
+        id: "mcs_1",
+        auth: {
+          type: "header",
+          headerName: "X-API-Key",
+          variableName: "api_key",
+        },
+      });
+      const client = await connectClient();
+      try {
+        const result = await client.callTool({
+          name: "set_server_auth",
+          arguments: {
+            serverId: "mcs_1",
+            auth: {
+              type: "header",
+              headerName: "X-API-Key",
+              value: "key_123",
+            },
+          },
+        });
+
+        expect(result.isError).toBeFalsy();
+        const text = (
+          result.content as Array<{ type: string; text: string }>
+        )[0].text;
+        expect(text).not.toContain("key_123");
+        expect(setServerAuth).toHaveBeenCalledWith(
+          expect.anything(),
+          "usr_1",
+          "mcs_1",
+          {
+            type: "header",
+            headerName: "X-API-Key",
+            value: "key_123",
+          },
+          "s".repeat(32),
+        );
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("keeps existing server auth when importing curl via agent", async () => {
+      createToolFromCurl.mockResolvedValue({
+        id: "mct_1",
+        name: "get_contacts",
+        existingAuthKept: true,
+        capturedVariable: null,
+      });
+      const client = await connectClient();
+      try {
+        const result = await client.callTool({
+          name: "add_tool_from_curl",
+          arguments: {
+            serverId: "mcs_1",
+            curl: `curl -H 'Authorization: Bearer other' https://api.example.com/contacts`,
+          },
+        });
+
+        expect(result.isError).toBeFalsy();
+        const text = (
+          result.content as Array<{ type: string; text: string }>
+        )[0].text;
+        expect(text).toContain("existingAuthKept");
+        expect(text).not.toContain("other");
+        expect(createToolFromCurl).toHaveBeenCalled();
       } finally {
         await client.close();
       }

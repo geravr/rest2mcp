@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppContext } from "./context.js";
 import { APP_ERROR_CODES, AppError, appJsonError } from "./app-error.js";
+import { serverAuthRecipeSchema } from "./mcp-auth-recipe.js";
 import { extractBearerToken } from "./mcp-agent-token.js";
 import {
   handleMcpHttpRequest,
@@ -24,6 +25,7 @@ import {
   listTools,
   listVariables,
   resolveApiOrigin,
+  setServerAuth,
   setVariable,
 } from "../services/mcp-studio-service.js";
 
@@ -136,15 +138,19 @@ export function createPlatformMcpRoutes() {
       mcp.registerTool(
         "create_server",
         {
-          description: "Create a new MCP server.",
+          description:
+            "Create a new MCP server. Optional auth recipe stores a secret variable and default header/query.",
           inputSchema: z.object({
             name: z.string().min(1),
             description: z.string().optional(),
             baseUrl: z.url(),
             slug: z.string().optional(),
+            auth: serverAuthRecipeSchema.optional(),
           }),
         },
-        asToolResult((args) => createServer(db, userId, args)),
+        asToolResult((args) =>
+          createServer(db, userId, args, env.MCP_CREDENTIAL_SECRET),
+        ),
       );
 
       mcp.registerTool(
@@ -250,6 +256,27 @@ export function createPlatformMcpRoutes() {
               isSecret: args.isSecret,
               value: args.value,
             },
+            env.MCP_CREDENTIAL_SECRET,
+          ),
+        ),
+      );
+
+      mcp.registerTool(
+        "set_server_auth",
+        {
+          description:
+            "Apply or clear server authentication (none/bearer/header/query/basic). Secrets are encrypted and never returned.",
+          inputSchema: z.object({
+            serverId: z.string().min(1),
+            auth: serverAuthRecipeSchema,
+          }),
+        },
+        asToolResult((args) =>
+          setServerAuth(
+            db,
+            userId,
+            args.serverId,
+            args.auth,
             env.MCP_CREDENTIAL_SECRET,
           ),
         ),
