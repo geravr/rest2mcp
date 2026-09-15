@@ -22,7 +22,13 @@ import { useState } from "react";
 
 type ParamValue = string | boolean;
 
-export function ServerPlaygroundTab({ serverId }: { serverId: string }) {
+export function ServerPlaygroundTab({
+  serverId,
+  serverStatus,
+}: {
+  serverId: string;
+  serverStatus: "draft" | "live" | "paused";
+}) {
   const { t } = useTranslations();
   const tools = useMcpTools(serverId, { page: 1, pageSize: 50 });
   const invoke = useInvokeMcpTool();
@@ -37,11 +43,21 @@ export function ServerPlaygroundTab({ serverId }: { serverId: string }) {
   );
   const [result, setResult] = useState<{
     body: string;
+    httpStatus: number | null;
     callLogId: string | null;
   } | null>(null);
 
   const tool = tools.data?.items.find((item) => item.id === toolId) ?? null;
   const params = tool?.params ?? [];
+
+  const invokeBlockedReason = (() => {
+    if (serverStatus === "paused") return t.servers.invokeServerPaused;
+    if (!tool) return null;
+    if (!tool.enabled) return t.servers.invokeDisabledTool;
+    const mutating = ["POST", "PUT", "PATCH", "DELETE"].includes(tool.method);
+    if (mutating && !tool.allowMutation) return t.servers.invokeMutationBlocked;
+    return null;
+  })();
 
   const setValue = (name: string, value: ParamValue) =>
     setValues((prev) => ({ ...prev, [name]: value }));
@@ -54,7 +70,8 @@ export function ServerPlaygroundTab({ serverId }: { serverId: string }) {
 
   const submit = () => {
     setAttempted(true);
-    if (!tool || missingRequired.length > 0) return;
+    setResult(null);
+    if (!tool || missingRequired.length > 0 || invokeBlockedReason) return;
 
     const args: Record<string, unknown> = {};
     const invalidJson = new Set<string>();
@@ -89,7 +106,11 @@ export function ServerPlaygroundTab({ serverId }: { serverId: string }) {
       { serverId, toolId: tool.id, args },
       {
         onSuccess: (payload) => {
-          setResult({ body: payload.body, callLogId: payload.callLogId });
+          setResult({
+            body: payload.body,
+            httpStatus: payload.httpStatus,
+            callLogId: payload.callLogId,
+          });
         },
       },
     );
@@ -125,8 +146,6 @@ export function ServerPlaygroundTab({ serverId }: { serverId: string }) {
           value={toolId}
           onValueChange={(next) => {
             setToolId(next);
-            // Booleans start as explicit false so required ones can be
-            // submitted without an on→off round-trip.
             const nextTool = tools.data?.items.find((item) => item.id === next);
             const defaults: Record<string, ParamValue> = {};
             for (const param of nextTool?.params ?? []) {
@@ -217,7 +236,14 @@ export function ServerPlaygroundTab({ serverId }: { serverId: string }) {
         );
       })}
 
-      <Button type="submit" disabled={invoke.isPending || !tool}>
+      {invokeBlockedReason ? (
+        <p className="text-sm text-muted-foreground">{invokeBlockedReason}</p>
+      ) : null}
+
+      <Button
+        type="submit"
+        disabled={invoke.isPending || !tool || Boolean(invokeBlockedReason)}
+      >
         {invoke.isPending ? (
           <LoaderCircle className="h-4 w-4 animate-spin" />
         ) : null}
@@ -227,7 +253,14 @@ export function ServerPlaygroundTab({ serverId }: { serverId: string }) {
       {result ? (
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-medium">{t.servers.result}</h3>
+            <h3 className="text-sm font-medium">
+              {result.httpStatus !== null
+                ? t.servers.resultStatus.replace(
+                    "{status}",
+                    String(result.httpStatus),
+                  )
+                : t.servers.result}
+            </h3>
             {result.callLogId ? (
               <Link
                 to="/servers/$serverId"
