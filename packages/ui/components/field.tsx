@@ -3,7 +3,7 @@ import * as React from "react";
 import { cn } from "../lib/utils";
 
 function Field({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("grid gap-2", className)} {...props} />;
+  return <div className={cn("grid gap-2.5", className)} {...props} />;
 }
 
 function FieldError({
