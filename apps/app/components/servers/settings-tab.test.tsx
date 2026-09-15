@@ -8,7 +8,13 @@ const updateServerMutate = vi.fn();
 
 vi.mock("@/hooks/use-mcp", () => ({
   useMcpVariables: () => ({
-    data: [],
+    data: [{ id: "msv_1", name: "api_version", isSecret: false, value: "v1" }],
+    isLoading: false,
+    isError: false,
+    error: null,
+  }),
+  useMcpTools: () => ({
+    data: { items: [], page: 1, pageSize: 50, total: 0 },
     isLoading: false,
     isError: false,
     error: null,
@@ -18,6 +24,10 @@ vi.mock("@/hooks/use-mcp", () => ({
     isPending: false,
   }),
   useDeleteMcpVariable: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+  useUpdateMcpVariable: () => ({
     mutate: vi.fn(),
     isPending: false,
   }),
@@ -98,6 +108,46 @@ describe("ServerSettingsTab", () => {
         serverId: "mcs_1",
         name: "Billing",
         baseUrl: "https://api.example.com",
+      }),
+    );
+  });
+
+  it("shows stored variable values on all screen sizes", () => {
+    render(
+      <ServerSettingsTab
+        server={server}
+        defaultHeaders={null}
+        defaultQuery={null}
+      />,
+    );
+
+    expect(screen.getByText("v1")).toBeInTheDocument();
+    expect(screen.getByText("v1").className).not.toMatch(/hidden/);
+  });
+
+  it("compiles a default header from a Variable origin", async () => {
+    const user = userEvent.setup();
+    render(
+      <ServerSettingsTab
+        server={server}
+        defaultHeaders={null}
+        defaultQuery={null}
+      />,
+    );
+
+    const addButtons = screen.getAllByRole("button", { name: /add row/i });
+    await user.click(addButtons[0] as HTMLElement);
+    await user.type(screen.getByLabelText(/^key$/i), "Version");
+    await user.click(screen.getByLabelText(/value origin/i));
+    await user.click(screen.getByRole("option", { name: /^variable$/i }));
+    await user.click(screen.getByRole("button", { name: /select variable/i }));
+    await user.click(screen.getByRole("menuitem", { name: "api_version" }));
+    await user.click(screen.getByRole("button", { name: /save defaults/i }));
+
+    expect(updateServerMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serverId: "mcs_1",
+        defaultHeaders: { Version: "{{api_version}}" },
       }),
     );
   });

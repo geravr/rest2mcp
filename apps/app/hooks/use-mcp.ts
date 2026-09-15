@@ -262,6 +262,24 @@ export function useCreateMcpVariable() {
   });
 }
 
+export function useUpdateMcpVariable() {
+  const { t } = useTranslations();
+  const invalidate = useInvalidateMcp();
+  const baseOptions = api.mcp.updateVariable.mutationOptions();
+  return useMutation({
+    ...baseOptions,
+    onSuccess: async (...args) => {
+      baseOptions.onSuccess?.(...args);
+      await invalidate();
+      toast.success(t.toasts.servers.variableSaved);
+    },
+    onError: (error, ...rest) => {
+      baseOptions.onError?.(error, ...rest);
+      toast.error(resolveErrorMessage(error, t));
+    },
+  });
+}
+
 export function useDeleteMcpVariable() {
   const { t } = useTranslations();
   const invalidate = useInvalidateMcp();

@@ -1,17 +1,19 @@
 import { SettingsFormSkeleton } from "@/components/loading";
 import { DeleteServerDialog } from "@/components/servers/delete-server-dialog";
-import {
-  KeyValueEditor,
-  pairsToRecord,
-  recordToPairs,
-  type KeyValuePair,
-} from "@/components/servers/key-value-editor";
+import { DeleteVariableDialog } from "@/components/servers/delete-variable-dialog";
+import { EditVariableDialog } from "@/components/servers/edit-variable-dialog";
+import { SourceRowEditor } from "@/components/servers/source-row-editor";
 import {
   useCreateMcpVariable,
-  useDeleteMcpVariable,
+  useMcpTools,
   useMcpVariables,
   useUpdateMcpServer,
 } from "@/hooks/use-mcp";
+import {
+  compileMap,
+  inferDefaultMapRows,
+  type SourceRow,
+} from "@/lib/value-origin";
 import { useTranslations } from "@/i18n/use-translations";
 import { resolveErrorMessage } from "@/lib/errors";
 import { ServerIcon } from "@/components/servers/server-icon";
@@ -24,11 +26,12 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
+  Field,
   Input,
   Label,
   Switch,
 } from "@repo/ui";
-import { LoaderCircle, Trash2 } from "lucide-react";
+import { LoaderCircle, Pencil, Trash2 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -55,6 +58,103 @@ type ServerIdentity = {
   iconImage: string | null;
 };
 
+function ServerDefaultsCard({
+  serverId,
+  variableNames,
+  defaultHeaders,
+  defaultQuery,
+  pending,
+  onSave,
+}: {
+  serverId: string;
+  variableNames: string[];
+  defaultHeaders: Record<string, string> | null;
+  defaultQuery: Record<string, string> | null;
+  pending: boolean;
+  onSave: (input: {
+    serverId: string;
+    defaultHeaders: Record<string, string> | null;
+    defaultQuery: Record<string, string> | null;
+  }) => void;
+}) {
+  const { t } = useTranslations();
+  const [headersDraft, setHeadersDraft] = useState<SourceRow[]>(() =>
+    inferDefaultMapRows(defaultHeaders, variableNames),
+  );
+  const [queryDraft, setQueryDraft] = useState<SourceRow[]>(() =>
+    inferDefaultMapRows(defaultQuery, variableNames),
+  );
+  const defaultsDirty = useMemo(
+    () =>
+      !recordsEqual(compileMap(headersDraft), defaultHeaders) ||
+      !recordsEqual(compileMap(queryDraft), defaultQuery),
+    [headersDraft, queryDraft, defaultHeaders, defaultQuery],
+  );
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t.servers.defaultsTitle}</CardTitle>
+        <CardDescription>{t.servers.defaultsDescription}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!defaultsDirty) return;
+            const parsedHeaders = compileMap(headersDraft);
+            const parsedQuery = compileMap(queryDraft);
+            onSave({
+              serverId,
+              defaultHeaders:
+                Object.keys(parsedHeaders).length > 0 ? parsedHeaders : null,
+              defaultQuery:
+                Object.keys(parsedQuery).length > 0 ? parsedQuery : null,
+            });
+          }}
+        >
+          <div className="grid gap-6 xl:grid-cols-2">
+            <Field>
+              <Label>{t.servers.defaultHeaders}</Label>
+              <SourceRowEditor
+                rows={headersDraft}
+                onChange={setHeadersDraft}
+                variableNames={variableNames}
+                mode="defaults"
+                emptyLabel={t.servers.emptyHeaderRows}
+              />
+            </Field>
+            <Field>
+              <Label>{t.servers.defaultQuery}</Label>
+              <SourceRowEditor
+                rows={queryDraft}
+                onChange={setQueryDraft}
+                variableNames={variableNames}
+                mode="defaults"
+                emptyLabel={t.servers.emptyQueryRows}
+              />
+            </Field>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button type="submit" disabled={!defaultsDirty || pending}>
+              {pending ? (
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+              ) : null}
+              {pending ? t.servers.savingDefaults : t.servers.saveDefaults}
+            </Button>
+            {defaultsDirty ? (
+              <p className="text-xs text-muted-foreground">
+                {t.servers.defaultsUnsaved}
+              </p>
+            ) : null}
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
 /** Server-owned configuration: identity, variables, and request defaults. */
 export function ServerSettingsTab({
   server,
@@ -67,13 +167,21 @@ export function ServerSettingsTab({
 }) {
   const { t } = useTranslations();
   const variables = useMcpVariables(server.id);
+  const tools = useMcpTools(server.id, { page: 1, pageSize: 50 });
   const createVariable = useCreateMcpVariable();
-  const deleteVariable = useDeleteMcpVariable();
   const updateServer = useUpdateMcpServer();
   const iconFileInputRef = useRef<HTMLInputElement>(null);
   const [iconUploadPending, setIconUploadPending] = useState(false);
   const [iconRemovePending, setIconRemovePending] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [editVariable, setEditVariable] = useState<{
+    name: string;
+    isSecret: boolean;
+    value?: string;
+  } | null>(null);
+  const [deleteVariableName, setDeleteVariableName] = useState<string | null>(
+    null,
+  );
 
   const [name, setName] = useState(server.name);
   const [baseUrl, setBaseUrl] = useState(server.baseUrl);
@@ -83,25 +191,11 @@ export function ServerSettingsTab({
   const [variableValue, setVariableValue] = useState("");
   const [variableSecret, setVariableSecret] = useState(true);
 
-  const [headersDraft, setHeadersDraft] = useState<KeyValuePair[]>(() =>
-    recordToPairs(defaultHeaders),
-  );
-  const [queryDraft, setQueryDraft] = useState<KeyValuePair[]>(() =>
-    recordToPairs(defaultQuery),
-  );
-
   const variableNames = (variables.data ?? []).map((variable) => variable.name);
   const identityDirty =
     name.trim() !== server.name ||
     baseUrl.trim() !== server.baseUrl ||
     (description.trim() || null) !== (server.description ?? null);
-  const defaultsDirty = useMemo(
-    () =>
-      !recordsEqual(pairsToRecord(headersDraft), defaultHeaders) ||
-      !recordsEqual(pairsToRecord(queryDraft), defaultQuery),
-    [headersDraft, queryDraft, defaultHeaders, defaultQuery],
-  );
-
   const trimmedVariableName = variableName.trim();
   const variableNameInvalid =
     trimmedVariableName.length > 0 &&
@@ -262,7 +356,7 @@ export function ServerSettingsTab({
             }}
           >
             <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
+              <Field>
                 <Label htmlFor="settings-server-name">{t.servers.name}</Label>
                 <Input
                   id="settings-server-name"
@@ -271,8 +365,8 @@ export function ServerSettingsTab({
                   placeholder={t.servers.namePlaceholder}
                   required
                 />
-              </div>
-              <div className="space-y-2">
+              </Field>
+              <Field>
                 <Label htmlFor="settings-server-base">
                   {t.servers.baseUrl}
                 </Label>
@@ -283,9 +377,9 @@ export function ServerSettingsTab({
                   placeholder={t.servers.baseUrlPlaceholder}
                   required
                 />
-              </div>
+              </Field>
             </div>
-            <div className="space-y-2">
+            <Field>
               <Label htmlFor="settings-server-description">
                 {t.servers.descriptionLabel}
               </Label>
@@ -295,7 +389,7 @@ export function ServerSettingsTab({
                 onChange={(event) => setDescription(event.target.value)}
                 placeholder={t.servers.optionalDescription}
               />
-            </div>
+            </Field>
             <Button
               type="submit"
               disabled={!identityDirty || updateServer.isPending}
@@ -324,41 +418,50 @@ export function ServerSettingsTab({
           ) : (
             <ul className="divide-y divide-border rounded-md border border-border">
               {variables.data.map((variable) => (
-                <li
-                  key={variable.id}
-                  className="flex items-center gap-3 px-3 py-2.5"
-                >
-                  <code className="min-w-0 flex-1 truncate font-mono text-xs">
-                    {variable.name}
-                  </code>
-                  {variable.isSecret ? (
-                    <Badge variant="secondary">
-                      {t.servers.variableSecretBadge}
-                    </Badge>
-                  ) : null}
-                  <span className="hidden text-xs text-muted-foreground sm:inline">
+                <li key={variable.id} className="px-3 py-2.5">
+                  <div className="flex items-center gap-3">
+                    <code className="min-w-0 flex-1 truncate font-mono text-xs">
+                      {variable.name}
+                    </code>
+                    {variable.isSecret ? (
+                      <Badge variant="secondary" className="shrink-0">
+                        {t.servers.variableSecretBadge}
+                      </Badge>
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="shrink-0"
+                      aria-label={t.servers.editVariable}
+                      onClick={() =>
+                        setEditVariable({
+                          name: variable.name,
+                          isSecret: variable.isSecret,
+                          value: variable.value ?? undefined,
+                        })
+                      }
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="shrink-0 text-muted-foreground hover:text-destructive"
+                      aria-label={t.servers.deleteVariable}
+                      onClick={() => setDeleteVariableName(variable.name)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <p className="mt-1 truncate text-xs text-muted-foreground">
                     {variable.isSecret
                       ? variable.hasValue
                         ? t.servers.variableHasValue
                         : t.servers.variableNoValue
                       : variable.value}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="shrink-0 text-muted-foreground hover:text-destructive"
-                    disabled={deleteVariable.isPending}
-                    aria-label={t.servers.deleteVariable}
-                    onClick={() =>
-                      deleteVariable.mutate({
-                        serverId: server.id,
-                        name: variable.name,
-                      })
-                    }
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  </p>
                 </li>
               ))}
             </ul>
@@ -387,7 +490,7 @@ export function ServerSettingsTab({
             }}
           >
             <div className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
-              <div className="space-y-2">
+              <Field>
                 <Label htmlFor="var-name">{t.servers.variableName}</Label>
                 <Input
                   id="var-name"
@@ -401,8 +504,8 @@ export function ServerSettingsTab({
                   aria-describedby="var-name-hint"
                   required
                 />
-              </div>
-              <div className="space-y-2">
+              </Field>
+              <Field>
                 <Label htmlFor="var-value">{t.servers.variableValue}</Label>
                 <Input
                   id="var-value"
@@ -412,7 +515,7 @@ export function ServerSettingsTab({
                   autoComplete="off"
                   required
                 />
-              </div>
+              </Field>
               <div className="flex h-9 items-center gap-2">
                 <Switch
                   id="var-secret"
@@ -448,67 +551,14 @@ export function ServerSettingsTab({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t.servers.defaultsTitle}</CardTitle>
-          <CardDescription>{t.servers.defaultsDescription}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form
-            className="space-y-4"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (!defaultsDirty) return;
-              const parsedHeaders = pairsToRecord(headersDraft);
-              const parsedQuery = pairsToRecord(queryDraft);
-              updateServer.mutate({
-                serverId: server.id,
-                defaultHeaders:
-                  Object.keys(parsedHeaders).length > 0 ? parsedHeaders : null,
-                defaultQuery:
-                  Object.keys(parsedQuery).length > 0 ? parsedQuery : null,
-              });
-            }}
-          >
-            <div className="grid gap-6 lg:grid-cols-2">
-              <div className="space-y-2">
-                <Label>{t.servers.defaultHeaders}</Label>
-                <KeyValueEditor
-                  pairs={headersDraft}
-                  onChange={setHeadersDraft}
-                  variableNames={variableNames}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>{t.servers.defaultQuery}</Label>
-                <KeyValueEditor
-                  pairs={queryDraft}
-                  onChange={setQueryDraft}
-                  variableNames={variableNames}
-                />
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <Button
-                type="submit"
-                disabled={!defaultsDirty || updateServer.isPending}
-              >
-                {updateServer.isPending ? (
-                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                ) : null}
-                {updateServer.isPending
-                  ? t.servers.savingDefaults
-                  : t.servers.saveDefaults}
-              </Button>
-              {defaultsDirty ? (
-                <p className="text-xs text-muted-foreground">
-                  {t.servers.defaultsUnsaved}
-                </p>
-              ) : null}
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+      <ServerDefaultsCard
+        serverId={server.id}
+        variableNames={variableNames}
+        defaultHeaders={defaultHeaders}
+        defaultQuery={defaultQuery}
+        pending={updateServer.isPending}
+        onSave={(input) => updateServer.mutate(input)}
+      />
 
       <Card className="border-destructive/40">
         <CardHeader>
@@ -538,7 +588,27 @@ export function ServerSettingsTab({
       </Card>
 
       {deleteOpen ? (
-        <DeleteServerDialog server={server} onClose={() => setDeleteOpen(false)} />
+        <DeleteServerDialog
+          server={server}
+          onClose={() => setDeleteOpen(false)}
+        />
+      ) : null}
+      {editVariable ? (
+        <EditVariableDialog
+          serverId={server.id}
+          variable={editVariable}
+          onClose={() => setEditVariable(null)}
+        />
+      ) : null}
+      {deleteVariableName ? (
+        <DeleteVariableDialog
+          serverId={server.id}
+          name={deleteVariableName}
+          tools={tools.data?.items ?? []}
+          defaultHeaders={defaultHeaders}
+          defaultQuery={defaultQuery}
+          onClose={() => setDeleteVariableName(null)}
+        />
       ) : null}
     </div>
   );
