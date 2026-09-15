@@ -39,11 +39,11 @@ Agent    { origin: "agent"; name: string; description?: string; type; required }
 
 Compile:
 
-| Origin   | Stored value                                      |
-| -------- | ------------------------------------------------- |
-| Fixed    | `value` as typed                                  |
-| Variable | `prefix + "{{" + name + "}}"`                     |
-| Agent    | `"{{" + name + "}}"` plus a `params[]` entry      |
+| Origin   | Stored value                                 |
+| -------- | -------------------------------------------- |
+| Fixed    | `value` as typed                             |
+| Variable | `prefix + "{{" + name + "}}"`                |
+| Agent    | `"{{" + name + "}}"` plus a `params[]` entry |
 
 `params[]` is the union of every Agent token in path, query, headers, and body. Save still calls `createTool` / `updateTool` with the current payload. Runtime is unchanged.
 
@@ -74,12 +74,12 @@ The path control is not a single raw `{{ }}` input. It is static segments plus i
 
 ### 5. Body: structured rows by default, Advanced when the JSON is not flat
 
-| `bodyType` | Editor |
-| ---------- | ------ |
-| `none`     | Empty |
-| `form`     | Same source rows as query |
+| `bodyType` | Editor                                                                                                      |
+| ---------- | ----------------------------------------------------------------------------------------------------------- |
+| `none`     | Empty                                                                                                       |
+| `form`     | Same source rows as query                                                                                   |
 | `json`     | If the stored body is a flat JSON object (no nested object/array), source rows. Otherwise Advanced textarea |
-| `raw`      | Advanced textarea |
+| `raw`      | Advanced textarea                                                                                           |
 
 Structured JSON compile (user-first, few controls):
 
@@ -124,10 +124,10 @@ Settings default headers/query reuse the source-row editor with Fixed and Variab
 
 **Edit** opens a dialog (not inline expand): name is read-only; `isSecret` can change; value follows write-only rules.
 
-| Current     | Value field                         | Save |
-| ----------- | ----------------------------------- | ---- |
-| Not secret  | Prefills current value              | Value and/or `isSecret` |
-| Secret      | Empty; “enter a new value to rotate” | Requires a new value to rotate, or to become non-secret |
+| Current    | Value field                          | Save                                                    |
+| ---------- | ------------------------------------ | ------------------------------------------------------- |
+| Not secret | Prefills current value               | Value and/or `isSecret`                                 |
+| Secret     | Empty; “enter a new value to rotate” | Requires a new value to rotate, or to become non-secret |
 
 Turning a non-secret into a secret MAY reuse the visible current value (re-encrypt). Turning a secret into a non-secret MUST supply a new value (the old secret is not shown).
 
@@ -139,14 +139,14 @@ Extend `mcp.updateVariable` with optional `isSecret`. Keep `value` required when
 
 ### 9. Shared modules, no new backend resources
 
-| Module | Role |
-| ------ | ---- |
-| `value-origin.ts` | Infer + compile + path split + flat-JSON detect (unit-tested) |
-| `source-row-editor.tsx` | Key + origin + origin-specific controls |
-| `path-parts-editor.tsx` | Text segments + tokens |
-| `template-value-input.tsx` | Move/generalize current autocomplete; add textarea + insert control for Advanced |
-| `edit-variable-dialog.tsx` / `delete-variable-dialog.tsx` | Settings |
-| `useUpdateMcpVariable` | Thin mutation hook |
+| Module                                                    | Role                                                                             |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `value-origin.ts`                                         | Infer + compile + path split + flat-JSON detect (unit-tested)                    |
+| `source-row-editor.tsx`                                   | Key + origin + origin-specific controls                                          |
+| `path-parts-editor.tsx`                                   | Text segments + tokens                                                           |
+| `template-value-input.tsx`                                | Move/generalize current autocomplete; add textarea + insert control for Advanced |
+| `edit-variable-dialog.tsx` / `delete-variable-dialog.tsx` | Settings                                                                         |
+| `useUpdateMcpVariable`                                    | Thin mutation hook                                                               |
 
 Picker: searchable list (filter input + options). Add `Popover` to `packages/ui` if needed; do not add a command palette unless Select + filter is visibly worse. Existing `Select` is acceptable for short variable lists.
 
