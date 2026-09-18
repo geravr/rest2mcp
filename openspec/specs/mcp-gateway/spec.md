@@ -8,65 +8,70 @@ Hosted Streamable HTTP MCP endpoint per server that proxies enabled tools to ups
 
 ### Requirement: Hosted Streamable HTTP MCP per server
 
-The system SHALL expose a Streamable HTTP MCP endpoint at `/mcp/{serverId}` on Hono (not tRPC). Unauthenticated requests SHALL fail. A valid unrevoked server agent token SHALL authenticate only that server.
+The system SHALL expose Streamable HTTP MCP at `/mcp/{serverId}` with server-scoped Bearer authentication. If an `Origin` header is present, the endpoint SHALL validate it against configured trusted origins and return HTTP 403 before MCP processing when invalid. The endpoint SHALL enforce request-size, per-token rate, and per-server concurrency limits. A valid token SHALL authenticate only its server and SHALL NOT authorize paused servers to advertise callable tools.
 
-#### Scenario: Valid token lists tools
+#### Scenario: Valid non-browser client
 
-- **WHEN** an MCP client connects to `/mcp/{serverId}` with a valid Bearer server token
-- **THEN** the server advertises the owner's enabled tools for that server and no other server's tools
+- **WHEN** a client omits Origin and sends a valid unrevoked token for the requested server
+- **THEN** MCP processing proceeds subject to rate and concurrency limits
 
-#### Scenario: Missing or unknown token
+#### Scenario: Invalid Origin
 
-- **WHEN** a client calls the gateway without a token or with an unknown token
-- **THEN** the system rejects the request with `MCP_AGENT_TOKEN_INVALID` and does not proxy upstream
+- **WHEN** a request includes an Origin outside the trusted allowlist
+- **THEN** the gateway returns HTTP 403 without authenticating, listing tools, or invoking upstream
 
 #### Scenario: Token from another server
 
-- **WHEN** a token issued for server A is sent to `/mcp/{serverB}`
-- **THEN** the system rejects the request with `MCP_AGENT_TOKEN_INVALID`
+- **WHEN** a server-A token is sent to server B
+- **THEN** the gateway rejects with `MCP_AGENT_TOKEN_INVALID`
+
+#### Scenario: Rate limit exceeded
+
+- **WHEN** a token exceeds its configured invocation budget
+- **THEN** the gateway returns a retryable rate-limit error and does not contact upstream
 
 ### Requirement: Gateway proxies mapped REST calls
 
-For an enabled tool call, the system SHALL render the upstream request from `baseUrl` (including any path prefix), path template, request template, server default headers and query, server variables, and the call arguments, per the `mcp-templates` resolution and escaping rules, then return the upstream body to the MCP client subject to the 256 KiB cap. A completed upstream HTTP response (including 4xx and 5xx) SHALL be returned as a tool result with `httpStatus` and body, not as `MCP_UPSTREAM_ERROR`.
+For an enabled valid tool, the gateway SHALL execute its compiled request plan within one deadline and return an MCP-native result. A 2xx response SHALL return compatibility text plus `structuredContent` containing `ok`, status, content type, parsed JSON data or text body, safe response headers, and truncation metadata. A 4xx or 5xx response SHALL return a tool execution result with `isError: true`, status, normalized code, safe details, and available retry metadata; it SHALL NOT use `MCP_UPSTREAM_ERROR` unless no completed upstream HTTP response exists.
 
-#### Scenario: Successful GET
+#### Scenario: Successful JSON GET
 
-- **WHEN** the agent calls `get_contact` with `{ "contactId": "1" }` and the tool maps to `GET /contacts/{{contactId}}`
-- **THEN** the gateway requests `https://{allowed-host}/contacts/1` with rendered default headers and variables, and returns the upstream JSON
+- **WHEN** upstream returns JSON with status 200
+- **THEN** the result has `isError` false, parsed `structuredContent.data`, and serialized compatibility text
 
-#### Scenario: Disabled tool
+#### Scenario: Upstream 401 is an MCP tool error
 
-- **WHEN** the agent calls a tool that exists but is not enabled
-- **THEN** the gateway rejects the call and does not contact upstream
+- **WHEN** upstream returns 401
+- **THEN** the result has `isError: true`, status 401, a stable auth-related code, and no credential value
 
-#### Scenario: Unresolved placeholder
+#### Scenario: Upstream 429 carries retry metadata
 
-- **WHEN** the agent calls a tool whose template references a placeholder that neither an argument nor a variable resolves
-- **THEN** the gateway rejects with `MCP_TEMPLATE_UNRESOLVED` and does not contact upstream
+- **WHEN** upstream returns 429 with `Retry-After`
+- **THEN** the tool error includes safe retry metadata the agent can use
 
-#### Scenario: Paused server
+#### Scenario: Disabled or invalid tool is unavailable
 
-- **WHEN** the server status is `paused`
-- **THEN** the gateway rejects tool execution
-
-#### Scenario: Upstream 401 is a tool result
-
-- **WHEN** the agent calls an enabled tool and the upstream API returns 401
-- **THEN** the MCP tool result includes `httpStatus` 401 and the capped upstream body, and does not use `MCP_UPSTREAM_ERROR`
+- **WHEN** a tool is disabled or has compile errors
+- **THEN** it is not advertised and cannot contact upstream
 
 ### Requirement: Gateway advertises derived input schemas
 
-Each advertised tool SHALL expose an MCP `inputSchema` derived from its declared params: one property per param with the declared JSON type, per-param description when present, and required params listed as required. A tool with no params SHALL advertise an empty-properties object schema.
+Each advertised tool SHALL expose an `inputSchema` generated from its compiled agent inputs, including descriptions, required fields, JSON types, constraints, formats, enums, and examples supported by the definition. The gateway SHALL also advertise a stable `outputSchema` for the result envelope and behavior annotations for read-only, destructive, idempotent, and open-world behavior. Tools SHALL be listed in deterministic name order.
 
-#### Scenario: Agent sees params
+#### Scenario: Agent sees constrained input
 
-- **WHEN** an MCP client lists tools for a server with tool `get_contact` declaring required param `contactId` (type string, described)
-- **THEN** the advertised `inputSchema` has property `contactId` of type string with its description and lists it as required
+- **WHEN** `limit` is an optional integer from 1 through 100 with an example
+- **THEN** the advertised schema contains those constraints and does not mark it required
 
-#### Scenario: Tool without params
+#### Scenario: Agent sees behavior annotations
 
-- **WHEN** an MCP client lists a tool with an empty params list
-- **THEN** the advertised `inputSchema` is an object schema with no properties
+- **WHEN** a DELETE tool is enabled and marked destructive and non-idempotent
+- **THEN** its MCP definition advertises the corresponding annotations
+
+#### Scenario: Tool without inputs is closed
+
+- **WHEN** a tool has no agent inputs
+- **THEN** its schema accepts an empty object and rejects unknown properties
 
 ### Requirement: Mutations require explicit allow
 
@@ -84,23 +89,71 @@ The gateway SHALL execute GET and HEAD tools when enabled. It SHALL reject POST,
 
 ### Requirement: Host allowlist and SSRF protections
 
-The gateway SHALL refuse upstream URLs whose host is not in `allowedHosts`. It SHALL refuse loopback, private, link-local, and cloud metadata targets after DNS resolution. It SHALL NOT follow redirects to a different host.
+The gateway SHALL enforce allowed host and resolved-address policy before every outbound hop. Redirects SHALL be same-origin by default; port changes, HTTPS downgrades, userinfo, private/link-local/metadata addresses, and cross-origin credential forwarding SHALL be rejected. HTTP redirect semantics SHALL preserve method/body for 307/308 and change method only where the HTTP standard permits. The final normalized path SHALL remain within the configured server base-path boundary.
 
-#### Scenario: Host not allowed
+#### Scenario: Same hostname different port is rejected
 
-- **WHEN** a tool path or parameter would send the request to a host outside `allowedHosts`
-- **THEN** the gateway rejects with `MCP_HOST_NOT_ALLOWED`
+- **WHEN** upstream redirects from `https://api.example.com` to `https://api.example.com:8443`
+- **THEN** the gateway rejects the redirect and does not forward auth
 
-#### Scenario: Private IP
+#### Scenario: HTTPS downgrade is rejected
 
-- **WHEN** the resolved address of an allowed hostname is a private or metadata IP
-- **THEN** the gateway rejects with `MCP_HOST_NOT_ALLOWED`
+- **WHEN** HTTPS upstream redirects to HTTP
+- **THEN** the gateway rejects the redirect
+
+#### Scenario: Path cannot escape base prefix
+
+- **WHEN** a rendered path contains a dot segment that would normalize above the server base path
+- **THEN** execution fails before fetch
+
+#### Scenario: 307 preserves method only on safe redirect
+
+- **WHEN** a POST receives a same-origin 307 within the allowed boundary
+- **THEN** the gateway preserves method and body for the validated hop
 
 ### Requirement: Secrets stay out of MCP errors
 
-Gateway and executor errors shown to the agent SHALL use stable `appCode` values and MUST NOT include credential secrets, agent tokens, or decrypted ciphertext. Upstream response bodies returned as tool results SHALL NOT be rewritten to inject secrets; persisted call-log summaries SHALL still redact secret variable values.
+Gateway results and errors SHALL NOT contain agent tokens, decrypted secret values, auth material, or inputs marked sensitive except where an authorized upstream response independently returns matching data that survives configured output policy. Agent-provided strings SHALL never be interpreted as templates. Error messages SHALL use stable app codes and sanitized details.
 
-#### Scenario: Upstream 401 does not leak secret
+#### Scenario: Reflected secret is redacted
 
-- **WHEN** the upstream API returns 401 after the gateway sent a rendered bearer token
-- **THEN** the agent result body does not contain a rest2mcp-injected copy of that token, and the call-log summary redacts the secret
+- **WHEN** an upstream error reflects a secret binding value
+- **THEN** the MCP error replaces it with `[REDACTED]`
+
+#### Scenario: Agent string cannot request secret expansion
+
+- **WHEN** an agent argument contains text matching secret template syntax
+- **THEN** the text remains data and no secret is added to the request or result
+
+### Requirement: Invocation deadline and response bounds cover the full operation
+
+The gateway SHALL apply one deadline across address validation, connection, redirects, response headers, and body consumption. Response caps SHALL be measured in bytes. Text SHALL be decoded only for supported textual content types; unsupported binary responses SHALL return metadata without corrupt text. Truncation SHALL be explicitly represented and SHALL NOT claim that truncated JSON is a complete parsed document.
+
+#### Scenario: Slow response body times out
+
+- **WHEN** upstream sends headers and then stalls while streaming the body past the deadline
+- **THEN** execution aborts with a timeout tool error
+
+#### Scenario: Oversized JSON is not presented as valid JSON
+
+- **WHEN** a JSON response exceeds the byte cap
+- **THEN** the result marks it truncated and does not expose a partially parsed JSON object as complete data
+
+#### Scenario: Binary response is not UTF-8 decoded
+
+- **WHEN** upstream returns an unsupported binary content type
+- **THEN** the result contains content metadata and a bounded unsupported-binary error or reference, not replacement-character text
+
+### Requirement: Gateway availability matches server state
+
+The gateway SHALL advertise only enabled, successfully compiled tools on a live server. A paused server SHALL advertise no callable tools and tool ordering SHALL be deterministic. Draft or invalid tools SHALL remain visible only in owner Studio surfaces.
+
+#### Scenario: Paused server lists no tools
+
+- **WHEN** a client lists tools for a paused server
+- **THEN** no callable product tools are returned
+
+#### Scenario: Tool order is stable
+
+- **WHEN** the same unchanged server is listed repeatedly
+- **THEN** tools appear in the same name order

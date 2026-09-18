@@ -8,94 +8,85 @@ Streamable HTTP MCP for the owner to manage MCP studio resources from an externa
 
 ### Requirement: Owner can connect a platform MCP
 
-The system SHALL expose a Streamable HTTP MCP at `/api/platform-mcp` authenticated by a platform agent token (not a server token). The owner SHALL be able to create and revoke that token from the authenticated SPA. The raw token SHALL be shown only once; only a hash is stored.
+The system SHALL expose `/api/platform-mcp` authenticated by an expiring platform token with explicit scopes for read, author, invoke, secret-reference, and destructive operations. The raw token SHALL be shown once and stored only as a hash. Requests SHALL enforce trusted Origin when present, payload limits, per-token rate limits, and concurrency limits. Existing unscoped platform tokens SHALL be revoked during migration.
 
-#### Scenario: Valid platform token
+#### Scenario: Scoped read token
 
-- **WHEN** the owner's agent connects to `/api/platform-mcp` with a valid platform token
-- **THEN** the agent receives studio tools (`list_servers`, `create_server`, `delete_server`, `add_tool`, `add_tool_from_curl`, `delete_tool`, `set_variable`, `set_server_auth`, `list_variables`, `delete_variable`, `list_tools`, `test_tool`, `get_connection_snippet`, `list_recent_calls`)
+- **WHEN** a platform token has only read scope
+- **THEN** list tools are available while create, execute, secret-reference, and delete tools are absent or denied
 
 #### Scenario: Server token rejected
 
-- **WHEN** a server-scoped agent token is sent to `/api/platform-mcp`
-- **THEN** the system rejects the request with `MCP_AGENT_TOKEN_INVALID`
+- **WHEN** a server token is sent to Platform MCP
+- **THEN** the system rejects with `MCP_AGENT_TOKEN_INVALID`
 
-#### Scenario: Unauthenticated
+#### Scenario: Expired token rejected
 
-- **WHEN** a client calls `/api/platform-mcp` without a token
-- **THEN** the system rejects the request and does not list servers
+- **WHEN** a platform token is past its expiration
+- **THEN** the request is rejected before any studio data is read
 
 ### Requirement: Platform tools mutate only the owner's studio
 
-Platform MCP tools SHALL enforce the same ownership, validation, mutation, and secret rules as the tRPC studio. They SHALL NOT expose ciphertext or other users' servers. `delete_server` SHALL apply the same cascading transaction as the tRPC delete. `add_tool_from_curl` SHALL use the same parsing and keep-existing-auth rules as the SPA import.
+Platform tools SHALL use the same shared command schemas, size limits, compiler, ownership checks, and transactions as tRPC Studio. Curl import SHALL create only a sanitized disabled draft tool and SHALL never change authentication, server values, secrets, or defaults. Destructive operations SHALL require destructive scope plus a confirmation field matching the current resource name.
 
-#### Scenario: Create server via agent
+#### Scenario: Validation matches tRPC
 
-- **WHEN** the owner's agent calls `create_server` with a valid name and base URL
-- **THEN** a server owned by that user is created and returned without any secret variable value
+- **WHEN** an agent submits a tool name, path, body, parameter list, or curl larger than the tRPC limit
+- **THEN** Platform MCP rejects it with the same validation code and writes nothing
 
-#### Scenario: Add tool from curl via agent
+#### Scenario: Curl with credential is rejected or sanitized
 
-- **WHEN** the owner's agent calls `add_tool_from_curl` with a valid curl and server id they own
-- **THEN** a tool is created using the same parsing rules as the SPA import
+- **WHEN** `add_tool_from_curl` receives curl containing Authorization, cookies, or API keys
+- **THEN** no credential value is stored, no server-wide state changes, and the result reports separate auth configuration is required
 
-#### Scenario: Curl keeps existing server auth via agent
+#### Scenario: Destructive confirmation mismatch
 
-- **WHEN** the server already has Bearer defaults and the agent imports a curl with a different Bearer token
-- **THEN** the existing secret is not rotated and the new tool contains no secret
+- **WHEN** `delete_server` receives the right id but a confirmation name that does not match
+- **THEN** deletion fails and all resources remain
 
-#### Scenario: Cannot edit another user's server
+#### Scenario: Cannot mutate another user's server
 
-- **WHEN** the agent passes another user's server id to `add_tool`
-- **THEN** the tool fails with `MCP_SERVER_NOT_FOUND` and no row is inserted
-
-#### Scenario: Cannot delete another user's server
-
-- **WHEN** the agent passes another user's server id to `delete_server`
-- **THEN** the tool fails with `MCP_SERVER_NOT_FOUND` and nothing is removed
-
-### Requirement: Platform create_server accepts an auth recipe
-
-`create_server` SHALL accept the same optional authentication recipe as tRPC `createServer` (`none` / omit, `bearer`, `header`, `query`, `basic`) and SHALL persist it through the same transactional mapping. Secret values SHALL NOT appear in the tool result.
-
-#### Scenario: Create server with bearer via agent
-
-- **WHEN** the owner's agent calls `create_server` with a name, HTTPS base URL, and `{ type: "bearer", token: "sk_live_123" }`
-- **THEN** the server is created with encrypted `api_token` and default `Authorization: Bearer {{api_token}}`, and the result does not include `sk_live_123`
-
-### Requirement: Platform can set server authentication
-
-The platform MCP SHALL expose `set_server_auth` that applies the same recipe as studio Settings (`none` to clear). It SHALL enforce owner scope and SHALL NOT return secret values.
-
-#### Scenario: Set header auth via agent
-
-- **WHEN** the owner's agent calls `set_server_auth` with type `header`, header name `X-API-Key`, and a value
-- **THEN** a secret variable and that default header exist, and the result omits the value
+- **WHEN** an agent supplies another user's server id
+- **THEN** the operation fails with `MCP_SERVER_NOT_FOUND` and writes nothing
 
 ### Requirement: Platform tools can test and connect
 
-`test_tool` SHALL run the shared executor and record a call log with source `platform`. `get_connection_snippet` SHALL return the product gateway URL for that server and SHALL NOT mint a new server token unless the owner explicitly requests token creation through the documented token-create path.
+`test_tool` SHALL require invoke scope and use the same compiled executor and structured result contract as the product gateway. `get_connection_snippet` SHALL require read scope, return no token, and SHALL NOT mint credentials. Completed upstream 4xx/5xx responses SHALL be Platform MCP tool errors with structured details.
 
-#### Scenario: Test tool
+#### Scenario: Scoped test tool
 
-- **WHEN** the agent calls `test_tool` for an enabled GET tool on a server they own
-- **THEN** the executor runs and a call log row with source `platform` is stored
+- **WHEN** a token with invoke scope tests an enabled tool
+- **THEN** the shared executor runs and returns the standard result or tool-error envelope
 
-#### Scenario: Connection snippet
+#### Scenario: Read token cannot invoke
 
-- **WHEN** the agent calls `get_connection_snippet` for a server they own
-- **THEN** the result includes `/mcp/{serverId}` and does not include secret variable values
+- **WHEN** a read-only platform token calls `test_tool`
+- **THEN** the operation is denied before upstream contact
 
 ### Requirement: Platform calls stay secret-safe
 
-Platform MCP responses and logs SHALL NOT include secret variable values, raw platform tokens after issuance, or raw server agent tokens except the one-time token-create response. `list_variables` SHALL return names, `isSecret` flags, and `hasValue` metadata only.
+Platform MCP SHALL never accept new plaintext secret values, raw auth credentials, or secret-bearing curl as normal agent-authored fields. It MAY reference an existing secret id when the token has secret-reference scope. Results, logs, schemas, and validation errors SHALL omit secret values, ciphertext, raw tokens, and sensitive inputs.
 
-#### Scenario: list_variables omits secrets
+#### Scenario: Agent cannot create plaintext secret
 
-- **WHEN** the agent calls `list_variables` for a server with a secret variable
-- **THEN** the item includes the variable name, `isSecret` true, and `hasValue` true, and MUST NOT include the value
+- **WHEN** `set_variable` requests `kind: secret` with a plaintext value
+- **THEN** Platform MCP rejects the request and directs the owner to the secure Studio secret flow
 
-#### Scenario: list_servers omits secrets
+#### Scenario: Existing secret reference is allowed by scope
 
-- **WHEN** the agent calls `list_servers`
-- **THEN** each item may include secret-presence metadata and MUST NOT include any secret variable value
+- **WHEN** an authoring tool references an existing secret id and the token has secret-reference scope
+- **THEN** the definition may be compiled without revealing the secret value
+
+#### Scenario: Secret-reference scope is required
+
+- **WHEN** a token without secret-reference scope attempts to bind a secret id
+- **THEN** the operation is denied without revealing whether the secret exists
+
+### Requirement: Platform token replacement is atomic
+
+Creating a replacement platform token SHALL revoke previous active tokens and insert the new scoped token in one transaction. If creation fails, the previous token SHALL remain active.
+
+#### Scenario: Replacement insert fails
+
+- **WHEN** database insertion of a new token fails
+- **THEN** the existing active token is not revoked
