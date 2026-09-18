@@ -66,6 +66,8 @@ type PushIssue = (
   code: string,
   message: string,
   severity?: "error" | "warning",
+  /** Stable definition-local id of the affected node, when known. */
+  nodeId?: string,
 ) => void;
 
 /**
@@ -171,8 +173,14 @@ function deriveAnnotations(
 
 export function compileToolDefinition(ctx: CompileContext): CompileResult {
   const issues: McpCompileIssue[] = [];
-  const push: PushIssue = (path, code, message, severity = "error") => {
-    issues.push({ path, code, message, severity });
+  const push: PushIssue = (path, code, message, severity = "error", nodeId) => {
+    issues.push({
+      path,
+      code,
+      message,
+      severity,
+      ...(nodeId !== undefined ? { id: nodeId } : {}),
+    });
   };
 
   const method = ctx.method.toUpperCase();
@@ -188,6 +196,8 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
         "agentInputs",
         APP_ERROR_CODES.MCP_COMPILE_INVALID,
         `Agent input id "${input.id}" is declared more than once.`,
+        "error",
+        input.id,
       );
       continue;
     }
@@ -206,6 +216,8 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
         `agentInputs.${input.name}`,
         APP_ERROR_CODES.MCP_COMPILE_INVALID,
         `Required string input "${input.name}" permits an empty value; set allowEmpty to confirm intent.`,
+        "error",
+        input.id,
       );
     }
   }
@@ -216,6 +228,8 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
         `agentInputs.${name}`,
         APP_ERROR_CODES.MCP_VARIABLE_NAME_CONFLICT,
         `Agent input name "${name}" is declared more than once with different ids.`,
+        "error",
+        declared[0]?.id,
       );
     }
     if (serverValueNames.has(name)) {
@@ -223,6 +237,8 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
         `agentInputs.${name}`,
         APP_ERROR_CODES.MCP_VARIABLE_NAME_CONFLICT,
         `Agent input name "${name}" collides with a server value name.`,
+        "error",
+        declared[0]?.id,
       );
     }
   }
@@ -230,6 +246,7 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
   function resolveBinding(
     binding: McpValueBinding,
     path: string,
+    nodeId?: string,
     options: { allowAuthOwned?: boolean } = {},
   ): void {
     if (binding.kind === "literal") return;
@@ -240,6 +257,8 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
           path,
           APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED,
           `Server value "${binding.serverValueId}" referenced at ${path} does not exist.`,
+          "error",
+          nodeId,
         );
         return;
       }
@@ -248,6 +267,8 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
           path,
           APP_ERROR_CODES.MCP_COMPILE_INVALID,
           `Server value "${value.name}" is owned by authentication and can only be referenced through the auth configuration.`,
+          "error",
+          nodeId,
         );
       }
       return;
@@ -258,6 +279,8 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
         path,
         APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED,
         `Agent input "${binding.agentInputId}" referenced at ${path} is not declared.`,
+        "error",
+        nodeId,
       );
       return;
     }
@@ -280,12 +303,14 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
   // ---- Path segments ----------------------------------------------------
   for (const [index, segment] of ctx.definition.pathSegments.entries()) {
     const path = `pathSegments[${index}]`;
-    resolveBinding(segment.value, path);
+    resolveBinding(segment.value, path, segment.id);
     if (isSecretBinding(segment.value)) {
       push(
         path,
         APP_ERROR_CODES.MCP_COMPILE_INVALID,
         "Secret values cannot be placed in path segments.",
+        "error",
+        segment.id,
       );
     }
     if (isOptionalAgentInput(segment.value)) {
@@ -293,6 +318,8 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
         path,
         APP_ERROR_CODES.MCP_COMPILE_INVALID,
         "Optional agent inputs cannot be used in path segments; path segments cannot be omitted.",
+        "error",
+        segment.id,
       );
     }
   }
@@ -402,16 +429,18 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
 
   // ---- Header / query merge (common -> tool -> auth) ---------------------
   function validateNamedEntry(
-    entry: { name: string; value: McpValueBinding; omitWhenAbsent?: boolean },
+    entry: McpNamedEntry,
     path: string,
     allowSecret: boolean,
   ): void {
-    resolveBinding(entry.value, path);
+    resolveBinding(entry.value, path, entry.id);
     if (!allowSecret && isSecretBinding(entry.value)) {
       push(
         path,
         APP_ERROR_CODES.MCP_COMPILE_INVALID,
         `Secret values must be delivered through the auth configuration, not a direct binding at ${path}.`,
+        "error",
+        entry.id,
       );
     }
     if (entry.omitWhenAbsent) {
@@ -422,6 +451,8 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
           path,
           APP_ERROR_CODES.MCP_COMPILE_INVALID,
           `Omission is only supported for an entry bound entirely to one optional agent input (${path}).`,
+          "error",
+          entry.id,
         );
       }
     }
@@ -448,6 +479,8 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
           path,
           APP_ERROR_CODES.MCP_COMPILE_INVALID,
           `Duplicate common entry name "${entry.name}".`,
+          "error",
+          entry.id,
         );
         continue;
       }
@@ -457,6 +490,8 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
           path,
           APP_ERROR_CODES.MCP_COMPILE_INVALID,
           `"${entry.name}" is a forbidden transport header.`,
+          "error",
+          entry.id,
         );
       }
       if (protectedNames.has(key)) {
@@ -464,6 +499,8 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
           path,
           APP_ERROR_CODES.MCP_COMPILE_INVALID,
           `"${entry.name}" is owned by authentication and cannot be set here.`,
+          "error",
+          entry.id,
         );
       }
       validateNamedEntry(entry, path, allowSecret);
@@ -478,15 +515,19 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
           path,
           APP_ERROR_CODES.MCP_COMPILE_INVALID,
           `Duplicate entry name "${entry.name}".`,
+          "error",
+          entry.id,
         );
         continue;
       }
       seenTool.set(key, entry);
-      if (forbidden && isForbiddenHeaderName(key)) {
+      if (forbidden && isForbiddenTransportHeaderName(key)) {
         push(
           path,
           APP_ERROR_CODES.MCP_COMPILE_INVALID,
           `"${entry.name}" is a forbidden transport header.`,
+          "error",
+          entry.id,
         );
       }
       if (protectedNames.has(key)) {
@@ -494,6 +535,8 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
           path,
           APP_ERROR_CODES.MCP_COMPILE_INVALID,
           `"${entry.name}" is owned by authentication and cannot be overridden.`,
+          "error",
+          entry.id,
         );
       }
       validateNamedEntry(entry, path, allowSecret);
@@ -587,6 +630,7 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
     node: McpJsonNode,
     path: string,
     context: "root" | "field" | "item",
+    nodeId?: string,
   ): void {
     if (node.kind === "literal") {
       if (!literalMatchesType(node.value, node.jsonType)) {
@@ -594,12 +638,14 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
           path,
           APP_ERROR_CODES.MCP_COMPILE_INVALID,
           `Literal value at ${path} does not match declared JSON type "${node.jsonType}".`,
+          "error",
+          nodeId,
         );
       }
       return;
     }
     if (node.kind === "binding") {
-      resolveBinding(node.binding, path);
+      resolveBinding(node.binding, path, nodeId);
       if (node.binding.kind === "agentInput" && node.jsonType !== "any") {
         const input = agentInputById.get(node.binding.agentInputId);
         if (input && !isJsonTypeCompatible(input.type, node.jsonType)) {
@@ -607,6 +653,8 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
             path,
             APP_ERROR_CODES.MCP_COMPILE_INVALID,
             `Agent input "${input.name}" type "${input.type}" is incompatible with JSON type "${node.jsonType}" at ${path}.`,
+            "error",
+            nodeId,
           );
         }
       }
@@ -620,6 +668,8 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
             path,
             APP_ERROR_CODES.MCP_COMPILE_INVALID,
             `Optional omission at ${path} is only supported for a full object field bound to one optional agent input.`,
+            "error",
+            nodeId,
           );
         }
       }
@@ -634,6 +684,8 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
             fieldPath,
             APP_ERROR_CODES.MCP_COMPILE_INVALID,
             `Duplicate JSON object key "${field.key}" at ${path}.`,
+            "error",
+            field.id,
           );
         }
         seenKeys.add(field.key);
@@ -655,10 +707,12 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
               fieldPath,
               APP_ERROR_CODES.MCP_COMPILE_INVALID,
               `Optional field omission at ${fieldPath} requires the field to be bound entirely to one optional agent input.`,
+              "error",
+              field.id,
             );
           }
         }
-        compileJsonNode(field.value, fieldPath, "field");
+        compileJsonNode(field.value, fieldPath, "field", field.id);
       }
       return;
     }
@@ -684,6 +738,8 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
           path,
           APP_ERROR_CODES.MCP_COMPILE_INVALID,
           `Duplicate form field "${field.name}".`,
+          "error",
+          field.id,
         );
         continue;
       }
@@ -695,12 +751,14 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
   } else if (bodyDefinition.bodyType === "raw") {
     for (const [index, entry] of bodyDefinition.bindings.entries()) {
       const path = `body.bindings[${index}]`;
-      resolveBinding(entry.binding, path);
+      resolveBinding(entry.binding, path, entry.id);
       if (isOptionalAgentInput(entry.binding)) {
         push(
           path,
           APP_ERROR_CODES.MCP_COMPILE_INVALID,
           "Raw bodies do not support optional agent inputs; there is no per-binding omission mechanism.",
+          "error",
+          entry.id,
         );
       }
     }
@@ -748,6 +806,8 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
             "body.bindings",
             APP_ERROR_CODES.MCP_COMPILE_INVALID,
             `Raw body binding "${id}" is declared but never referenced by the template.`,
+            "error",
+            id,
           );
         }
       }
@@ -769,6 +829,8 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
         `agentInputs.${input.name}`,
         APP_ERROR_CODES.MCP_COMPILE_INVALID,
         `Agent input "${input.name}" is declared but not referenced by any binding.`,
+        "error",
+        input.id,
       );
     }
   }
@@ -833,6 +895,7 @@ export function assertCompileSuccess(result: CompileResult): McpCompiledPlan {
     status: 400,
     details: {
       ...(firstError?.path !== undefined ? { path: firstError.path } : {}),
+      ...(firstError?.id !== undefined ? { nodeId: firstError.id } : {}),
       ...(firstError?.code !== undefined ? { issueCode: firstError.code } : {}),
     },
   });

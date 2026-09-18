@@ -8,7 +8,6 @@ import {
   MCP_FIELD_LIMITS,
   mcpAgentInputSchema,
   mcpAuthConfigurationSchema,
-  mcpBehaviorAnnotationsSchema,
   mcpCommonEntriesSchema,
   mcpRequestDefinitionSchema,
   mcpServerValueKindSchema,
@@ -36,23 +35,33 @@ export const createServerCommandSchema = z.object({
   allowedHosts: z.array(z.string().min(1).max(253)).max(20).optional(),
 });
 
-export const updateServerCommandSchema = z.object({
-  serverId: z.string().min(1),
-  name: z.string().trim().min(1).max(MCP_FIELD_LIMITS.name).optional(),
-  description: z
-    .string()
-    .max(MCP_FIELD_LIMITS.description)
-    .optional()
-    .nullable(),
-  baseUrl: z.string().trim().url().max(2048).optional(),
-  allowedHosts: z.array(z.string().min(1).max(253)).max(20).optional(),
-  status: z.enum(["draft", "live", "paused"]).optional(),
-  iconImage: z.string().max(2048).optional().nullable(),
-  common: mcpCommonEntriesSchema.optional(),
-  /** Legacy compatibility maps during dual-write window. */
-  defaultHeaders: z.record(z.string(), z.string()).optional().nullable(),
-  defaultQuery: z.record(z.string(), z.string()).optional().nullable(),
-});
+export const updateServerCommandSchema = z
+  .strictObject({
+    serverId: z.string().min(1),
+    name: z.string().trim().min(1).max(MCP_FIELD_LIMITS.name).optional(),
+    description: z
+      .string()
+      .max(MCP_FIELD_LIMITS.description)
+      .optional()
+      .nullable(),
+    baseUrl: z.string().trim().url().max(2048).optional(),
+    allowedHosts: z.array(z.string().min(1).max(253)).max(20).optional(),
+    status: z.enum(["draft", "live", "paused"]).optional(),
+    iconImage: z.string().max(2048).optional().nullable(),
+    common: mcpCommonEntriesSchema.optional(),
+    /** Legacy compatibility maps during dual-write window. */
+    defaultHeaders: z.record(z.string(), z.string()).optional().nullable(),
+    defaultQuery: z.record(z.string(), z.string()).optional().nullable(),
+  })
+  .refine(
+    (value) =>
+      value.common === undefined ||
+      (value.defaultHeaders === undefined && value.defaultQuery === undefined),
+    {
+      message:
+        "Typed common entries and legacy default maps cannot be combined in one update.",
+    },
+  );
 
 /** Legacy `{{name}}` template shape, shared by tRPC and Platform MCP until authoring migrates to `requestDefinition`. */
 export const legacyToolParamSchema = z.object({
@@ -83,7 +92,7 @@ export const legacyRequestTemplateSchema = z.object({
   bodyType: z.enum(["json", "form", "raw"]).optional(),
 });
 
-export const createLegacyToolCommandSchema = z.object({
+export const createLegacyToolCommandSchema = z.strictObject({
   serverId: z.string().min(1),
   name: z.string().trim().min(1).max(MCP_FIELD_LIMITS.name),
   description: z
@@ -114,7 +123,7 @@ export const updateLegacyToolCommandSchema = createLegacyToolCommandSchema
     serverId: z.string().min(1),
   });
 
-export const createToolCommandSchema = z.object({
+export const createToolCommandSchema = z.strictObject({
   serverId: z.string().min(1),
   name: z.string().trim().min(1).max(MCP_FIELD_LIMITS.name),
   description: z
@@ -126,28 +135,6 @@ export const createToolCommandSchema = z.object({
   requestDefinition: mcpRequestDefinitionSchema,
   allowMutation: z.boolean().optional(),
   enabled: z.boolean().optional(),
-  annotations: mcpBehaviorAnnotationsSchema.optional(),
-  /** Legacy dual-write fields. */
-  pathTemplate: z.string().max(2048).optional(),
-  requestTemplate: z
-    .object({
-      query: z.record(z.string(), z.string()).optional(),
-      headers: z.record(z.string(), z.string()).optional(),
-      body: z.string().max(MCP_FIELD_LIMITS.body).nullable().optional(),
-      bodyType: z.enum(["json", "form", "raw"]).optional(),
-    })
-    .optional(),
-  params: z
-    .array(
-      z.object({
-        name: mcpValueNameSchema,
-        description: z.string().max(MCP_FIELD_LIMITS.description).optional(),
-        required: z.boolean(),
-        type: z.enum(["string", "number", "boolean", "json"]),
-      }),
-    )
-    .max(MCP_FIELD_LIMITS.agentInputCount)
-    .optional(),
 });
 
 export const updateToolCommandSchema = createToolCommandSchema
@@ -157,6 +144,19 @@ export const updateToolCommandSchema = createToolCommandSchema
     toolId: z.string().min(1),
     serverId: z.string().min(1),
   });
+
+/** Create a copy of an existing tool with regenerated definition-local ids. */
+export const duplicateToolCommandSchema = z.strictObject({
+  serverId: z.string().min(1),
+  toolId: z.string().min(1),
+  name: z.string().trim().min(1).max(MCP_FIELD_LIMITS.name).optional(),
+  description: z
+    .string()
+    .max(MCP_FIELD_LIMITS.description)
+    .optional()
+    .nullable(),
+  enabled: z.boolean().optional(),
+});
 
 export const setServerValueCommandSchema = z.object({
   serverId: z.string().min(1),
@@ -226,8 +226,16 @@ export const createPlatformTokenCommandSchema = z.object({
   expiresInDays: z.number().int().min(1).max(365).optional(),
 });
 
-/** Dry-run compile preview: same legacy shape the Studio tool form already builds, no persistence. */
-export const previewToolCompileCommandSchema = z.object({
+/** Dry-run compile preview: same typed definition the Studio tool form builds, no persistence. */
+export const previewToolCompileCommandSchema = z.strictObject({
+  serverId: z.string().min(1),
+  method: mcpHttpMethodSchema,
+  requestDefinition: mcpRequestDefinitionSchema,
+  allowMutation: z.boolean().optional(),
+});
+
+/** Explicit legacy compatibility preview retained during the migration window. */
+export const previewLegacyToolCompileCommandSchema = z.strictObject({
   serverId: z.string().min(1),
   method: mcpHttpMethodSchema,
   pathTemplate: z
@@ -254,4 +262,8 @@ export type CreateServerCommand = z.infer<typeof createServerCommandSchema>;
 export type UpdateServerCommand = z.infer<typeof updateServerCommandSchema>;
 export type CreateToolCommand = z.infer<typeof createToolCommandSchema>;
 export type UpdateToolCommand = z.infer<typeof updateToolCommandSchema>;
+export type DuplicateToolCommand = z.infer<typeof duplicateToolCommandSchema>;
+export type PreviewToolCompileCommand = z.infer<
+  typeof previewToolCompileCommandSchema
+>;
 export type CurlConfirmCommand = z.infer<typeof curlConfirmCommandSchema>;

@@ -40,6 +40,8 @@ export type McpToolParam = {
 
 export type McpCompileIssueRow = {
   path: string;
+  /** Stable definition-local id of the affected node, when known. */
+  id?: string;
   code: string;
   message: string;
   severity: "error" | "warning";

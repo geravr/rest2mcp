@@ -586,12 +586,11 @@ function jsonNodeToLegacyTemplateText(
 }
 
 /**
- * Renders a versioned definition back into the legacy shape so a rollback
- * to pre-compiler code can still execute newly authored tools. `raw` bodies
- * are only rewritten when the template still contains the declared
- * `{{bindingId}}` tokens; unrecognized tokens are left untouched.
+ * Unconditional renderer that maps a versioned definition back into the legacy
+ * shape. Prefer {@link projectDefinitionToLegacy} when the result must be
+ * provably lossless; this helper is kept for diagnostics and tests.
  */
-export function legacyTemplateFromDefinition(
+export function renderDefinitionToLegacy(
   definition: McpRequestDefinition,
   method: string,
   serverValueNames?: Record<string, string>,
@@ -674,6 +673,203 @@ export function legacyTemplateFromDefinition(
   return { pathTemplate, requestTemplate, params };
 }
 
+/** @deprecated Prefer {@link projectDefinitionToLegacy} for lossless checks. */
+export const legacyTemplateFromDefinition = renderDefinitionToLegacy;
+
+export type LegacyProjection = {
+  pathTemplate: string;
+  requestTemplate: McpRequestTemplate;
+  params: McpToolParam[];
+};
+
+export type LegacyProjectionResult = {
+  /** True only when every typed semantic survives a legacy round trip. */
+  projectable: boolean;
+  issues: McpCompileIssue[];
+  projection: LegacyProjection | null;
+};
+
+const PLACEHOLDER_SHAPED_TEXT = /\{\{[A-Za-z][A-Za-z0-9_]*\}\}/;
+const DECLARED_TOKEN = /\{\{([^}]+)\}\}/g;
+
+function literalTextIsProjectable(text: string): boolean {
+  return !PLACEHOLDER_SHAPED_TEXT.test(text);
+}
+
+function collectJsonLiteralTexts(node: McpJsonNode, out: string[]): void {
+  if (node.kind === "literal") {
+    if (typeof node.value === "string") out.push(node.value);
+    return;
+  }
+  if (node.kind === "binding") return;
+  if (node.kind === "array") {
+    node.items.forEach((item) => collectJsonLiteralTexts(item, out));
+    return;
+  }
+  node.fields.forEach((field) => collectJsonLiteralTexts(field.value, out));
+}
+
+/**
+ * Projects a typed definition to legacy fields only when the projection is
+ * semantically lossless. Returns non-projectable diagnostics instead of
+ * approximating placeholder-shaped text, collapsing repeated names, or
+ * rewriting typed JSON/raw shapes that legacy analysis would reinterpret.
+ */
+export function projectDefinitionToLegacy(
+  definition: McpRequestDefinition,
+  method: string,
+  serverValueNames?: Record<string, string>,
+): LegacyProjectionResult {
+  const issues: McpCompileIssue[] = [];
+  const reject = (path: string, message: string) => {
+    issues.push({
+      path,
+      code: APP_ERROR_CODES.MCP_LEGACY_PROJECTION_UNAVAILABLE,
+      message,
+      severity: "warning",
+    });
+  };
+
+  const agentInputById = new Map(
+    definition.agentInputs.map((input) => [input.id, input]),
+  );
+
+  const checkBinding = (binding: McpValueBinding, path: string): void => {
+    if (binding.kind === "literal") {
+      if (
+        typeof binding.value === "string" &&
+        !literalTextIsProjectable(binding.value)
+      ) {
+        reject(
+          path,
+          `Literal text at ${path} looks like a placeholder and cannot be projected without being reinterpreted.`,
+        );
+      }
+      return;
+    }
+    if (binding.kind === "serverValue") {
+      if (
+        serverValueNames &&
+        serverValueNames[binding.serverValueId] === undefined
+      ) {
+        reject(
+          path,
+          `Server value "${binding.serverValueId}" at ${path} has no name to project.`,
+        );
+      }
+      return;
+    }
+    if (!agentInputById.has(binding.agentInputId)) {
+      reject(
+        path,
+        `Agent input "${binding.agentInputId}" at ${path} is not declared.`,
+      );
+    }
+  };
+
+  definition.pathSegments.forEach((segment, index) => {
+    checkBinding(segment.value, `pathSegments[${index}]`);
+  });
+
+  const collectNames = (
+    entries: McpNamedEntry[],
+    pathPrefix: string,
+    caseInsensitive: boolean,
+  ): void => {
+    const seen = new Set<string>();
+    entries.forEach((entry, index) => {
+      const key = caseInsensitive ? entry.name.toLowerCase() : entry.name;
+      if (seen.has(key)) {
+        reject(
+          `${pathPrefix}[${index}]`,
+          `Repeated entry name "${entry.name}" at ${pathPrefix} cannot be represented in a legacy record.`,
+        );
+      }
+      seen.add(key);
+      checkBinding(entry.value, `${pathPrefix}[${index}]`);
+    });
+  };
+  collectNames(definition.headers, "headers", true);
+  collectNames(definition.query, "query", false);
+
+  if (definition.body.bodyType === "json") {
+    const literals: string[] = [];
+    collectJsonLiteralTexts(definition.body.root, literals);
+    for (const text of literals) {
+      if (!literalTextIsProjectable(text)) {
+        reject(
+          "body.root",
+          "A fixed JSON string looks like a placeholder and cannot be projected without being reinterpreted.",
+        );
+        break;
+      }
+    }
+    const walkJson = (node: McpJsonNode, path: string) => {
+      if (node.kind === "binding") {
+        if (node.jsonType === "null") {
+          reject(
+            path,
+            `A dynamic JSON null binding at ${path} has no lossless legacy representation.`,
+          );
+        }
+        checkBinding(node.binding, path);
+        return;
+      }
+      if (node.kind === "array") {
+        node.items.forEach((item, index) =>
+          walkJson(item, `${path}[${index}]`),
+        );
+        return;
+      }
+      if (node.kind === "object") {
+        node.fields.forEach((field) =>
+          walkJson(field.value, `${path}.${field.key}`),
+        );
+      }
+    };
+    walkJson(definition.body.root, "body.root");
+  } else if (definition.body.bodyType === "form") {
+    collectNames(definition.body.fields, "body.fields", false);
+  } else if (definition.body.bodyType === "raw") {
+    const declared = new Set(definition.body.bindings.map((b) => b.id));
+    definition.body.bindings.forEach((entry, index) => {
+      checkBinding(entry.binding, `body.bindings[${index}]`);
+    });
+    const stripped = definition.body.template.replace(
+      DECLARED_TOKEN,
+      (whole, id: string) => (declared.has(id) ? "" : whole),
+    );
+    if (!literalTextIsProjectable(stripped)) {
+      reject(
+        "body.template",
+        "Raw body text contains undeclared placeholder-shaped tokens that legacy analysis would reinterpret.",
+      );
+    }
+  }
+
+  const agentInputNames = new Set(definition.agentInputs.map((i) => i.name));
+  const serverValueNameValues = new Set(Object.values(serverValueNames ?? {}));
+  for (const name of agentInputNames) {
+    if (serverValueNameValues.has(name)) {
+      reject(
+        "agentInputs",
+        `Agent input name "${name}" collides with a server value name; legacy analysis cannot choose a source.`,
+      );
+    }
+  }
+
+  if (issues.length > 0) {
+    return { projectable: false, issues, projection: null };
+  }
+
+  return {
+    projectable: true,
+    issues,
+    projection: renderDefinitionToLegacy(definition, method, serverValueNames),
+  };
+}
+
+/** @deprecated Prefer {@link projectCommonEntriesToLegacy}. */
 export function legacyDefaultsFromCommonEntries(
   common: McpCommonEntries,
   serverValueNames?: Record<string, string>,
@@ -693,4 +889,93 @@ export function legacyDefaultsFromCommonEntries(
     defaultQuery[entry.name] = render(entry.value);
   }
   return { defaultHeaders, defaultQuery };
+}
+
+export type CommonEntriesProjectionResult = {
+  projectable: boolean;
+  issues: McpCompileIssue[];
+  defaultHeaders: Record<string, string> | null;
+  defaultQuery: Record<string, string> | null;
+};
+
+/**
+ * Projects typed common entries to legacy default maps only when lossless.
+ * Repeated case-insensitive header names, repeated query names, or literal
+ * placeholder-shaped text are marked non-projectable instead of approximated.
+ */
+export function projectCommonEntriesToLegacy(
+  common: McpCommonEntries,
+  serverValueNames?: Record<string, string>,
+): CommonEntriesProjectionResult {
+  const issues: McpCompileIssue[] = [];
+  const reject = (path: string, message: string) => {
+    issues.push({
+      path,
+      code: APP_ERROR_CODES.MCP_LEGACY_PROJECTION_UNAVAILABLE,
+      message,
+      severity: "warning",
+    });
+  };
+
+  const check = (
+    entries: McpNamedEntry[],
+    pathPrefix: string,
+    caseInsensitive: boolean,
+  ) => {
+    const seen = new Set<string>();
+    entries.forEach((entry, index) => {
+      const key = caseInsensitive ? entry.name.toLowerCase() : entry.name;
+      if (seen.has(key)) {
+        reject(
+          `${pathPrefix}[${index}]`,
+          `Repeated common entry name "${entry.name}" cannot be represented in a legacy map.`,
+        );
+      }
+      seen.add(key);
+      if (entry.value.kind === "literal") {
+        if (
+          typeof entry.value.value === "string" &&
+          !literalTextIsProjectable(entry.value.value)
+        ) {
+          reject(
+            `${pathPrefix}[${index}]`,
+            `Literal text at ${pathPrefix}[${index}] looks like a placeholder and cannot be projected.`,
+          );
+        }
+      } else if (entry.value.kind === "agentInput") {
+        reject(
+          `${pathPrefix}[${index}]`,
+          "Agent input bindings cannot exist in common entries.",
+        );
+      } else if (
+        serverValueNames &&
+        serverValueNames[entry.value.serverValueId] === undefined
+      ) {
+        reject(
+          `${pathPrefix}[${index}]`,
+          `Server value "${entry.value.serverValueId}" has no name to project.`,
+        );
+      }
+    });
+  };
+
+  check(common.headers, "common.headers", true);
+  check(common.query, "common.query", false);
+
+  if (issues.length > 0) {
+    return {
+      projectable: false,
+      issues,
+      defaultHeaders: null,
+      defaultQuery: null,
+    };
+  }
+
+  const legacy = legacyDefaultsFromCommonEntries(common, serverValueNames);
+  return {
+    projectable: true,
+    issues,
+    defaultHeaders: legacy.defaultHeaders,
+    defaultQuery: legacy.defaultQuery,
+  };
 }

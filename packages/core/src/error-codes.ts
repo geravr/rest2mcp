@@ -67,6 +67,8 @@ export const APP_ERROR_CODES = {
   MCP_UPSTREAM_HTTP_ERROR: "MCP_UPSTREAM_HTTP_ERROR",
   MCP_MUTATION_INDETERMINATE: "MCP_MUTATION_INDETERMINATE",
   MCP_BINARY_UNSUPPORTED: "MCP_BINARY_UNSUPPORTED",
+  MCP_LEGACY_PROJECTION_UNAVAILABLE: "MCP_LEGACY_PROJECTION_UNAVAILABLE",
+  MCP_LEGACY_DOWNGRADE_REJECTED: "MCP_LEGACY_DOWNGRADE_REJECTED",
 
   ROUTE_NOT_FOUND: "ROUTE_NOT_FOUND",
   INTERNAL_ERROR: "INTERNAL_ERROR",
@@ -98,6 +100,8 @@ export type AppErrorDetails = {
   placeholder?: string;
   /** Location-aware validation path (e.g. `query[0].value`, `headers.Authorization`). */
   path?: string;
+  /** Stable definition-local id of the affected node, when known. */
+  nodeId?: string;
   issueCode?: string;
   httpStatus?: number;
   retryAfterSeconds?: number;
