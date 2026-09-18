@@ -258,6 +258,41 @@ export async function captureServerException(
   }
 }
 
+/**
+ * Captures a consent-gated product event. Unlike exceptions this does not
+ * require error-tracking consent, only general observability consent, and it
+ * never includes request values (callers pass ids/codes/counts only).
+ */
+export async function captureServerEvent(
+  event: string,
+  context: ServerTelemetryContext,
+): Promise<void> {
+  try {
+    const client = getPostHogClient(context.runtimeEnv);
+    if (!client) {
+      return;
+    }
+
+    const resolvedEnv = resolveEnv(context.runtimeEnv);
+    const capturePermissions = await resolveCapturePermissions({
+      ...context,
+      requireErrorTracking: false,
+    });
+
+    if (!capturePermissions.canCapture) {
+      return;
+    }
+
+    client.capture({
+      distinctId: capturePermissions.distinctId ?? ANONYMOUS_SERVER_DISTINCT_ID,
+      event,
+      properties: buildBaseProperties(context, resolvedEnv, capturePermissions),
+    });
+  } catch (captureError) {
+    console.error("[PostHog] Failed to capture event:", captureError);
+  }
+}
+
 export function registerPostHogProcessHandlers(
   label: string,
   runtimeEnv?: RuntimeEnv,

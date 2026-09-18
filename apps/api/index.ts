@@ -20,7 +20,7 @@ export type {
   ConfirmCurlImportOptions,
   CreatePlatformTokenInput,
   CreateServerInput,
-  CreateToolInput,
+  CreateTypedToolInput,
   McpHttpMethod,
   McpServerStatus,
   McpServerWithMeta,
@@ -31,7 +31,7 @@ export type {
   TestConnectionResult,
   TrafficLight,
   UpdateServerInput,
-  UpdateToolInput,
+  UpdateTypedToolInput,
 } from "./services/mcp-studio-service.js";
 export type {
   InferredServerAuth,

@@ -18,12 +18,18 @@ import {
 } from "@repo/db";
 import { and, count, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { APP_ERROR_CODES, AppError, appError } from "../lib/app-error.js";
+import {
+  APP_ERROR_CODES,
+  AppError,
+  appError,
+  isAppErrorCode,
+} from "../lib/app-error.js";
 import {
   allCredentialMappingKeys,
   inferServerAuth,
   inferredAuthOwnedKeys,
   isAuthHeaderName,
+  isCredentialQueryName,
   recipeToMapping,
   templatesReferenceVariable,
   type ServerAuthRecipe,
@@ -42,18 +48,31 @@ import { encryptCredential } from "../lib/mcp-crypto.js";
 import {
   analyzeLegacyTool,
   analyzeLegacyCommonEntries,
-  legacyTemplateFromDefinition,
+  projectCommonEntriesToLegacy,
+  projectDefinitionToLegacy,
+  renderDefinitionToLegacy,
 } from "../lib/mcp-legacy-migrate.js";
 import {
   MCP_DEFAULT_PLATFORM_SCOPES,
   MCP_PLATFORM_TOKEN_TTL_MS,
 } from "../lib/mcp-policy.js";
+import { isForbiddenTransportHeaderName } from "../lib/mcp-policy.js";
 import { MCP_MAX_TOOLS_PER_SERVER } from "../lib/mcp-redact.js";
-import type {
-  McpAuthConfiguration,
-  McpCommonEntries,
+import {
+  mcpCommonEntriesSchema,
+  mcpRequestDefinitionSchema,
+  regenerateDefinitionIds,
+  type McpAuthConfiguration,
+  type McpCommonEntries,
+  type McpCompileIssue,
+  type McpNamedEntry,
+  type McpRequestDefinition,
 } from "../lib/mcp-request-definition.js";
 import { assertUpstreamUrlSafe } from "../lib/mcp-ssrf.js";
+import {
+  captureMcpTelemetry,
+  MCP_TELEMETRY_EVENTS,
+} from "../lib/mcp-telemetry.js";
 import { assertOwnedStorageAccessUrl } from "../lib/storage.js";
 import {
   extractPlaceholders,
@@ -97,7 +116,7 @@ export type UpdateServerInput = {
   defaultQuery?: Record<string, string> | null;
 };
 
-export type CreateToolInput = {
+export type CreateLegacyToolInput = {
   name: string;
   description?: string | null;
   method: McpHttpMethod;
@@ -108,7 +127,7 @@ export type CreateToolInput = {
   enabled?: boolean;
 };
 
-export type UpdateToolInput = {
+export type UpdateLegacyToolInput = {
   name?: string;
   description?: string | null;
   method?: McpHttpMethod;
@@ -116,6 +135,31 @@ export type UpdateToolInput = {
   requestTemplate?: McpRequestTemplate;
   params?: McpToolParam[];
   allowMutation?: boolean;
+  enabled?: boolean;
+};
+
+/** Canonical typed create contract; the request definition is authoritative. */
+export type CreateTypedToolInput = {
+  name: string;
+  description?: string | null;
+  method: McpHttpMethod;
+  requestDefinition: McpRequestDefinition;
+  allowMutation?: boolean;
+  enabled?: boolean;
+};
+
+export type UpdateTypedToolInput = {
+  name?: string;
+  description?: string | null;
+  method?: McpHttpMethod;
+  requestDefinition?: McpRequestDefinition;
+  allowMutation?: boolean;
+  enabled?: boolean;
+};
+
+export type DuplicateTypedToolInput = {
+  name?: string;
+  description?: string | null;
   enabled?: boolean;
 };
 
@@ -1021,6 +1065,24 @@ export async function updateServer(
   appOrigin: string,
 ) {
   const server = await requireOwnedServer(db, userId, serverId);
+  if (
+    (input.defaultHeaders !== undefined || input.defaultQuery !== undefined) &&
+    server.commonEntries
+  ) {
+    const serverValues = await loadCompileServerValueRefs(db, server.id);
+    const projection = projectCommonEntriesToLegacy(
+      server.commonEntries as McpCommonEntries,
+      Object.fromEntries(serverValues.map((value) => [value.id, value.name])),
+    );
+    throw appError({
+      appCode: projection.projectable
+        ? APP_ERROR_CODES.MCP_LEGACY_DOWNGRADE_REJECTED
+        : APP_ERROR_CODES.MCP_LEGACY_PROJECTION_UNAVAILABLE,
+      message:
+        "This server already uses typed common entries; edit them through the typed common-values command.",
+      status: 409,
+    });
+  }
   const nextBaseUrl = input.baseUrl
     ? formatBaseUrl(parseBaseUrl(input.baseUrl))
     : server.baseUrl;
@@ -1083,6 +1145,282 @@ export async function updateServer(
 
   const [withMeta] = await attachTrafficLight(db, [updated]);
   return withMeta;
+}
+
+/** Reads the canonical typed common entries for a server. */
+export async function getServerCommon(
+  db: DB,
+  userId: string,
+  serverId: string,
+) {
+  const server = await requireOwnedServer(db, userId, serverId);
+  const serverValues = await loadCompileServerValueRefs(db, server.id);
+  const common: McpCommonEntries =
+    (server.commonEntries as McpCommonEntries | null) ??
+    resolveCommonEntriesForCompile(server, serverValues);
+  const names = Object.fromEntries(
+    serverValues.map((value) => [value.id, value.name]),
+  );
+  const projection = projectCommonEntriesToLegacy(common, names);
+  return {
+    common,
+    legacyProjectable: projection.projectable,
+    projectionIssues: projection.issues,
+  };
+}
+
+/**
+ * Canonically writes ordered typed common entries and atomically refreshes
+ * every affected enabled tool's compiled plan. Rejects with per-tool
+ * diagnostics and writes nothing when any enabled tool becomes invalid.
+ */
+export async function updateServerCommon(
+  db: DB,
+  userId: string,
+  serverId: string,
+  input: { common: McpCommonEntries },
+) {
+  const server = await requireOwnedServer(db, userId, serverId);
+  const parsedCommon = mcpCommonEntriesSchema.parse(input.common);
+  const serverValues = await loadCompileServerValueRefs(db, server.id);
+  const serverValueById = new Map(serverValues.map((v) => [v.id, v]));
+  const names = Object.fromEntries(
+    serverValues.map((value) => [value.id, value.name]),
+  );
+  const protectedKeys = protectedAuthKeys(server);
+
+  const issues: McpCompileIssue[] = [];
+  const pushIssue = (
+    path: string,
+    code: string,
+    message: string,
+    id?: string,
+  ) => {
+    issues.push({
+      path,
+      code,
+      message,
+      severity: "error",
+      ...(id ? { id } : {}),
+    });
+  };
+
+  const validateEntries = (
+    entries: McpNamedEntry[],
+    location: "headers" | "query",
+  ) => {
+    const seen = new Set<string>();
+    entries.forEach((entry, index) => {
+      const path = `common.${location}[${index}]`;
+      const key =
+        location === "headers" ? entry.name.toLowerCase() : entry.name;
+      if (seen.has(key)) {
+        pushIssue(
+          path,
+          APP_ERROR_CODES.MCP_COMPILE_INVALID,
+          `Repeated common ${location} name "${entry.name}".`,
+          entry.id,
+        );
+      }
+      seen.add(key);
+      if (location === "headers" && isForbiddenTransportHeaderName(key)) {
+        pushIssue(
+          path,
+          APP_ERROR_CODES.MCP_COMPILE_INVALID,
+          `"${entry.name}" is a forbidden transport header.`,
+          entry.id,
+        );
+      }
+      if (location === "headers" && protectedKeys.headers.has(key)) {
+        pushIssue(
+          path,
+          APP_ERROR_CODES.MCP_COMPILE_INVALID,
+          `"${entry.name}" is owned by authentication and cannot be set here.`,
+          entry.id,
+        );
+      }
+      if (location === "query" && protectedKeys.query.has(entry.name)) {
+        pushIssue(
+          path,
+          APP_ERROR_CODES.MCP_COMPILE_INVALID,
+          `"${entry.name}" is owned by authentication and cannot be set here.`,
+          entry.id,
+        );
+      }
+      if (
+        entry.value.kind === "serverValue" &&
+        !serverValueById.has(entry.value.serverValueId)
+      ) {
+        pushIssue(
+          path,
+          APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED,
+          `Server value "${entry.value.serverValueId}" does not exist on this server.`,
+          entry.id,
+        );
+      }
+    });
+  };
+
+  validateEntries(parsedCommon.headers, "headers");
+  validateEntries(parsedCommon.query, "query");
+  issues.push(
+    ...collectPlaintextCredentialIssues(parsedCommon.headers, "headers"),
+    ...collectPlaintextCredentialIssues(parsedCommon.query, "query"),
+  );
+
+  if (issues.some((issue) => issue.severity === "error")) {
+    const first =
+      issues.find((issue) => issue.severity === "error") ?? issues[0];
+    throw appError({
+      appCode:
+        first && isAppErrorCode(first.code)
+          ? first.code
+          : APP_ERROR_CODES.MCP_COMPILE_INVALID,
+      message: first?.message ?? "The common request values are invalid.",
+      status: 400,
+      details: {
+        ...(first?.path !== undefined ? { path: first.path } : {}),
+        ...(first?.id !== undefined ? { nodeId: first.id } : {}),
+        ...(first?.code !== undefined ? { issueCode: first.code } : {}),
+      },
+    });
+  }
+
+  const projection = projectCommonEntriesToLegacy(parsedCommon, names);
+  const authConfiguration =
+    (server.authConfiguration as unknown as McpAuthConfiguration | null) ??
+    null;
+  const basePath = (() => {
+    try {
+      return new URL(server.baseUrl).pathname || "/";
+    } catch {
+      return "/";
+    }
+  })();
+
+  const enabledTools = await db
+    .select()
+    .from(mcpTool)
+    .where(and(eq(mcpTool.serverId, server.id), eq(mcpTool.enabled, true)));
+
+  if (enabledTools.length > MCP_MAX_TOOLS_PER_SERVER) {
+    throw appError({
+      appCode: APP_ERROR_CODES.INVALID_INPUT,
+      message: `A server cannot have more than ${MCP_MAX_TOOLS_PER_SERVER} enabled tools.`,
+      status: 400,
+    });
+  }
+
+  const toolFailures: Array<{ toolId: string; name: string }> = [];
+  const compiledUpdates: Array<{
+    toolId: string;
+    plan: Record<string, unknown> | null;
+    issues: McpCompileIssue[];
+    annotations: Record<string, unknown> | null;
+  }> = [];
+
+  for (const tool of enabledTools) {
+    if (!tool.requestDefinition) {
+      if (!projection.projectable) {
+        toolFailures.push({ toolId: tool.id, name: tool.name });
+      }
+      continue;
+    }
+    const parsedDefinition = mcpRequestDefinitionSchema.safeParse(
+      tool.requestDefinition,
+    );
+    if (!parsedDefinition.success) {
+      toolFailures.push({ toolId: tool.id, name: tool.name });
+      continue;
+    }
+    const result = compileToolDefinition({
+      method: tool.method,
+      definition: parsedDefinition.data,
+      common: parsedCommon,
+      auth: authConfiguration,
+      serverValues,
+      basePath,
+      allowMutation: tool.allowMutation,
+    });
+    if (!result.ok) {
+      toolFailures.push({ toolId: tool.id, name: tool.name });
+      continue;
+    }
+    compiledUpdates.push({
+      toolId: tool.id,
+      plan: result.plan as unknown as Record<string, unknown>,
+      issues: result.issues,
+      annotations:
+        (result.plan?.annotations as Record<string, unknown> | undefined) ??
+        null,
+    });
+  }
+
+  if (toolFailures.length > 0) {
+    throw appError({
+      appCode: APP_ERROR_CODES.MCP_COMPILE_INVALID,
+      message:
+        "The common request values would invalidate enabled tools; no changes were saved.",
+      status: 409,
+      details: {
+        references: toolFailures.map((failure) => ({
+          kind: "tool",
+          id: failure.toolId,
+          name: failure.name,
+        })),
+      },
+    });
+  }
+
+  const legacyDefaultHeaders = { ...(projection.defaultHeaders ?? {}) };
+  for (const [key, value] of Object.entries(server.defaultHeaders ?? {})) {
+    if (protectedKeys.headers.has(key.toLowerCase())) {
+      legacyDefaultHeaders[key] = value;
+    }
+  }
+  const legacyDefaultQuery = { ...(projection.defaultQuery ?? {}) };
+  for (const [key, value] of Object.entries(server.defaultQuery ?? {})) {
+    if (protectedKeys.query.has(key)) {
+      legacyDefaultQuery[key] = value;
+    }
+  }
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(mcpServer)
+      .set({
+        commonEntries: parsedCommon as unknown as {
+          headers: McpNamedEntryRow[];
+          query: McpNamedEntryRow[];
+        },
+        defaultHeaders: projection.projectable
+          ? legacyDefaultHeaders
+          : server.defaultHeaders,
+        defaultQuery: projection.projectable
+          ? legacyDefaultQuery
+          : server.defaultQuery,
+      })
+      .where(eq(mcpServer.id, server.id));
+
+    for (const update of compiledUpdates) {
+      await tx
+        .update(mcpTool)
+        .set({
+          compiledPlan: update.plan,
+          compileIssues: update.issues,
+          annotations: update.annotations,
+          compileStatus: "valid",
+        })
+        .where(eq(mcpTool.id, update.toolId));
+    }
+  });
+
+  return {
+    common: parsedCommon,
+    legacyProjectable: projection.projectable,
+    projectionIssues: projection.issues,
+    affectedToolCount: enabledTools.length,
+  };
 }
 
 /**
@@ -1212,12 +1550,43 @@ function validateToolTemplates(input: {
   assertNoPlaintextSecretHeaders(input.requestTemplate.headers ?? {});
 }
 
+/**
+ * Typed entries may bind a server value, but a literal credential-shaped value
+ * must still reference a variable rather than embed a plaintext secret.
+ */
+function collectPlaintextCredentialIssues(
+  entries: McpNamedEntry[],
+  location: "headers" | "query",
+): McpCompileIssue[] {
+  const issues: McpCompileIssue[] = [];
+  entries.forEach((entry, index) => {
+    if (entry.value.kind !== "literal") return;
+    const credentialKey =
+      location === "headers"
+        ? isAuthHeaderName(entry.name)
+        : isCredentialQueryName(entry.name);
+    if (!credentialKey) return;
+    const value = entry.value.value;
+    if (typeof value === "string" && !value.includes("{{")) {
+      issues.push({
+        path: `${location}[${index}]`,
+        id: entry.id,
+        code: APP_ERROR_CODES.MCP_PLAINTEXT_SECRET,
+        message: `${location === "headers" ? "Header" : "Query parameter"} "${entry.name}" looks credential-related. Store the secret in a secret variable and reference it instead of embedding it literally.`,
+        severity: "error",
+      });
+    }
+  });
+  return issues;
+}
+
 type CompiledToolPersistence = {
   requestDefinition: Record<string, unknown> | null;
   compiledPlan: Record<string, unknown> | null;
   compileStatus: "valid" | "invalid" | "legacy";
   compileIssues: Array<{
     path: string;
+    id?: string;
     code: string;
     message: string;
     severity: "error" | "warning";
@@ -1296,14 +1665,544 @@ async function compileLegacyToolForPersistence(
   };
 }
 
+function throwTypedCompileInvalid(
+  issues: CompiledToolPersistence["compileIssues"],
+): never {
+  const first = issues.find((issue) => issue.severity === "error") ?? issues[0];
+  throw appError({
+    appCode:
+      first && isAppErrorCode(first.code)
+        ? first.code
+        : APP_ERROR_CODES.MCP_COMPILE_INVALID,
+    message:
+      first?.message ?? "The typed request definition failed to compile.",
+    status: 400,
+    details: {
+      ...(first?.path !== undefined ? { path: first.path } : {}),
+      ...(first?.id !== undefined ? { nodeId: first.id } : {}),
+      ...(first?.code !== undefined ? { issueCode: first.code } : {}),
+    },
+  });
+}
+
+type TypedToolPersistence = CompiledToolPersistence & {
+  ok: boolean;
+  /** Legacy compatibility fields written only when the projection is lossless. */
+  compatibility: {
+    pathTemplate: string;
+    requestTemplate: McpRequestTemplate | null;
+    params: McpToolParam[] | null;
+    projectable: boolean;
+  };
+};
+
+/**
+ * Validates server-value references against the selected server's catalog,
+ * compiles the typed definition with the candidate common entries and auth
+ * configuration, and computes the lossless legacy compatibility projection.
+ * Pure with respect to the tool row: performs no writes.
+ */
+async function compileTypedToolForPersistence(
+  db: DB,
+  server: McpServer,
+  input: {
+    method: McpHttpMethod;
+    definition: McpRequestDefinition;
+    allowMutation: boolean;
+    enabled: boolean;
+  },
+): Promise<TypedToolPersistence> {
+  const serverValues = await loadCompileServerValueRefs(db, server.id);
+  const serverValueNames = Object.fromEntries(
+    serverValues.map((value) => [value.id, value.name]),
+  );
+  const commonEntries = resolveCommonEntriesForCompile(server, serverValues);
+  const authConfiguration =
+    (server.authConfiguration as unknown as McpAuthConfiguration | null) ??
+    null;
+  const basePath = (() => {
+    try {
+      return new URL(server.baseUrl).pathname || "/";
+    } catch {
+      return "/";
+    }
+  })();
+
+  const compileResult = compileToolDefinition({
+    method: input.method,
+    definition: input.definition,
+    common: commonEntries,
+    auth: authConfiguration,
+    serverValues,
+    basePath,
+    allowMutation: input.allowMutation,
+  });
+
+  const plaintextSecretIssues = [
+    ...collectPlaintextCredentialIssues(input.definition.headers, "headers"),
+    ...collectPlaintextCredentialIssues(input.definition.query, "query"),
+  ];
+  const compileIssues: CompiledToolPersistence["compileIssues"] = [
+    ...compileResult.issues,
+    ...plaintextSecretIssues,
+  ];
+
+  const projection = projectDefinitionToLegacy(
+    input.definition,
+    input.method,
+    serverValueNames,
+  );
+  if (!projection.projectable) {
+    compileIssues.push(...projection.issues);
+  }
+
+  const ok = compileResult.ok && plaintextSecretIssues.length === 0;
+  if (!ok) {
+    captureMcpTelemetry(MCP_TELEMETRY_EVENTS.typedCompileFailed, {
+      db,
+      userId: server.userId,
+      properties: {
+        serverId: server.id,
+        method: input.method,
+        issueCodes: compileResult.issues
+          .filter((issue) => issue.severity === "error")
+          .map((issue) => issue.code)
+          .slice(0, 10),
+      },
+    });
+  }
+  if (!projection.projectable) {
+    captureMcpTelemetry(MCP_TELEMETRY_EVENTS.definitionNotProjectable, {
+      db,
+      userId: server.userId,
+      properties: {
+        serverId: server.id,
+        method: input.method,
+        issueCodes: projection.issues.map((issue) => issue.code).slice(0, 10),
+      },
+    });
+  }
+  const fallbackPathTemplate = projection.projectable
+    ? (projection.projection?.pathTemplate ?? "")
+    : renderDefinitionToLegacy(input.definition, input.method, serverValueNames)
+        .pathTemplate;
+
+  return {
+    requestDefinition: input.definition as unknown as Record<string, unknown>,
+    compiledPlan:
+      (compileResult.plan as Record<string, unknown> | null) ?? null,
+    compileStatus: ok ? "valid" : "invalid",
+    compileIssues,
+    annotations:
+      (compileResult.plan?.annotations as
+        Record<string, unknown> | undefined) ?? null,
+    enabled: ok && input.enabled,
+    ok,
+    compatibility: {
+      pathTemplate: fallbackPathTemplate,
+      requestTemplate: projection.projectable
+        ? (projection.projection?.requestTemplate ?? null)
+        : null,
+      params: projection.projectable
+        ? (projection.projection?.params ?? null)
+        : null,
+      projectable: projection.projectable,
+    },
+  };
+}
+
+function assertSupportedMethod(method: McpHttpMethod): void {
+  if (![...READ_METHODS, ...MUTATING_METHODS].includes(method)) {
+    throw appError({
+      appCode: APP_ERROR_CODES.INVALID_INPUT,
+      message: "Unsupported HTTP method.",
+      status: 400,
+    });
+  }
+}
+
+/** Canonical typed create; persists definition, plan, status, and issues atomically. */
 export async function createTool(
   db: DB,
   userId: string,
   serverId: string,
-  input: CreateToolInput,
+  input: CreateTypedToolInput,
   source: McpToolSource = "manual",
 ) {
   const server = await requireOwnedServer(db, userId, serverId);
+  await assertToolCapacity(db, server.id);
+  const name = toMcpToolName(input.name);
+  const method = input.method.toUpperCase() as McpHttpMethod;
+  assertSupportedMethod(method);
+  const flags = mutationDefaults(method, input.allowMutation, input.enabled);
+  const compiled = await compileTypedToolForPersistence(db, server, {
+    method,
+    definition: input.requestDefinition,
+    allowMutation: flags.allowMutation,
+    enabled: flags.enabled,
+  });
+  if (!compiled.ok && flags.enabled)
+    throwTypedCompileInvalid(compiled.compileIssues);
+
+  try {
+    const [created] = await db
+      .insert(mcpTool)
+      .values({
+        serverId: server.id,
+        name,
+        description: input.description?.trim() || null,
+        method,
+        pathTemplate: compiled.compatibility.pathTemplate,
+        requestTemplate: compiled.compatibility.requestTemplate,
+        params: compiled.compatibility.params,
+        requestDefinition: compiled.requestDefinition,
+        compiledPlan: compiled.compiledPlan,
+        compileStatus: compiled.compileStatus,
+        compileIssues: compiled.compileIssues,
+        annotations: compiled.annotations,
+        allowMutation: flags.allowMutation,
+        enabled: compiled.enabled,
+        source,
+      })
+      .returning();
+    await promoteServerIfReady(db, server.id, server.status);
+    return {
+      ...created,
+      warnings: [],
+      compileIssues: compiled.compileIssues,
+      compatibilityProjectable: compiled.compatibility.projectable,
+    };
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw appError({
+        appCode: APP_ERROR_CODES.MCP_TOOL_NAME_CONFLICT,
+        message: "A tool with this name already exists on the server.",
+        status: 409,
+      });
+    }
+    throw error;
+  }
+}
+
+/** Dry-run typed compile preview: no persistence, no legacy template translation. */
+export async function previewToolCompile(
+  db: DB,
+  userId: string,
+  serverId: string,
+  input: {
+    method: McpHttpMethod;
+    requestDefinition: McpRequestDefinition;
+    allowMutation?: boolean;
+  },
+) {
+  const server = await requireOwnedServer(db, userId, serverId);
+  const method = input.method.toUpperCase() as McpHttpMethod;
+  assertSupportedMethod(method);
+  const flags = mutationDefaults(method, input.allowMutation, false);
+  const compiled = await compileTypedToolForPersistence(db, server, {
+    method,
+    definition: input.requestDefinition,
+    allowMutation: flags.allowMutation,
+    enabled: false,
+  });
+  return {
+    ok: compiled.ok,
+    issues: compiled.compileIssues,
+    plan: compiled.compiledPlan,
+    compatibilityProjectable: compiled.compatibility.projectable,
+  };
+}
+
+/**
+ * Loads a tool for editing. Typed tools return their canonical definition;
+ * legacy-only tools return the backend conversion draft or blocking issues.
+ */
+export async function getToolEditorState(
+  db: DB,
+  userId: string,
+  serverId: string,
+  toolId: string,
+) {
+  const server = await requireOwnedServer(db, userId, serverId);
+  const [tool] = await db
+    .select()
+    .from(mcpTool)
+    .where(and(eq(mcpTool.id, toolId), eq(mcpTool.serverId, serverId)))
+    .limit(1);
+  if (!tool) {
+    throw appError({
+      appCode: APP_ERROR_CODES.MCP_TOOL_NOT_FOUND,
+      message: "MCP tool not found.",
+      status: 404,
+    });
+  }
+
+  const issueRows = (tool.compileIssues ??
+    []) as CompiledToolPersistence["compileIssues"];
+  if (tool.requestDefinition) {
+    const parsed = mcpRequestDefinitionSchema.safeParse(tool.requestDefinition);
+    return {
+      toolId: tool.id,
+      typed: true,
+      definition: parsed.success ? parsed.data : null,
+      issues: issueRows,
+      conversionDraft: null,
+      conversionIssues: [],
+    };
+  }
+
+  const serverValues = await loadCompileServerValueRefs(db, server.id);
+  const analysis = analyzeLegacyTool({
+    method: tool.method,
+    pathTemplate: tool.pathTemplate,
+    requestTemplate: tool.requestTemplate,
+    params: tool.params,
+    serverValues,
+  });
+  captureMcpTelemetry(MCP_TELEMETRY_EVENTS.legacyConversion, {
+    db,
+    userId,
+    properties: {
+      serverId: server.id,
+      toolId: tool.id,
+      unambiguous: analysis.unambiguous,
+      issueCount: analysis.issues.length,
+    },
+  });
+  return {
+    toolId: tool.id,
+    typed: false,
+    definition: null,
+    issues: issueRows,
+    conversionDraft: analysis.definition,
+    conversionIssues: analysis.issues,
+  };
+}
+
+function isTypedToolRow(tool: { requestDefinition: unknown }): boolean {
+  return Boolean(tool.requestDefinition);
+}
+
+/** Canonical typed update; preserves definition-local ids from the payload. */
+export async function updateTool(
+  db: DB,
+  userId: string,
+  serverId: string,
+  toolId: string,
+  input: UpdateTypedToolInput,
+) {
+  const server = await requireOwnedServer(db, userId, serverId);
+  const [existing] = await db
+    .select()
+    .from(mcpTool)
+    .where(and(eq(mcpTool.id, toolId), eq(mcpTool.serverId, serverId)))
+    .limit(1);
+  if (!existing) {
+    throw appError({
+      appCode: APP_ERROR_CODES.MCP_TOOL_NOT_FOUND,
+      message: "MCP tool not found.",
+      status: 404,
+    });
+  }
+
+  const method = (
+    input.method ?? existing.method
+  ).toUpperCase() as McpHttpMethod;
+  assertSupportedMethod(method);
+
+  let definition: McpRequestDefinition;
+  if (input.requestDefinition !== undefined) {
+    definition = input.requestDefinition;
+  } else if (existing.requestDefinition) {
+    const parsed = mcpRequestDefinitionSchema.safeParse(
+      existing.requestDefinition,
+    );
+    if (!parsed.success) {
+      throw appError({
+        appCode: APP_ERROR_CODES.MCP_COMPILE_INVALID,
+        message: "The stored request definition is invalid.",
+        status: 409,
+      });
+    }
+    definition = parsed.data;
+  } else {
+    throw appError({
+      appCode: APP_ERROR_CODES.MCP_LEGACY_DOWNGRADE_REJECTED,
+      message:
+        "A typed definition is required to update this tool; submit a converted definition first.",
+      status: 409,
+    });
+  }
+
+  const flags = mutationDefaults(
+    method,
+    input.allowMutation ?? existing.allowMutation,
+    input.enabled ?? existing.enabled,
+  );
+  const compiled = await compileTypedToolForPersistence(db, server, {
+    method,
+    definition,
+    allowMutation: flags.allowMutation,
+    enabled: flags.enabled,
+  });
+  if (!compiled.ok && flags.enabled)
+    throwTypedCompileInvalid(compiled.compileIssues);
+
+  try {
+    const [updated] = await db
+      .update(mcpTool)
+      .set({
+        name: input.name ? toMcpToolName(input.name) : existing.name,
+        description:
+          input.description === undefined
+            ? existing.description
+            : input.description?.trim() || null,
+        method,
+        pathTemplate: compiled.compatibility.pathTemplate,
+        requestTemplate: compiled.compatibility.requestTemplate,
+        params: compiled.compatibility.params,
+        requestDefinition: compiled.requestDefinition,
+        compiledPlan: compiled.compiledPlan,
+        compileStatus: compiled.compileStatus,
+        compileIssues: compiled.compileIssues,
+        annotations: compiled.annotations,
+        allowMutation: flags.allowMutation,
+        enabled: compiled.enabled,
+      })
+      .where(eq(mcpTool.id, existing.id))
+      .returning();
+    return {
+      ...updated,
+      warnings: [],
+      compileIssues: compiled.compileIssues,
+      compatibilityProjectable: compiled.compatibility.projectable,
+    };
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw appError({
+        appCode: APP_ERROR_CODES.MCP_TOOL_NAME_CONFLICT,
+        message: "A tool with this name already exists on the server.",
+        status: 409,
+      });
+    }
+    throw error;
+  }
+}
+
+/** Duplicates a tool, regenerating definition-local ids and preserving server-value ids. */
+export async function duplicateTool(
+  db: DB,
+  userId: string,
+  serverId: string,
+  toolId: string,
+  input: DuplicateTypedToolInput = {},
+) {
+  const server = await requireOwnedServer(db, userId, serverId);
+  const [existing] = await db
+    .select()
+    .from(mcpTool)
+    .where(and(eq(mcpTool.id, toolId), eq(mcpTool.serverId, serverId)))
+    .limit(1);
+  if (!existing) {
+    throw appError({
+      appCode: APP_ERROR_CODES.MCP_TOOL_NOT_FOUND,
+      message: "MCP tool not found.",
+      status: 404,
+    });
+  }
+  await assertToolCapacity(db, server.id);
+  if (!isTypedToolRow(existing) || !existing.requestDefinition) {
+    throw appError({
+      appCode: APP_ERROR_CODES.MCP_LEGACY_DOWNGRADE_REJECTED,
+      message:
+        "This tool has no typed definition; convert it before duplicating.",
+      status: 409,
+    });
+  }
+  const parsed = mcpRequestDefinitionSchema.safeParse(
+    existing.requestDefinition,
+  );
+  if (!parsed.success) {
+    throw appError({
+      appCode: APP_ERROR_CODES.MCP_COMPILE_INVALID,
+      message: "The stored request definition is invalid.",
+      status: 409,
+    });
+  }
+
+  const definition = regenerateDefinitionIds(parsed.data);
+  const method = existing.method.toUpperCase() as McpHttpMethod;
+  const flags = mutationDefaults(
+    method,
+    existing.allowMutation,
+    input.enabled ?? existing.enabled,
+  );
+  const compiled = await compileTypedToolForPersistence(db, server, {
+    method,
+    definition,
+    allowMutation: flags.allowMutation,
+    enabled: flags.enabled,
+  });
+  if (!compiled.ok && flags.enabled)
+    throwTypedCompileInvalid(compiled.compileIssues);
+
+  const baseName = input.name ?? `${existing.name}_copy`;
+  try {
+    const [created] = await db
+      .insert(mcpTool)
+      .values({
+        serverId: server.id,
+        name: toMcpToolName(baseName),
+        description:
+          input.description === undefined
+            ? existing.description
+            : input.description?.trim() || null,
+        method,
+        pathTemplate: compiled.compatibility.pathTemplate,
+        requestTemplate: compiled.compatibility.requestTemplate,
+        params: compiled.compatibility.params,
+        requestDefinition: compiled.requestDefinition,
+        compiledPlan: compiled.compiledPlan,
+        compileStatus: compiled.compileStatus,
+        compileIssues: compiled.compileIssues,
+        annotations: compiled.annotations,
+        allowMutation: flags.allowMutation,
+        enabled: compiled.enabled,
+        source: existing.source,
+      })
+      .returning();
+    await promoteServerIfReady(db, server.id, server.status);
+    return {
+      ...created,
+      warnings: [],
+      compileIssues: compiled.compileIssues,
+      compatibilityProjectable: compiled.compatibility.projectable,
+    };
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw appError({
+        appCode: APP_ERROR_CODES.MCP_TOOL_NAME_CONFLICT,
+        message: "A tool with this name already exists on the server.",
+        status: 409,
+      });
+    }
+    throw error;
+  }
+}
+
+export async function createLegacyTool(
+  db: DB,
+  userId: string,
+  serverId: string,
+  input: CreateLegacyToolInput,
+  source: McpToolSource = "manual",
+) {
+  const server = await requireOwnedServer(db, userId, serverId);
+  captureMcpTelemetry(MCP_TELEMETRY_EVENTS.legacyCompatWrite, {
+    db,
+    userId,
+    properties: { serverId: server.id, operation: "create" },
+  });
   await assertToolCapacity(db, server.id);
   const name = toMcpToolName(input.name);
   const method = input.method.toUpperCase() as McpHttpMethod;
@@ -1390,6 +2289,25 @@ async function loadCompileServerValueRefs(
 }
 
 /**
+ * Legacy defaults may still carry auth-owned keys that are now injected
+ * through `authConfiguration`; exclude them so the inferred common entries
+ * match what the write validators accept.
+ */
+function excludeAuthOwnedCommonEntries(
+  server: McpServer,
+  common: McpCommonEntries,
+): McpCommonEntries {
+  if (!server.authConfiguration) return common;
+  const protectedKeys = protectedAuthKeys(server);
+  return {
+    headers: common.headers.filter(
+      (entry) => !protectedKeys.headers.has(entry.name.toLowerCase()),
+    ),
+    query: common.query.filter((entry) => !protectedKeys.query.has(entry.name)),
+  };
+}
+
+/**
  * Prefer explicit commonEntries; otherwise compile unambiguous legacy
  * defaultHeaders/defaultQuery so unmigrated servers keep server-wide defaults
  * in the cached compiled plan.
@@ -1407,7 +2325,7 @@ function resolveCommonEntriesForCompile(
     serverValues,
   });
   if (analysis.unambiguous && analysis.commonEntries) {
-    return analysis.commonEntries;
+    return excludeAuthOwnedCommonEntries(server, analysis.commonEntries);
   }
   return { headers: [], query: [] };
 }
@@ -1495,7 +2413,16 @@ export async function confirmCurlImport(
   const serverValueNamesById = Object.fromEntries(
     serverValues.map((value) => [value.id, value.name]),
   );
-  const legacy = legacyTemplateFromDefinition(
+  const projection = projectDefinitionToLegacy(
+    draft.requestDefinition,
+    draft.method,
+    serverValueNamesById,
+  );
+  const compileIssues = [
+    ...compileResult.issues,
+    ...(projection.projectable ? [] : projection.issues),
+  ];
+  const fallbackLegacy = renderDefinitionToLegacy(
     draft.requestDefinition,
     draft.method,
     serverValueNamesById,
@@ -1510,9 +2437,10 @@ export async function confirmCurlImport(
           name,
           description: input.description?.trim() || null,
           method: draft.method,
-          pathTemplate: legacy.pathTemplate,
-          requestTemplate: legacy.requestTemplate,
-          params: legacy.params,
+          pathTemplate:
+            projection.projection?.pathTemplate ?? fallbackLegacy.pathTemplate,
+          requestTemplate: projection.projection?.requestTemplate ?? null,
+          params: projection.projection?.params ?? null,
           requestDefinition: draft.requestDefinition as unknown as Record<
             string,
             unknown
@@ -1521,7 +2449,7 @@ export async function confirmCurlImport(
             ? (compileResult.plan as unknown as Record<string, unknown>)
             : null,
           compileStatus: compileResult.ok ? "valid" : "invalid",
-          compileIssues: compileResult.issues,
+          compileIssues,
           annotations: compileResult.ok
             ? (compileResult.plan?.annotations ?? null)
             : null,
@@ -1554,7 +2482,7 @@ export async function confirmCurlImport(
 /** Backward-compatible name for {@link confirmCurlImport}. */
 export const createToolFromCurl = confirmCurlImport;
 
-export type PreviewToolCompileInput = {
+export type PreviewLegacyToolCompileInput = {
   method: McpHttpMethod;
   pathTemplate: string;
   requestTemplate?: McpRequestTemplate;
@@ -1563,18 +2491,23 @@ export type PreviewToolCompileInput = {
 };
 
 /**
- * Dry-run compile preview for the Studio tool form's effective-request
- * panel. Analyzes the same legacy `{{name}}` shape the form already builds,
- * then runs the publish-time compiler against the server's current values,
- * common entries, and auth configuration. Never persists anything.
+ * Explicit legacy compatibility preview retained during the migration window.
+ * Analyzes the legacy `{{name}}` shape, then runs the publish-time compiler
+ * against the server's current values, common entries, and auth configuration.
+ * Never persists anything.
  */
-export async function previewToolCompile(
+export async function previewLegacyToolCompile(
   db: DB,
   userId: string,
   serverId: string,
-  input: PreviewToolCompileInput,
+  input: PreviewLegacyToolCompileInput,
 ) {
   const server = await requireOwnedServer(db, userId, serverId);
+  captureMcpTelemetry(MCP_TELEMETRY_EVENTS.legacyCompatWrite, {
+    db,
+    userId,
+    properties: { serverId: server.id, operation: "preview" },
+  });
   const serverValues = await loadCompileServerValueRefs(db, server.id);
   const method = input.method.toUpperCase() as McpHttpMethod;
   const pathTemplate = input.pathTemplate.startsWith("/")
@@ -1707,12 +2640,12 @@ export async function testConnection(
   }
 }
 
-export async function updateTool(
+export async function updateLegacyTool(
   db: DB,
   userId: string,
   serverId: string,
   toolId: string,
-  input: UpdateToolInput,
+  input: UpdateLegacyToolInput,
 ) {
   const server = await requireOwnedServer(db, userId, serverId);
   const [existing] = await db
@@ -1727,6 +2660,26 @@ export async function updateTool(
       status: 404,
     });
   }
+
+  // A typed record is authoritative: legacy-only writers cannot downgrade it.
+  if (existing.requestDefinition) {
+    throw appError({
+      appCode: APP_ERROR_CODES.MCP_LEGACY_DOWNGRADE_REJECTED,
+      message:
+        "This tool already has a typed request definition; legacy template updates are rejected.",
+      status: 409,
+    });
+  }
+
+  captureMcpTelemetry(MCP_TELEMETRY_EVENTS.legacyCompatWrite, {
+    db,
+    userId,
+    properties: {
+      serverId: server.id,
+      operation: "update",
+      toolId: existing.id,
+    },
+  });
 
   const method = (
     input.method ?? existing.method

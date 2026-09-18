@@ -81,6 +81,7 @@ import {
 import { appError } from "../lib/app-error.js";
 import {
   authenticateAgentToken,
+  createLegacyTool,
   createPlatformToken,
   createServer,
   createTool,
@@ -90,6 +91,7 @@ import {
   deleteTool,
   deleteVariable,
   deriveTrafficLight,
+  duplicateTool,
   getServer,
   listCallLogs,
   listServers,
@@ -101,7 +103,9 @@ import {
   setVariable,
   testConnection,
   toRecipeTemplate,
+  updateLegacyTool,
   updateServer,
+  updateServerCommon,
   updateTool,
   updateVariable,
 } from "./mcp-studio-service.js";
@@ -253,7 +257,7 @@ describe("mcp-studio ownership", () => {
   it("rejects adding a tool to another user's server", async () => {
     const db = makeDb([[]]);
     await expect(
-      createTool(db as never, "user-b", "mcs_a", {
+      createLegacyTool(db as never, "user-b", "mcs_a", {
         name: "get_contact",
         method: "GET",
         pathTemplate: "/contacts/{{id}}",
@@ -1068,7 +1072,7 @@ describe("mcp-studio tools", () => {
       [{ id: "mct_1", name: "get_contact" }],
     ]);
 
-    await createTool(db as never, "user-a", "mcs_1", {
+    await createLegacyTool(db as never, "user-a", "mcs_1", {
       name: "get_contact",
       method: "GET",
       pathTemplate: "/contacts/{{id}}",
@@ -1094,7 +1098,7 @@ describe("mcp-studio tools", () => {
       [{ id: "mct_1", name: "get_contact" }],
     ]);
 
-    const created = await createTool(db as never, "user-a", "mcs_1", {
+    const created = await createLegacyTool(db as never, "user-a", "mcs_1", {
       name: "get_contact",
       method: "GET",
       pathTemplate: "/contacts/{{contactId}}",
@@ -1134,7 +1138,7 @@ describe("mcp-studio tools", () => {
     };
 
     await expect(
-      createTool(db as never, "user-a", "mcs_1", {
+      createLegacyTool(db as never, "user-a", "mcs_1", {
         name: "get_contact",
         method: "GET",
         pathTemplate: "/contacts",
@@ -1155,7 +1159,7 @@ describe("mcp-studio tools", () => {
       [{ id: "mct_1", name: "get_contact" }],
     ]);
 
-    const created = await createTool(db as never, "user-a", "mcs_1", {
+    const created = await createLegacyTool(db as never, "user-a", "mcs_1", {
       name: "get_contact",
       method: "GET",
       pathTemplate: "/contacts",
@@ -1171,7 +1175,7 @@ describe("mcp-studio tools", () => {
     const db = makeDb([[{ id: "mcs_1", status: "live" }], [{ count: 0 }]]);
 
     await expect(
-      createTool(db as never, "user-a", "mcs_1", {
+      createLegacyTool(db as never, "user-a", "mcs_1", {
         name: "get_contact",
         method: "GET",
         pathTemplate: "/contacts",
@@ -1183,6 +1187,412 @@ describe("mcp-studio tools", () => {
         error.appCode === APP_ERROR_CODES.MCP_PLAINTEXT_SECRET,
     );
     expect(db.insert).not.toHaveBeenCalled();
+  });
+});
+
+describe("mcp-studio typed tools", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const serverRow = {
+    id: "mcs_1",
+    status: "live",
+    baseUrl: "https://api.example.com",
+    commonEntries: null,
+    authConfiguration: null,
+    defaultHeaders: null,
+    defaultQuery: null,
+  };
+
+  const typedDefinition = {
+    version: 1 as const,
+    pathSegments: [
+      { id: "path_1", value: { kind: "literal" as const, value: "/contacts" } },
+      {
+        id: "path_2",
+        value: { kind: "agentInput" as const, agentInputId: "ain_1" },
+      },
+    ],
+    query: [],
+    headers: [],
+    body: { bodyType: "none" as const },
+    agentInputs: [
+      {
+        id: "ain_1",
+        name: "id",
+        required: true,
+        sensitive: false,
+        type: "string" as const,
+      },
+    ],
+  };
+
+  it("persists a typed definition and its compiled plan without inference", async () => {
+    const db = makeDb([
+      [serverRow],
+      [{ count: 0 }],
+      [], // server values
+      [{ id: "mct_1", name: "get_contact" }],
+    ]);
+
+    await createTool(db as never, "user-a", "mcs_1", {
+      name: "get_contact",
+      method: "GET",
+      requestDefinition: typedDefinition,
+    });
+
+    expect(db.insertedValues[0]).toMatchObject({
+      method: "GET",
+      compileStatus: "valid",
+      enabled: true,
+      requestDefinition: expect.objectContaining({ version: 1 }),
+    });
+    expect(
+      (db.insertedValues[0] as { compiledPlan?: unknown }).compiledPlan,
+    ).toBeTruthy();
+  });
+
+  it("rejects legacy updates for a tool that already has a typed definition", async () => {
+    const db = makeDb([
+      [serverRow],
+      [
+        {
+          id: "mct_1",
+          name: "get_contact",
+          method: "GET",
+          pathTemplate: "/contacts",
+          requestDefinition: typedDefinition,
+          allowMutation: false,
+          enabled: true,
+        },
+      ],
+    ]);
+
+    await expect(
+      updateLegacyTool(db as never, "user-a", "mcs_1", "mct_1", {
+        name: "renamed",
+      }),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.appCode === APP_ERROR_CODES.MCP_LEGACY_DOWNGRADE_REJECTED,
+    );
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it("updates a typed tool without re-inferring its definition", async () => {
+    const db = makeDb([
+      [serverRow],
+      [
+        {
+          id: "mct_1",
+          serverId: "mcs_1",
+          name: "get_contact",
+          description: null,
+          method: "GET",
+          pathTemplate: "/contacts/{{id}}",
+          requestDefinition: typedDefinition,
+          compiledPlan: null,
+          compileStatus: "valid",
+          compileIssues: [],
+          annotations: null,
+          allowMutation: false,
+          enabled: true,
+        },
+      ],
+      [], // server values
+      [{ id: "mct_1", name: "renamed" }],
+    ]);
+
+    await updateTool(db as never, "user-a", "mcs_1", "mct_1", {
+      name: "renamed",
+    });
+
+    const updated = db.updatedValues[0] as {
+      name: string;
+      requestDefinition?: {
+        pathSegments: Array<{ id: string }>;
+        agentInputs: Array<{ id: string }>;
+      };
+      compileStatus: string;
+    };
+    expect(updated.name).toBe("renamed");
+    expect(updated.requestDefinition?.pathSegments[1]?.id).toBe("path_2");
+    expect(updated.requestDefinition?.agentInputs[0]?.id).toBe("ain_1");
+    expect(updated.compileStatus).toBe("valid");
+  });
+
+  it("rejects a plaintext auth header embedded literally in a typed definition", async () => {
+    const db = makeDb([[serverRow], [{ count: 0 }], []]);
+
+    await expect(
+      createTool(db as never, "user-a", "mcs_1", {
+        name: "secure_get",
+        method: "GET",
+        enabled: true,
+        requestDefinition: {
+          ...typedDefinition,
+          headers: [
+            {
+              id: "hdr_1",
+              name: "Authorization",
+              value: { kind: "literal", value: "Bearer sk_live_123" },
+            },
+          ],
+        },
+      }),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.appCode === APP_ERROR_CODES.MCP_PLAINTEXT_SECRET,
+    );
+    expect(db.insert).not.toHaveBeenCalled();
+  });
+
+  it("preserves auth-owned legacy default maps on common updates", async () => {
+    const db = makeDb([
+      [
+        {
+          ...serverRow,
+          authConfiguration: {
+            kind: "bearer",
+            bindings: [
+              {
+                location: "header",
+                key: "Authorization",
+                serverValueId: "msv_auth",
+              },
+            ],
+          },
+          defaultHeaders: { Authorization: "Bearer {{api_token}}" },
+          defaultQuery: {},
+        },
+      ],
+      [
+        { id: "msv_1", name: "api_version", kind: "config", owner: "manual" },
+        { id: "msv_auth", name: "api_token", kind: "secret", owner: "auth" },
+      ],
+      [],
+    ]);
+
+    await updateServerCommon(db as never, "user-a", "mcs_1", {
+      common: {
+        headers: [
+          {
+            id: "hdr_1",
+            name: "Version",
+            value: { kind: "serverValue", serverValueId: "msv_1" },
+          },
+        ],
+        query: [],
+      },
+    });
+
+    expect(db.updatedValues[0]).toMatchObject({
+      defaultHeaders: {
+        Version: "{{api_version}}",
+        Authorization: "Bearer {{api_token}}",
+      },
+    });
+  });
+
+  it("rejects plaintext auth headers in typed common entries without writing", async () => {
+    const db = makeDb([[serverRow], []]);
+
+    await expect(
+      updateServerCommon(db as never, "user-a", "mcs_1", {
+        common: {
+          headers: [
+            {
+              id: "hdr_1",
+              name: "X-Api-Key",
+              value: { kind: "literal", value: "sk_live_123" },
+            },
+          ],
+          query: [],
+        },
+      }),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.appCode === APP_ERROR_CODES.MCP_PLAINTEXT_SECRET,
+    );
+    expect(db.updatedValues).toHaveLength(0);
+  });
+
+  it("duplicates a typed tool with regenerated local ids", async () => {
+    const db = makeDb([
+      [serverRow],
+      [
+        {
+          id: "mct_1",
+          name: "get_contact",
+          description: null,
+          method: "GET",
+          pathTemplate: "/contacts/{{id}}",
+          requestDefinition: typedDefinition,
+          allowMutation: false,
+          enabled: true,
+          source: "manual",
+        },
+      ],
+      [{ count: 1 }],
+      [], // server values
+      [{ id: "mct_2", name: "get_contact_copy" }],
+    ]);
+
+    await duplicateTool(db as never, "user-a", "mcs_1", "mct_1");
+
+    const inserted = db.insertedValues[0] as {
+      requestDefinition?: {
+        pathSegments: Array<{ id: string }>;
+        agentInputs: Array<{ id: string }>;
+      };
+    };
+    expect(inserted.requestDefinition?.pathSegments[0]?.id).not.toBe("path_1");
+    expect(inserted.requestDefinition?.agentInputs[0]?.id).not.toBe("ain_1");
+  });
+
+  it("writes typed common entries with stable server-value ids and lossless legacy maps", async () => {
+    const db = makeDb([
+      [serverRow],
+      [{ id: "msv_1", name: "api_version", kind: "config", owner: "manual" }],
+      [], // enabled tools
+    ]);
+
+    const result = await updateServerCommon(db as never, "user-a", "mcs_1", {
+      common: {
+        headers: [
+          {
+            id: "hdr_1",
+            name: "Version",
+            value: { kind: "serverValue", serverValueId: "msv_1" },
+          },
+        ],
+        query: [],
+      },
+    });
+
+    expect(result.legacyProjectable).toBe(true);
+    expect(db.updatedValues[0]).toMatchObject({
+      commonEntries: {
+        headers: [
+          {
+            id: "hdr_1",
+            name: "Version",
+            value: { kind: "serverValue", serverValueId: "msv_1" },
+          },
+        ],
+        query: [],
+      },
+      defaultHeaders: { Version: "{{api_version}}" },
+    });
+  });
+
+  it("rejects a common entry that collides with auth-owned keys without writing", async () => {
+    const db = makeDb([
+      [
+        {
+          ...serverRow,
+          authConfiguration: {
+            kind: "bearer",
+            bindings: [
+              {
+                location: "header",
+                key: "Authorization",
+                serverValueId: "msv_1",
+              },
+            ],
+          },
+        },
+      ],
+      [{ id: "msv_1", name: "api_token", kind: "secret", owner: "auth" }],
+    ]);
+
+    await expect(
+      updateServerCommon(db as never, "user-a", "mcs_1", {
+        common: {
+          headers: [
+            {
+              id: "hdr_1",
+              name: "Authorization",
+              value: { kind: "literal", value: "Bearer x" },
+            },
+          ],
+          query: [],
+        },
+      }),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.appCode === APP_ERROR_CODES.MCP_COMPILE_INVALID,
+    );
+    expect(db.updatedValues).toHaveLength(0);
+  });
+
+  it("fails atomically with per-tool diagnostics for non-projectable common values", async () => {
+    const db = makeDb([
+      [serverRow],
+      [],
+      [
+        {
+          id: "mct_legacy",
+          name: "legacy_tool",
+          method: "GET",
+          requestDefinition: null,
+          allowMutation: false,
+          enabled: true,
+        },
+      ],
+    ]);
+
+    await expect(
+      updateServerCommon(db as never, "user-a", "mcs_1", {
+        common: {
+          headers: [
+            {
+              id: "hdr_1",
+              name: "X-Note",
+              value: { kind: "literal", value: "Example {{name}}" },
+            },
+          ],
+          query: [],
+        },
+      }),
+    ).rejects.toSatisfy((error: unknown) => {
+      if (!(error instanceof AppError)) return false;
+      return (
+        error.appCode === APP_ERROR_CODES.MCP_COMPILE_INVALID &&
+        (error.details?.references ?? []).some(
+          (reference) => reference.id === "mct_legacy",
+        )
+      );
+    });
+    expect(db.updatedValues).toHaveLength(0);
+  });
+
+  it("enforces the enabled-tool bound for common updates", async () => {
+    const manyTools = Array.from({ length: 51 }, (_, index) => ({
+      id: `mct_${index}`,
+      name: `tool_${index}`,
+      method: "GET",
+      requestDefinition: typedDefinition,
+      allowMutation: false,
+      enabled: true,
+    }));
+    const db = makeDb([[serverRow], [], manyTools]);
+
+    await expect(
+      updateServerCommon(db as never, "user-a", "mcs_1", {
+        common: { headers: [], query: [] },
+      }),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.appCode === APP_ERROR_CODES.INVALID_INPUT,
+    );
+    expect(db.updatedValues).toHaveLength(0);
   });
 });
 
@@ -2000,7 +2410,7 @@ describe("mcp-studio updateTool", () => {
     };
 
     await expect(
-      updateTool(db as never, "user-a", "mcs_1", "mct_1", {
+      updateLegacyTool(db as never, "user-a", "mcs_1", "mct_1", {
         name: "list_contacts",
       }),
     ).rejects.toSatisfy(
