@@ -81,7 +81,7 @@ export const enErrors = {
       [APP_ERROR_CODES.MCP_SERVER_SLUG_CONFLICT]:
         "A server with this slug already exists on your account.",
       [APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED]:
-        "A template placeholder has no matching argument or variable.",
+        "Template placeholder {name} has no matching argument or variable.",
       [APP_ERROR_CODES.MCP_VARIABLE_NAME_CONFLICT]:
         "A variable with this name already exists on the server.",
       [APP_ERROR_CODES.MCP_PLAINTEXT_SECRET]:

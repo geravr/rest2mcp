@@ -91,7 +91,7 @@ export const esErrors = {
       [APP_ERROR_CODES.MCP_SERVER_SLUG_CONFLICT]:
         "Ya existe un servidor con este slug en tu cuenta.",
       [APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED]:
-        "Un placeholder de la plantilla no tiene argumento ni variable correspondiente.",
+        "El placeholder {name} de la plantilla no tiene argumento ni variable correspondiente.",
       [APP_ERROR_CODES.MCP_VARIABLE_NAME_CONFLICT]:
         "Ya existe una variable con este nombre en el servidor.",
       [APP_ERROR_CODES.MCP_PLAINTEXT_SECRET]:

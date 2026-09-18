@@ -159,4 +159,51 @@ describe("resolveErrorMessage", () => {
       ),
     ).toBe(es.errors.codes.USER_NOT_FOUND);
   });
+
+  it("interpolates MCP_TEMPLATE_UNRESOLVED placeholder in English", () => {
+    expect(
+      resolveErrorMessage(
+        {
+          data: {
+            appCode: APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED,
+            details: { placeholder: "limit" },
+          },
+        },
+        t,
+      ),
+    ).toBe("Template placeholder limit has no matching argument or variable.");
+  });
+
+  it("interpolates MCP_TEMPLATE_UNRESOLVED from shape.data.details", () => {
+    expect(
+      resolveErrorMessage(
+        {
+          shape: {
+            data: {
+              appCode: APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED,
+              details: { placeholder: "limit" },
+            },
+          },
+        },
+        t,
+      ),
+    ).toBe("Template placeholder limit has no matching argument or variable.");
+  });
+
+  it("interpolates MCP_TEMPLATE_UNRESOLVED placeholder in Spanish", () => {
+    const es = getTranslations("es");
+    expect(
+      resolveErrorMessage(
+        {
+          data: {
+            appCode: APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED,
+            details: { placeholder: "limit" },
+          },
+        },
+        es,
+      ),
+    ).toBe(
+      "El placeholder limit de la plantilla no tiene argumento ni variable correspondiente.",
+    );
+  });
 });
