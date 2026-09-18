@@ -1,20 +1,46 @@
+/**
+ * @file Side-effect-free curl tokenizer with an explicit supported-flag
+ * allowlist. Ambiguous or unsupported request-affecting flags are rejected
+ * rather than silently ignored. Credential-shaped headers, cookies, proxy
+ * credentials, and unsafe transport headers are pulled out of the plain
+ * header list and reported only by kind/name — never surfaced as tool
+ * headers — so downstream importers cannot accidentally persist a secret.
+ */
+import { encodeBasicAuth, isAuthHeaderName } from "./mcp-auth-recipe.js";
 import { APP_ERROR_CODES, appError } from "./app-error.js";
-import { isAuthHeaderName } from "./mcp-auth-recipe.js";
+import { isForbiddenTransportHeaderName } from "./mcp-policy.js";
 
 export { isAuthHeaderName };
 
+export type CurlCredentialKind =
+  "bearer" | "basic" | "api_key" | "header" | "cookie" | "proxy";
+
+export type CurlCredential = {
+  kind: CurlCredentialKind;
+  /** Header name the credential would occupy ("Authorization", "Cookie", ...). */
+  headerName: string;
+  /** Raw secret value, retained only for internal detection — never serialized. */
+  value: string;
+};
+
 export type ParsedCurl = {
   method: string;
-  url: string;
-  headers: Record<string, string>;
+  url: URL;
+  /** Ordered, non-credential, non-forbidden headers (duplicates preserved). */
+  headers: Array<{ name: string; value: string }>;
   body: string | null;
-  credentialSuggestion: {
-    scheme: "bearer" | "api_key" | "header";
-    headerName: string;
-    /** Raw secret value detected in the auth header (token part for bearer). */
-    value: string;
-  } | null;
+  credentials: CurlCredential[];
+  /** Names only, e.g. "Host" — excluded because they are transport-reserved. */
+  excludedTransportHeaders: string[];
 };
+
+function invalidCurl(message: string): never {
+  throw appError({
+    appCode: APP_ERROR_CODES.MCP_CURL_INVALID,
+    message,
+    status: 400,
+  });
+}
 
 function stripQuotes(value: string): string {
   if (
@@ -26,7 +52,7 @@ function stripQuotes(value: string): string {
   return value;
 }
 
-function tokenizeCurl(command: string): string[] {
+export function tokenizeCurl(command: string): string[] {
   const tokens: string[] = [];
   let current = "";
   let quote: "'" | '"' | null = null;
@@ -65,13 +91,8 @@ function tokenizeCurl(command: string): string[] {
   }
 
   if (quote) {
-    throw appError({
-      appCode: APP_ERROR_CODES.MCP_CURL_INVALID,
-      message: "Unclosed quote in curl command.",
-      status: 400,
-    });
+    invalidCurl("Unclosed quote in curl command.");
   }
-
   if (current.length > 0) {
     tokens.push(current);
   }
@@ -85,17 +106,13 @@ function consumeFlagValue(
   inlineValue: string | undefined,
 ): { value: string; nextIndex: number } {
   if (inlineValue !== undefined && inlineValue.length > 0) {
-    return { value: inlineValue, nextIndex: index + 1 };
+    return { value: stripQuotes(inlineValue), nextIndex: index + 1 };
   }
   const next = tokens[index + 1];
-  if (!next || next.startsWith("-")) {
-    throw appError({
-      appCode: APP_ERROR_CODES.MCP_CURL_INVALID,
-      message: "Curl flag is missing a value.",
-      status: 400,
-    });
+  if (next === undefined || next.startsWith("-")) {
+    invalidCurl("Curl flag is missing a value.");
   }
-  return { value: next, nextIndex: index + 2 };
+  return { value: stripQuotes(next), nextIndex: index + 2 };
 }
 
 function parseHeader(raw: string): { name: string; value: string } | null {
@@ -107,64 +124,124 @@ function parseHeader(raw: string): { name: string; value: string } | null {
   };
 }
 
-function inferCredentialSuggestion(
-  headers: Record<string, string>,
-): ParsedCurl["credentialSuggestion"] {
-  for (const [name, value] of Object.entries(headers)) {
-    if (!isAuthHeaderName(name)) continue;
-    const bearer = value.match(/^Bearer\s+(\S+)/i);
-    if (bearer) {
-      return {
-        scheme: "bearer",
-        headerName: "Authorization",
-        value: bearer[1],
-      };
-    }
-    if (/api[-_]?key/i.test(name)) {
-      return {
-        scheme: "api_key",
-        headerName: name,
-        value,
-      };
-    }
-    return {
-      scheme: "header",
-      headerName: name,
-      value,
-    };
+/** Flags that take a value and change the outgoing request. */
+const REQUEST_VALUE_FLAGS = new Set([
+  "-X",
+  "--request",
+  "-H",
+  "--header",
+  "-d",
+  "--data",
+  "--data-raw",
+  "--data-binary",
+  "--data-ascii",
+  "--data-urlencode",
+  "--url",
+  "-u",
+  "--user",
+  "-b",
+  "--cookie",
+  "-A",
+  "--user-agent",
+  "-e",
+  "--referer",
+]);
+
+/** Flags that take a value but do not affect the request as sent. */
+const IGNORED_VALUE_FLAGS = new Set([
+  "-o",
+  "--output",
+  "-w",
+  "--write-out",
+  "--cookie-jar",
+  "--connect-timeout",
+  "--max-time",
+  "--retry",
+  "--limit-rate",
+  "-C",
+  "--continue-at",
+]);
+
+/** Boolean flags that are safe to ignore for request-definition purposes. */
+const IGNORED_BOOLEAN_FLAGS = new Set([
+  "-s",
+  "--silent",
+  "-S",
+  "--show-error",
+  "-v",
+  "--verbose",
+  "-i",
+  "--include",
+  "-L",
+  "--location",
+  "-k",
+  "--insecure",
+  "--compressed",
+  "-#",
+  "--progress-bar",
+  "-f",
+  "--fail",
+  "-N",
+  "--no-buffer",
+  "--http1.1",
+  "--http2",
+]);
+
+function classifyHeaderCredential(name: string, value: string): CurlCredential {
+  const bearer = value.match(/^Bearer\s+(\S+)/i);
+  if (bearer && name.toLowerCase() === "authorization") {
+    return { kind: "bearer", headerName: "Authorization", value: bearer[1] };
   }
-  return null;
+  if (/api[-_]?key/i.test(name)) {
+    return { kind: "api_key", headerName: name, value };
+  }
+  return { kind: "header", headerName: name, value };
 }
 
 export function parseCurlCommand(command: string): ParsedCurl {
   const trimmed = command.trim().replace(/\\\n/g, " ");
   if (!trimmed) {
-    throw appError({
-      appCode: APP_ERROR_CODES.MCP_CURL_INVALID,
-      message: "Curl command is empty.",
-      status: 400,
-    });
+    invalidCurl("Curl command is empty.");
   }
 
   const tokens = tokenizeCurl(trimmed);
   if (tokens[0] !== "curl") {
-    throw appError({
-      appCode: APP_ERROR_CODES.MCP_CURL_INVALID,
-      message: "Command must start with curl.",
-      status: 400,
-    });
+    invalidCurl("Command must start with curl.");
   }
 
   let method: string | null = null;
   let url: string | null = null;
   let body: string | null = null;
-  const rawHeaders: Record<string, string> = {};
+  const headers: Array<{ name: string; value: string }> = [];
+  const credentials: CurlCredential[] = [];
+  const excludedTransportHeaders: string[] = [];
+
+  const pushHeader = (name: string, value: string): void => {
+    const lower = name.toLowerCase();
+    if (lower === "cookie") {
+      credentials.push({ kind: "cookie", headerName: "Cookie", value });
+      return;
+    }
+    if (isForbiddenTransportHeaderName(lower)) {
+      if (lower.startsWith("proxy-")) {
+        credentials.push({ kind: "proxy", headerName: name, value });
+      } else {
+        excludedTransportHeaders.push(name);
+      }
+      return;
+    }
+    if (isAuthHeaderName(name)) {
+      credentials.push(classifyHeaderCredential(name, value));
+      return;
+    }
+    headers.push({ name, value });
+  };
 
   for (let index = 1; index < tokens.length;) {
     const token = tokens[index];
 
     if (!token.startsWith("-") && !url) {
-      url = token;
+      url = stripQuotes(token);
       index += 1;
       continue;
     }
@@ -181,9 +258,7 @@ export function parseCurlCommand(command: string): ParsedCurl {
     if (flag === "-H" || flag === "--header") {
       const consumed = consumeFlagValue(tokens, index, inline);
       const header = parseHeader(consumed.value);
-      if (header) {
-        rawHeaders[header.name] = header.value;
-      }
+      if (header) pushHeader(header.name, header.value);
       index = consumed.nextIndex;
       continue;
     }
@@ -193,11 +268,53 @@ export function parseCurlCommand(command: string): ParsedCurl {
       flag === "--data" ||
       flag === "--data-raw" ||
       flag === "--data-binary" ||
-      flag === "--data-ascii"
+      flag === "--data-ascii" ||
+      flag === "--data-urlencode"
     ) {
       const consumed = consumeFlagValue(tokens, index, inline);
       body = consumed.value;
       if (!method) method = "POST";
+      index = consumed.nextIndex;
+      continue;
+    }
+
+    if (flag === "-u" || flag === "--user") {
+      const consumed = consumeFlagValue(tokens, index, inline);
+      const separator = consumed.value.indexOf(":");
+      const username =
+        separator >= 0 ? consumed.value.slice(0, separator) : consumed.value;
+      const password =
+        separator >= 0 ? consumed.value.slice(separator + 1) : "";
+      credentials.push({
+        kind: "basic",
+        headerName: "Authorization",
+        value: encodeBasicAuth(username, password),
+      });
+      index = consumed.nextIndex;
+      continue;
+    }
+
+    if (flag === "-b" || flag === "--cookie") {
+      const consumed = consumeFlagValue(tokens, index, inline);
+      credentials.push({
+        kind: "cookie",
+        headerName: "Cookie",
+        value: consumed.value,
+      });
+      index = consumed.nextIndex;
+      continue;
+    }
+
+    if (flag === "-A" || flag === "--user-agent") {
+      const consumed = consumeFlagValue(tokens, index, inline);
+      pushHeader("User-Agent", consumed.value);
+      index = consumed.nextIndex;
+      continue;
+    }
+
+    if (flag === "-e" || flag === "--referer") {
+      const consumed = consumeFlagValue(tokens, index, inline);
+      pushHeader("Referer", consumed.value);
       index = consumed.nextIndex;
       continue;
     }
@@ -221,75 +338,56 @@ export function parseCurlCommand(command: string): ParsedCurl {
       continue;
     }
 
-    if (flag.startsWith("-")) {
-      if (
-        flag === "-s" ||
-        flag === "--silent" ||
-        flag === "-L" ||
-        flag === "--location" ||
-        flag === "-k" ||
-        flag === "--insecure" ||
-        flag === "-v" ||
-        flag === "--verbose" ||
-        flag === "-i" ||
-        flag === "--include"
-      ) {
-        index += 1;
-        continue;
-      }
-      if (tokens[index + 1] && !tokens[index + 1].startsWith("-") && !url) {
-        index += 2;
-        continue;
-      }
+    if (IGNORED_VALUE_FLAGS.has(flag)) {
+      const consumed = consumeFlagValue(tokens, index, inline);
+      index = consumed.nextIndex;
+      continue;
+    }
+
+    if (IGNORED_BOOLEAN_FLAGS.has(flag)) {
       index += 1;
       continue;
     }
 
+    if (REQUEST_VALUE_FLAGS.has(flag)) {
+      // Unreachable: every request-affecting value flag is handled above.
+      // Kept so adding a flag to the allowlist without a handler fails loudly.
+      invalidCurl(`Curl flag "${flag}" is recognized but not implemented.`);
+    }
+
+    if (token.startsWith("-")) {
+      invalidCurl(`Unsupported curl flag "${flag}".`);
+    }
+
     if (!url) {
-      url = token;
+      url = stripQuotes(token);
+    } else {
+      invalidCurl("Curl command has more than one URL argument.");
     }
     index += 1;
   }
 
   if (!url) {
-    throw appError({
-      appCode: APP_ERROR_CODES.MCP_CURL_INVALID,
-      message: "Curl command is missing a URL.",
-      status: 400,
-    });
+    invalidCurl("Curl command is missing a URL.");
   }
 
   let parsedUrl: URL;
   try {
-    parsedUrl = new URL(stripQuotes(url));
+    parsedUrl = new URL(url);
   } catch {
-    throw appError({
-      appCode: APP_ERROR_CODES.MCP_CURL_INVALID,
-      message: "Curl URL is invalid.",
-      status: 400,
-    });
+    invalidCurl("Curl URL is invalid.");
   }
 
   if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
-    throw appError({
-      appCode: APP_ERROR_CODES.MCP_CURL_INVALID,
-      message: "Curl URL must be http or https.",
-      status: 400,
-    });
-  }
-
-  const credentialSuggestion = inferCredentialSuggestion(rawHeaders);
-  const headers: Record<string, string> = {};
-  for (const [name, value] of Object.entries(rawHeaders)) {
-    if (isAuthHeaderName(name)) continue;
-    headers[name] = value;
+    invalidCurl("Curl URL must be http or https.");
   }
 
   return {
     method: method ?? "GET",
-    url: parsedUrl.toString(),
+    url: parsedUrl,
     headers,
     body,
-    credentialSuggestion,
+    credentials,
+    excludedTransportHeaders,
   };
 }
