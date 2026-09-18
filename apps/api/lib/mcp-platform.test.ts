@@ -15,13 +15,18 @@ vi.mock("./posthog.js", () => ({
 
 const authenticateAgentToken = vi.hoisted(() => vi.fn());
 const setVariable = vi.hoisted(() => vi.fn());
-const setServerAuth = vi.hoisted(() => vi.fn());
 const createServer = vi.hoisted(() => vi.fn());
 const createToolFromCurl = vi.hoisted(() => vi.fn());
+const createTool = vi.hoisted(() => vi.fn());
 const listVariables = vi.hoisted(() => vi.fn());
 const deleteVariable = vi.hoisted(() => vi.fn());
 const deleteServer = vi.hoisted(() => vi.fn());
 const deleteTool = vi.hoisted(() => vi.fn());
+const getServerName = vi.hoisted(() => vi.fn());
+const getToolName = vi.hoisted(() => vi.fn());
+const listServers = vi.hoisted(() => vi.fn());
+const listTools = vi.hoisted(() => vi.fn());
+const executeMappedTool = vi.hoisted(() => vi.fn());
 
 vi.mock("../services/mcp-studio-service.js", async () => {
   const actual = await vi.importActual<
@@ -31,14 +36,25 @@ vi.mock("../services/mcp-studio-service.js", async () => {
     ...actual,
     authenticateAgentToken,
     setVariable,
-    setServerAuth,
     createServer,
     createToolFromCurl,
+    createTool,
     listVariables,
     deleteVariable,
     deleteServer,
     deleteTool,
+    getServerName,
+    getToolName,
+    listServers,
+    listTools,
   };
+});
+
+vi.mock("../services/mcp-executor-service.js", async () => {
+  const actual = await vi.importActual<
+    typeof import("../services/mcp-executor-service.js")
+  >("../services/mcp-executor-service.js");
+  return { ...actual, executeMappedTool };
 });
 
 import { buildConnectionSnippet } from "../services/mcp-studio-service.js";
@@ -64,6 +80,37 @@ function createApp() {
 afterEach(() => {
   vi.clearAllMocks();
 });
+
+const ALL_SCOPES = [
+  "read",
+  "author",
+  "invoke",
+  "secret_reference",
+  "destructive",
+];
+
+async function connectClient(scopes: string[] = ALL_SCOPES) {
+  authenticateAgentToken.mockResolvedValue({
+    id: "mtk_1",
+    kind: "platform",
+    userId: "usr_1",
+    scopes,
+  });
+  const app = createApp();
+  const transport = new StreamableHTTPClientTransport(
+    new URL("http://test.local/api/platform-mcp"),
+    {
+      fetch: (input, init) =>
+        app.request(input as string | URL, init) as Promise<Response>,
+      requestInit: {
+        headers: { Authorization: "Bearer platform-token" },
+      },
+    },
+  );
+  const client = new Client({ name: "test-client", version: "0.0.1" });
+  await client.connect(transport);
+  return client;
+}
 
 describe("platform MCP", () => {
   it("rejects a missing token", async () => {
@@ -107,30 +154,8 @@ describe("platform MCP", () => {
     expect(JSON.stringify(snippet)).not.toContain("ciphertext");
   });
 
-  describe("tool surface", () => {
-    async function connectClient() {
-      authenticateAgentToken.mockResolvedValue({
-        id: "mtk_1",
-        kind: "platform",
-        userId: "usr_1",
-      });
-      const app = createApp();
-      const transport = new StreamableHTTPClientTransport(
-        new URL("http://test.local/api/platform-mcp"),
-        {
-          fetch: (input, init) =>
-            app.request(input as string | URL, init) as Promise<Response>,
-          requestInit: {
-            headers: { Authorization: "Bearer platform-token" },
-          },
-        },
-      );
-      const client = new Client({ name: "test-client", version: "0.0.1" });
-      await client.connect(transport);
-      return client;
-    }
-
-    it("lists exactly the fourteen platform tools", async () => {
+  describe("scope-gated tool visibility", () => {
+    it("lists the full tool set for a fully scoped token", async () => {
       const client = await connectClient();
       try {
         const { tools } = await client.listTools();
@@ -149,153 +174,184 @@ describe("platform MCP", () => {
             "list_servers",
             "list_tools",
             "list_variables",
-            "set_server_auth",
             "set_variable",
             "test_tool",
           ].sort(),
         );
-
-        const addTool = tools.find((tool) => tool.name === "add_tool");
-        const properties = (addTool?.inputSchema.properties ?? {}) as Record<
-          string,
-          unknown
-        >;
-        expect(properties).toHaveProperty("requestTemplate");
-        expect(properties).toHaveProperty("params");
+        // Platform never accepts a plaintext auth recipe on create_server.
+        const createServerTool = tools.find((t) => t.name === "create_server");
+        expect(createServerTool?.inputSchema.properties).not.toHaveProperty(
+          "auth",
+        );
+        // set_server_auth is removed entirely — Platform cannot set credentials.
+        expect(names).not.toContain("set_server_auth");
       } finally {
         await client.close();
       }
     });
 
-    it("creates a server with bearer auth without echoing the secret", async () => {
-      createServer.mockResolvedValue({
-        id: "mcs_1",
-        name: "CRM",
-        defaultHeaders: { Authorization: "Bearer {{api_token}}" },
-      });
-      const client = await connectClient();
+    it("a read-only token only sees read tools", async () => {
+      const client = await connectClient(["read"]);
+      try {
+        const { tools } = await client.listTools();
+        const names = tools.map((tool) => tool.name).sort();
+        expect(names).toEqual(
+          [
+            "get_connection_snippet",
+            "list_recent_calls",
+            "list_servers",
+            "list_tools",
+            "list_variables",
+          ].sort(),
+        );
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("a read-only token cannot call test_tool", async () => {
+      const client = await connectClient(["read"]);
+      try {
+        const result = await client.callTool({
+          name: "test_tool",
+          arguments: { serverId: "mcs_1", toolId: "mct_1" },
+        });
+        expect(result.isError).toBe(true);
+        expect(executeMappedTool).not.toHaveBeenCalled();
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("an author token cannot see or call delete tools", async () => {
+      const client = await connectClient(["read", "author"]);
+      try {
+        const { tools } = await client.listTools();
+        const names = tools.map((t) => t.name);
+        expect(names).not.toContain("delete_server");
+        expect(names).not.toContain("delete_tool");
+        expect(names).not.toContain("delete_variable");
+      } finally {
+        await client.close();
+      }
+    });
+  });
+
+  describe("authoring tools", () => {
+    it("creates a server without accepting an auth recipe", async () => {
+      createServer.mockResolvedValue({ id: "mcs_1", name: "CRM" });
+      const client = await connectClient(["author"]);
       try {
         const result = await client.callTool({
           name: "create_server",
-          arguments: {
-            name: "CRM",
-            baseUrl: "https://api.example.com",
-            auth: { type: "bearer", token: "sk_live_123" },
-          },
+          arguments: { name: "CRM", baseUrl: "https://api.example.com" },
         });
 
         expect(result.isError).toBeFalsy();
-        const text = (
-          result.content as Array<{ type: string; text: string }>
-        )[0].text;
-        expect(text).not.toContain("sk_live_123");
         expect(createServer).toHaveBeenCalledWith(
           expect.anything(),
           "usr_1",
-          expect.objectContaining({
-            name: "CRM",
-            auth: { type: "bearer", token: "sk_live_123" },
-          }),
-          "s".repeat(32),
+          expect.objectContaining({ name: "CRM" }),
         );
+        // No credentialSecret / auth argument ever reaches the service call.
+        expect(createServer.mock.calls[0]).toHaveLength(3);
       } finally {
         await client.close();
       }
     });
 
-    it("routes set_server_auth payloads to the studio service", async () => {
-      setServerAuth.mockResolvedValue({
-        id: "mcs_1",
-        auth: {
-          type: "header",
-          headerName: "X-API-Key",
-          variableName: "api_key",
-        },
-      });
-      const client = await connectClient();
+    it("routes add_tool payloads to the studio service", async () => {
+      createTool.mockResolvedValue({ id: "mct_1", name: "get_contact" });
+      listVariables.mockResolvedValue([]);
+      const client = await connectClient(["author"]);
       try {
         const result = await client.callTool({
-          name: "set_server_auth",
+          name: "add_tool",
           arguments: {
             serverId: "mcs_1",
-            auth: {
-              type: "header",
-              headerName: "X-API-Key",
-              value: "key_123",
+            name: "get_contact",
+            method: "GET",
+            pathTemplate: "/contacts/{{id}}",
+          },
+        });
+        expect(result.isError).toBeFalsy();
+        expect(createTool).toHaveBeenCalled();
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("denies add_tool secret bindings without secret_reference scope", async () => {
+      listVariables.mockResolvedValue([
+        { id: "msv_1", name: "api_token", isSecret: true, hasValue: true },
+      ]);
+      const client = await connectClient(["author"]);
+      try {
+        const result = await client.callTool({
+          name: "add_tool",
+          arguments: {
+            serverId: "mcs_1",
+            name: "secure_get",
+            method: "GET",
+            pathTemplate: "/x",
+            requestTemplate: {
+              headers: { Authorization: "Bearer {{api_token}}" },
             },
           },
         });
-
-        expect(result.isError).toBeFalsy();
+        expect(result.isError).toBe(true);
         const text = (
           result.content as Array<{ type: string; text: string }>
         )[0].text;
-        expect(text).not.toContain("key_123");
-        expect(setServerAuth).toHaveBeenCalledWith(
-          expect.anything(),
-          "usr_1",
-          "mcs_1",
-          {
-            type: "header",
-            headerName: "X-API-Key",
-            value: "key_123",
-          },
-          "s".repeat(32),
-        );
+        expect(text).toContain(APP_ERROR_CODES.MCP_SCOPE_DENIED);
+        expect(createTool).not.toHaveBeenCalled();
       } finally {
         await client.close();
       }
     });
 
-    it("keeps existing server auth when importing curl via agent", async () => {
-      createToolFromCurl.mockResolvedValue({
-        id: "mct_1",
-        name: "get_contacts",
-        existingAuthKept: true,
-        capturedVariable: null,
-      });
-      const client = await connectClient();
-      try {
-        const result = await client.callTool({
-          name: "add_tool_from_curl",
-          arguments: {
-            serverId: "mcs_1",
-            curl: `curl -H 'Authorization: Bearer other' https://api.example.com/contacts`,
-          },
-        });
-
-        expect(result.isError).toBeFalsy();
-        const text = (
-          result.content as Array<{ type: string; text: string }>
-        )[0].text;
-        expect(text).toContain("existingAuthKept");
-        expect(text).not.toContain("other");
-        expect(createToolFromCurl).toHaveBeenCalled();
-      } finally {
-        await client.close();
-      }
-    });
-
-    it("routes set_variable payloads to the studio service", async () => {
-      setVariable.mockResolvedValue({ name: "api_token", isSecret: true });
-      const client = await connectClient();
+    it("rejects set_variable requests for a plaintext secret", async () => {
+      const client = await connectClient(["author"]);
       try {
         const result = await client.callTool({
           name: "set_variable",
           arguments: {
             serverId: "mcs_1",
             name: "api_token",
-            isSecret: true,
+            kind: "secret",
             value: "raw-secret",
           },
         });
+        expect(result.isError).toBe(true);
+        const text = (
+          result.content as Array<{ type: string; text: string }>
+        )[0].text;
+        expect(text).toContain(APP_ERROR_CODES.MCP_PLAINTEXT_SECRET);
+        expect(setVariable).not.toHaveBeenCalled();
+      } finally {
+        await client.close();
+      }
+    });
 
+    it("allows set_variable for a non-secret configuration value", async () => {
+      setVariable.mockResolvedValue({ name: "region", isSecret: false });
+      const client = await connectClient(["author"]);
+      try {
+        const result = await client.callTool({
+          name: "set_variable",
+          arguments: {
+            serverId: "mcs_1",
+            name: "region",
+            kind: "config",
+            value: "mx",
+          },
+        });
         expect(result.isError).toBeFalsy();
         expect(setVariable).toHaveBeenCalledWith(
           expect.anything(),
           "usr_1",
           "mcs_1",
-          { name: "api_token", isSecret: true, value: "raw-secret" },
+          { name: "region", isSecret: false, value: "mx" },
           "s".repeat(32),
         );
       } finally {
@@ -303,36 +359,92 @@ describe("platform MCP", () => {
       }
     });
 
-    it("routes delete_variable payloads to the studio service", async () => {
-      deleteVariable.mockResolvedValue({ name: "api_token", deleted: true });
-      const client = await connectClient();
+    it("rejects secret-bearing curl entirely instead of sanitizing it", async () => {
+      createToolFromCurl.mockResolvedValue({
+        id: "mct_1",
+        name: "get_items",
+        enabled: false,
+      });
+      const client = await connectClient(["author"]);
       try {
         const result = await client.callTool({
-          name: "delete_variable",
-          arguments: { serverId: "mcs_1", name: "api_token" },
+          name: "add_tool_from_curl",
+          arguments: {
+            serverId: "mcs_1",
+            curl: `curl -H 'Authorization: Bearer secret' https://api.example.com/v1/items`,
+            markings: [],
+          },
         });
-
         expect(result.isError).toBeFalsy();
-        expect(deleteVariable).toHaveBeenCalledWith(
+        expect(createToolFromCurl).toHaveBeenCalledWith(
           expect.anything(),
           "usr_1",
           "mcs_1",
-          "api_token",
+          expect.objectContaining({ serverId: "mcs_1" }),
+          { rejectCredentials: true },
         );
       } finally {
         await client.close();
       }
     });
+  });
 
-    it("routes delete_server payloads to the studio service", async () => {
-      deleteServer.mockResolvedValue({ id: "mcs_1", deleted: true });
-      const client = await connectClient();
+  describe("invoke", () => {
+    it("test_tool runs through the shared executor with invoke scope", async () => {
+      executeMappedTool.mockResolvedValue({ ok: true, httpStatus: 200 });
+      const client = await connectClient(["invoke"]);
+      try {
+        const result = await client.callTool({
+          name: "test_tool",
+          arguments: { serverId: "mcs_1", toolId: "mct_1" },
+        });
+        expect(result.isError).toBeFalsy();
+        expect(executeMappedTool).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({
+            serverId: "mcs_1",
+            toolId: "mct_1",
+            source: "platform",
+            ownerUserId: "usr_1",
+          }),
+        );
+      } finally {
+        await client.close();
+      }
+    });
+  });
+
+  describe("destructive operations", () => {
+    it("delete_server requires confirm to match the current name", async () => {
+      getServerName.mockResolvedValue("CRM");
+      const client = await connectClient(["destructive"]);
       try {
         const result = await client.callTool({
           name: "delete_server",
-          arguments: { serverId: "mcs_1" },
+          arguments: { serverId: "mcs_1", confirm: "Not CRM" },
         });
+        expect(result.isError).toBe(true);
+        const text = (
+          result.content as Array<{ type: string; text: string }>
+        )[0].text;
+        expect(text).toContain(
+          APP_ERROR_CODES.MCP_DESTRUCTIVE_CONFIRMATION_REQUIRED,
+        );
+        expect(deleteServer).not.toHaveBeenCalled();
+      } finally {
+        await client.close();
+      }
+    });
 
+    it("delete_server succeeds when confirm matches the current name", async () => {
+      getServerName.mockResolvedValue("CRM");
+      deleteServer.mockResolvedValue({ id: "mcs_1", deleted: true });
+      const client = await connectClient(["destructive"]);
+      try {
+        const result = await client.callTool({
+          name: "delete_server",
+          arguments: { serverId: "mcs_1", confirm: "CRM" },
+        });
         expect(result.isError).toBeFalsy();
         expect(deleteServer).toHaveBeenCalledWith(
           expect.anything(),
@@ -344,28 +456,66 @@ describe("platform MCP", () => {
       }
     });
 
-    it("routes delete_tool payloads to the studio service", async () => {
-      deleteTool.mockResolvedValue({ id: "mct_1", deleted: true });
-      const client = await connectClient();
+    it("delete_tool requires confirm to match the tool's current name", async () => {
+      getToolName.mockResolvedValue("get_contacts");
+      const client = await connectClient(["destructive"]);
       try {
         const result = await client.callTool({
           name: "delete_tool",
-          arguments: { serverId: "mcs_1", toolId: "mct_1" },
+          arguments: {
+            serverId: "mcs_1",
+            toolId: "mct_1",
+            confirm: "wrong_name",
+          },
         });
-
-        expect(result.isError).toBeFalsy();
-        expect(deleteTool).toHaveBeenCalledWith(
-          expect.anything(),
-          "usr_1",
-          "mcs_1",
-          "mct_1",
-        );
+        expect(result.isError).toBe(true);
+        expect(deleteTool).not.toHaveBeenCalled();
       } finally {
         await client.close();
       }
     });
 
-    it("lists variables without values", async () => {
+    it("delete_variable requires confirm to repeat the variable name", async () => {
+      const client = await connectClient(["destructive"]);
+      try {
+        const result = await client.callTool({
+          name: "delete_variable",
+          arguments: { serverId: "mcs_1", name: "api_token", confirm: "nope" },
+        });
+        expect(result.isError).toBe(true);
+        expect(deleteVariable).not.toHaveBeenCalled();
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("delete_variable succeeds when confirm repeats the name", async () => {
+      deleteVariable.mockResolvedValue({ name: "api_token", deleted: true });
+      const client = await connectClient(["destructive"]);
+      try {
+        const result = await client.callTool({
+          name: "delete_variable",
+          arguments: {
+            serverId: "mcs_1",
+            name: "api_token",
+            confirm: "api_token",
+          },
+        });
+        expect(result.isError).toBeFalsy();
+        expect(deleteVariable).toHaveBeenCalledWith(
+          expect.anything(),
+          "usr_1",
+          "mcs_1",
+          "api_token",
+        );
+      } finally {
+        await client.close();
+      }
+    });
+  });
+
+  describe("secret non-disclosure", () => {
+    it("lists secret metadata only with secret_reference scope", async () => {
       listVariables.mockResolvedValue([
         { id: "msv_1", name: "api_token", isSecret: true, hasValue: true },
         {
@@ -374,9 +524,11 @@ describe("platform MCP", () => {
           isSecret: false,
           hasValue: true,
           value: "mx",
+          kind: "config",
+          owner: "manual",
         },
       ]);
-      const client = await connectClient();
+      const client = await connectClient(["read", "secret_reference"]);
       try {
         const result = await client.callTool({
           name: "list_variables",
@@ -389,10 +541,62 @@ describe("platform MCP", () => {
         )[0].text;
         const payload = JSON.parse(text) as Array<Record<string, unknown>>;
         expect(payload).toEqual([
-          { id: "msv_1", name: "api_token", isSecret: true, hasValue: true },
-          { id: "msv_2", name: "region", isSecret: false, hasValue: true },
+          {
+            id: "msv_1",
+            name: "api_token",
+            isSecret: true,
+            hasValue: true,
+          },
+          {
+            id: "msv_2",
+            name: "region",
+            isSecret: false,
+            hasValue: true,
+            kind: "config",
+            owner: "manual",
+          },
         ]);
         expect(text).not.toContain('"mx"');
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("omits secret rows without secret_reference scope", async () => {
+      listVariables.mockResolvedValue([
+        { id: "msv_1", name: "api_token", isSecret: true, hasValue: true },
+        {
+          id: "msv_2",
+          name: "region",
+          isSecret: false,
+          hasValue: true,
+          value: "mx",
+          kind: "config",
+          owner: "manual",
+        },
+      ]);
+      const client = await connectClient(["read"]);
+      try {
+        const result = await client.callTool({
+          name: "list_variables",
+          arguments: { serverId: "mcs_1" },
+        });
+        expect(result.isError).toBeFalsy();
+        const text = (
+          result.content as Array<{ type: string; text: string }>
+        )[0].text;
+        const payload = JSON.parse(text) as Array<Record<string, unknown>>;
+        expect(payload).toEqual([
+          {
+            id: "msv_2",
+            name: "region",
+            isSecret: false,
+            hasValue: true,
+            kind: "config",
+            owner: "manual",
+          },
+        ]);
+        expect(text).not.toContain("api_token");
       } finally {
         await client.close();
       }
