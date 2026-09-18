@@ -6,6 +6,8 @@ import { z } from "zod";
 import { APP_ERROR_CODES } from "@repo/core";
 import { appError } from "./app-error.js";
 import type { AppContext } from "./context.js";
+import { resetRateLimitState } from "./mcp-rate-limit.js";
+import { MCP_RATE_LIMIT_TOKEN_CAPACITY } from "./mcp-policy.js";
 
 vi.mock("./posthog.js", () => ({
   captureServerException: vi.fn(),
@@ -39,7 +41,8 @@ vi.mock("../services/mcp-executor-service.js", async () => {
 
 const tables = vi.hoisted(() => ({
   mcpServer: { id: "id" },
-  mcpTool: { serverId: "serverId", enabled: "enabled" },
+  mcpTool: { serverId: "serverId", enabled: "enabled", id: "id", name: "name" },
+  mcpServerVariable: { serverId: "serverId" },
 }));
 
 vi.mock("@repo/db", () => tables);
@@ -52,14 +55,28 @@ vi.mock("drizzle-orm", () => ({
 import { createMcpGatewayRoutes, deriveInputSchema } from "./mcp-gateway.js";
 import { errorHandler } from "./middleware.js";
 
-const SERVER_ROW = { id: "mcs_1", name: "CRM" };
+const SERVER_ROW = {
+  id: "mcs_1",
+  userId: "usr_1",
+  name: "CRM",
+  status: "live",
+  baseUrl: "https://api.example.com",
+  allowedHosts: ["api.example.com"],
+  defaultHeaders: null,
+  defaultQuery: null,
+  commonEntries: null,
+  authConfiguration: null,
+};
+
 const TOOL_ROWS = [
   {
     id: "mct_1",
+    serverId: "mcs_1",
     name: "get_contact",
     description: null,
     method: "GET",
     pathTemplate: "/contacts/{{id}}",
+    requestTemplate: {},
     params: [
       {
         name: "id",
@@ -68,30 +85,52 @@ const TOOL_ROWS = [
         description: "Contact id",
       },
     ],
+    allowMutation: false,
     enabled: true,
+    requestDefinition: null,
+    compiledPlan: null,
+    compileStatus: null,
   },
 ];
 
-function gatewayDb() {
+function selectResult(rows: unknown[]) {
+  const promise = Promise.resolve(rows);
+  return Object.assign(promise, { limit: () => Promise.resolve(rows) });
+}
+
+function gatewayDb(
+  serverRow: typeof SERVER_ROW | null = SERVER_ROW,
+  toolRows: typeof TOOL_ROWS = TOOL_ROWS,
+) {
   return {
     select: () => ({
       from: (table: unknown) => ({
         where: () => {
-          if (table === tables.mcpTool) return Promise.resolve(TOOL_ROWS);
-          return { limit: async () => [SERVER_ROW] };
+          if (table === tables.mcpServer) {
+            return selectResult(serverRow ? [serverRow] : []);
+          }
+          if (table === tables.mcpTool) return selectResult(toolRows);
+          if (table === tables.mcpServerVariable) return selectResult([]);
+          return selectResult([]);
         },
       }),
     }),
   };
 }
 
-function createApp() {
+function createApp(
+  serverRow: typeof SERVER_ROW | null = SERVER_ROW,
+  toolRows: typeof TOOL_ROWS = TOOL_ROWS,
+) {
   const app = new Hono<AppContext>();
   app.onError(errorHandler);
   app.use("*", async (c, next) => {
-    c.set("db", gatewayDb() as never);
+    c.set("db", gatewayDb(serverRow, toolRows) as never);
     c.set("dbDirect", c.get("db"));
-    c.set("env", { MCP_CREDENTIAL_SECRET: "s".repeat(32) } as never);
+    c.set("env", {
+      MCP_CREDENTIAL_SECRET: "s".repeat(32),
+      APP_ORIGIN: "https://app.example.com",
+    } as never);
     await next();
   });
   app.route("/mcp", createMcpGatewayRoutes());
@@ -100,9 +139,10 @@ function createApp() {
 
 afterEach(() => {
   vi.clearAllMocks();
+  resetRateLimitState();
 });
 
-describe("product MCP gateway", () => {
+describe("product MCP gateway: transport guards", () => {
   it("rejects a missing token", async () => {
     const response = await createApp().request("/mcp/mcs_1", {
       method: "POST",
@@ -139,184 +179,313 @@ describe("product MCP gateway", () => {
     );
   });
 
-  describe("MCP round-trip", () => {
-    async function connectClient() {
-      authenticateAgentToken.mockResolvedValue({
-        id: "mtk_1",
-        kind: "server",
-        serverId: "mcs_1",
-        userId: "usr_1",
-      });
-      const app = createApp();
-      const transport = new StreamableHTTPClientTransport(
-        new URL("http://test.local/mcp/mcs_1"),
-        {
-          fetch: (input, init) =>
-            app.request(input as string | URL, init) as Promise<Response>,
-          requestInit: {
-            headers: { Authorization: "Bearer server-token" },
-          },
-        },
-      );
-      const client = new Client({ name: "test-client", version: "0.0.1" });
-      await client.connect(transport);
-      return client;
-    }
-
-    it("lists tools with input schemas derived from params", async () => {
-      const client = await connectClient();
-      try {
-        const { tools } = await client.listTools();
-
-        expect(tools).toHaveLength(1);
-        const tool = tools[0];
-        expect(tool.name).toBe("get_contact");
-        expect(tool.description).toBe("GET /contacts/{{id}}");
-        expect(tool.inputSchema).toMatchObject({
-          type: "object",
-          properties: {
-            id: { type: "string", description: "Contact id" },
-          },
-          required: ["id"],
-        });
-      } finally {
-        await client.close();
-      }
+  it("rejects an untrusted Origin before authenticating", async () => {
+    const response = await createApp().request("/mcp/mcs_1", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer x",
+        Origin: "https://evil.example",
+      },
     });
 
-    it("executes tools and returns the upstream payload", async () => {
-      executeMappedTool.mockResolvedValue({
-        httpStatus: 200,
-        truncated: false,
-        body: '{"ok":true}',
-      });
-      const client = await connectClient();
-      try {
-        const result = await client.callTool({
-          name: "get_contact",
-          arguments: { id: "1" },
-        });
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      code: APP_ERROR_CODES.MCP_ORIGIN_INVALID,
+    });
+    expect(authenticateAgentToken).not.toHaveBeenCalled();
+  });
 
-        expect(result.isError).toBeFalsy();
-        const text = (
-          result.content as Array<{ type: string; text: string }>
-        )[0].text;
-        const payload = JSON.parse(text) as {
-          httpStatus: number;
-          truncated: boolean;
-          body: string;
-        };
-        expect(payload).toMatchObject({ httpStatus: 200, truncated: false });
-        expect(JSON.parse(payload.body)).toEqual({ ok: true });
-        expect(executeMappedTool).toHaveBeenCalledWith(expect.anything(), {
-          serverId: "mcs_1",
-          toolId: "mct_1",
-          args: { id: "1" },
-          source: "agent",
-          credentialSecret: "s".repeat(32),
-        });
-      } finally {
-        await client.close();
-      }
+  it("allows a trusted Origin to proceed to authentication", async () => {
+    const response = await createApp().request("/mcp/mcs_1", {
+      method: "POST",
+      headers: { Origin: "https://app.example.com" },
     });
 
-    it("returns upstream 401 as a tool result with httpStatus", async () => {
-      executeMappedTool.mockResolvedValue({
-        ok: false,
-        httpStatus: 401,
-        truncated: false,
-        body: JSON.stringify({ error: "unauthorized" }),
-        durationMs: 12,
-        contentType: "application/json",
-        callLogId: "log_1",
-      });
-      const client = await connectClient();
-      try {
-        const result = await client.callTool({
-          name: "get_contact",
-          arguments: { id: "1" },
-        });
+    // No bearer token provided, so it still 401s — but past the Origin gate.
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toMatchObject({
+      code: APP_ERROR_CODES.MCP_AGENT_TOKEN_INVALID,
+    });
+  });
 
-        expect(result.isError).toBeFalsy();
-        const text = (
-          result.content as Array<{ type: string; text: string }>
-        )[0].text;
-        const payload = JSON.parse(text) as {
-          httpStatus: number;
-          body: string;
-        };
-        expect(payload).toMatchObject({ httpStatus: 401 });
-        expect(JSON.parse(payload.body)).toEqual({ error: "unauthorized" });
-      } finally {
-        await client.close();
-      }
+  it("rejects an oversized request body", async () => {
+    const response = await createApp().request("/mcp/mcs_1", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer x",
+        "content-length": String(10 * 1024 * 1024),
+      },
     });
 
-    it("maps executor AppErrors to tool errors with appCode", async () => {
-      executeMappedTool.mockRejectedValue(
-        appError({
-          appCode: APP_ERROR_CODES.MCP_MUTATION_NOT_ALLOWED,
-          message: "Mutations are not allowed.",
-          status: 403,
-        }),
-      );
-      const client = await connectClient();
-      try {
-        const result = await client.callTool({
-          name: "get_contact",
-          arguments: { id: "1" },
-        });
-
-        expect(result.isError).toBe(true);
-        const text = (
-          result.content as Array<{ type: string; text: string }>
-        )[0].text;
-        expect(text).toContain(APP_ERROR_CODES.MCP_MUTATION_NOT_ALLOWED);
-        expect(text).toContain("Mutations are not allowed.");
-      } finally {
-        await client.close();
-      }
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toMatchObject({
+      code: APP_ERROR_CODES.MCP_REQUEST_TOO_LARGE,
     });
   });
 });
 
+describe("MCP round-trip", () => {
+  async function connectClient(
+    serverRow: typeof SERVER_ROW | null = SERVER_ROW,
+    toolRows: typeof TOOL_ROWS = TOOL_ROWS,
+  ) {
+    authenticateAgentToken.mockResolvedValue({
+      id: "mtk_1",
+      kind: "server",
+      serverId: "mcs_1",
+      userId: "usr_1",
+    });
+    const app = createApp(serverRow, toolRows);
+    const transport = new StreamableHTTPClientTransport(
+      new URL("http://test.local/mcp/mcs_1"),
+      {
+        fetch: (input, init) =>
+          app.request(input as string | URL, init) as Promise<Response>,
+        requestInit: {
+          headers: { Authorization: "Bearer server-token" },
+        },
+      },
+    );
+    const client = new Client({ name: "test-client", version: "0.0.1" });
+    await client.connect(transport);
+    return client;
+  }
+
+  it("lists tools with input schemas derived from the compiled plan", async () => {
+    const client = await connectClient();
+    try {
+      const { tools } = await client.listTools();
+
+      expect(tools).toHaveLength(1);
+      const tool = tools[0];
+      expect(tool.name).toBe("get_contact");
+      expect(tool.description).toBe("GET /contacts/{value}");
+      expect(tool.inputSchema).toMatchObject({
+        type: "object",
+        properties: {
+          id: { type: "string", description: "Contact id" },
+        },
+        required: ["id"],
+      });
+      expect(tool.outputSchema).toMatchObject({ type: "object" });
+      expect(tool.annotations).toMatchObject({ readOnlyHint: true });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("lists no callable tools for a paused server", async () => {
+    const client = await connectClient({ ...SERVER_ROW, status: "paused" });
+    try {
+      const { tools } = await client.listTools();
+      expect(tools).toHaveLength(0);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("executes tools and returns structuredContent for a successful call", async () => {
+    executeMappedTool.mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      envelope: {
+        ok: true,
+        status: 200,
+        contentType: "application/json",
+        headers: {},
+        truncated: false,
+        body: '{"ok":true}',
+        data: { ok: true },
+      },
+      durationMs: 5,
+      callLogId: "log_1",
+      secretsUsed: [],
+    });
+    const client = await connectClient();
+    try {
+      const result = await client.callTool({
+        name: "get_contact",
+        arguments: { id: "1" },
+      });
+
+      expect(result.isError).toBeFalsy();
+      expect(result.structuredContent).toMatchObject({
+        ok: true,
+        status: 200,
+        data: { ok: true },
+      });
+      expect(executeMappedTool).toHaveBeenCalledWith(expect.anything(), {
+        serverId: "mcs_1",
+        toolId: "mct_1",
+        args: { id: "1" },
+        source: "agent",
+        credentialSecret: "s".repeat(32),
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("returns a completed upstream 401 as isError:true structuredContent", async () => {
+    executeMappedTool.mockResolvedValue({
+      ok: false,
+      httpStatus: 401,
+      envelope: {
+        ok: false,
+        status: 401,
+        contentType: "application/json",
+        headers: {},
+        truncated: false,
+        body: JSON.stringify({ error: "unauthorized" }),
+        data: { error: "unauthorized" },
+        appCode: APP_ERROR_CODES.MCP_UPSTREAM_HTTP_ERROR,
+      },
+      durationMs: 12,
+      callLogId: "log_1",
+      secretsUsed: [],
+    });
+    const client = await connectClient();
+    try {
+      const result = await client.callTool({
+        name: "get_contact",
+        arguments: { id: "1" },
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent).toMatchObject({
+        status: 401,
+        appCode: APP_ERROR_CODES.MCP_UPSTREAM_HTTP_ERROR,
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("maps a thrown executor AppError to a jsonToolError with appCode", async () => {
+    executeMappedTool.mockRejectedValue(
+      appError({
+        appCode: APP_ERROR_CODES.MCP_MUTATION_NOT_ALLOWED,
+        message: "Mutations are not allowed.",
+        status: 403,
+      }),
+    );
+    const client = await connectClient();
+    try {
+      const result = await client.callTool({
+        name: "get_contact",
+        arguments: { id: "1" },
+      });
+
+      expect(result.isError).toBe(true);
+      const text = (result.content as Array<{ type: string; text: string }>)[0]
+        .text;
+      expect(text).toContain(APP_ERROR_CODES.MCP_MUTATION_NOT_ALLOWED);
+      expect(text).toContain("Mutations are not allowed.");
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("rate-limits invocations beyond the per-token budget", async () => {
+    executeMappedTool.mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      envelope: {
+        ok: true,
+        status: 200,
+        contentType: "application/json",
+        headers: {},
+        truncated: false,
+        body: "{}",
+      },
+      durationMs: 1,
+      callLogId: "log_1",
+      secretsUsed: [],
+    });
+    const client = await connectClient();
+    try {
+      for (let i = 0; i < MCP_RATE_LIMIT_TOKEN_CAPACITY; i += 1) {
+        const result = await client.callTool({
+          name: "get_contact",
+          arguments: { id: "1" },
+        });
+        expect(result.isError).toBeFalsy();
+      }
+
+      const limited = await client.callTool({
+        name: "get_contact",
+        arguments: { id: "1" },
+      });
+      expect(limited.isError).toBe(true);
+      expect(limited.structuredContent).toMatchObject({
+        appCode: APP_ERROR_CODES.MCP_RATE_LIMITED,
+      });
+    } finally {
+      await client.close();
+    }
+  }, 20_000);
+});
+
 describe("deriveInputSchema", () => {
-  it("advertises an empty object schema for a paramless tool", () => {
-    const schema = deriveInputSchema(null);
+  it("advertises a closed empty object schema for a tool with no inputs", () => {
+    const schema = deriveInputSchema([]);
 
     expect(schema.safeParse({}).success).toBe(true);
+    expect(schema.safeParse({ extra: 1 }).success).toBe(false);
     expect(z.toJSONSchema(schema)).toMatchObject({
       type: "object",
       properties: {},
     });
   });
 
-  it("maps param types, required flags, and descriptions", () => {
+  it("maps agent input types, constraints, required flags, and descriptions", () => {
     const schema = deriveInputSchema([
       {
+        id: "in_query",
         name: "query",
         type: "string",
         required: true,
+        sensitive: false,
         description: "Search text",
       },
-      { name: "limit", type: "number", required: false },
-      { name: "exact", type: "boolean", required: false },
-      { name: "payload", type: "json", required: true },
+      {
+        id: "in_limit",
+        name: "limit",
+        type: "integer",
+        required: false,
+        sensitive: false,
+        minimum: 1,
+        maximum: 100,
+      },
+      {
+        id: "in_exact",
+        name: "exact",
+        type: "boolean",
+        required: false,
+        sensitive: false,
+      },
+      {
+        id: "in_payload",
+        name: "payload",
+        type: "json",
+        required: true,
+        sensitive: false,
+      },
     ]);
 
     expect(schema.safeParse({ query: "acme", payload: { a: 1 } }).success).toBe(
       true,
     );
-    expect(schema.safeParse({ query: "acme", payload: null }).success).toBe(
-      true,
-    );
     expect(schema.safeParse({ query: "acme" }).success).toBe(false);
     expect(
-      schema.safeParse({ query: "acme", limit: "ten", payload: 1 }).success,
+      schema.safeParse({ query: "acme", limit: 200, payload: 1 }).success,
     ).toBe(false);
     expect(
       schema.safeParse({ query: "acme", exact: "yes", payload: 1 }).success,
     ).toBe(false);
+    expect(
+      schema.safeParse({ query: "acme", limit: 10, payload: 1 }).success,
+    ).toBe(true);
 
     const json = z.toJSONSchema(schema) as {
       properties: Record<string, { description?: string }>;
