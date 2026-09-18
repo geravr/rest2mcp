@@ -55,13 +55,13 @@ Edit archived change files under `openspec/changes/archive/` to remove Impeccabl
 
 During apply, remove:
 
-| Location | Action |
-|----------|--------|
-| `~/.impeccable/` | `rm -rf` entire cache (engine binaries, version pins) |
-| `~/.cursor/skills/impeccable/` | Delete if present (global skill install) |
-| `~/.claude/skills/impeccable/` | Delete if present |
-| `~/.codex/skills/impeccable/` or `~/.agents/skills/impeccable/` | Delete if present |
-| PATH `impeccable` binary | `which impeccable`; remove symlink or npm global if found |
+| Location                                                        | Action                                                    |
+| --------------------------------------------------------------- | --------------------------------------------------------- |
+| `~/.impeccable/`                                                | `rm -rf` entire cache (engine binaries, version pins)     |
+| `~/.cursor/skills/impeccable/`                                  | Delete if present (global skill install)                  |
+| `~/.claude/skills/impeccable/`                                  | Delete if present                                         |
+| `~/.codex/skills/impeccable/` or `~/.agents/skills/impeccable/` | Delete if present                                         |
+| PATH `impeccable` binary                                        | `which impeccable`; remove symlink or npm global if found |
 
 **Verification:**
 
