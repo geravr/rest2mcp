@@ -75,27 +75,32 @@ The SPA SHALL render each owned server's icon using, in order: (1) `iconImage` w
 
 ### Requirement: Owner can add REST tools manually
 
-The system SHALL let the owner create a tool with a unique MCP-safe name, an agent-facing description, HTTP method, explicit request bindings, agent input schema, behavior annotations, mutation policy, and enabled state. Before enabling the tool, the backend SHALL compile the complete effective request and reject unresolved references, duplicate keys or inputs, conflicting input metadata, invalid headers or JSON, GET/HEAD bodies, unsupported optional placements, protected-auth overrides, unsafe path traversal, and any definition that cannot execute deterministically. GET and HEAD tools SHALL use read-only mutation metadata. POST, PUT, PATCH, and DELETE tools SHALL require explicit mutation permission before they can be enabled. A server SHALL NOT exceed 50 tools.
+The system SHALL let the owner create a tool with a unique MCP-safe name, agent-facing description, HTTP method, versioned typed request definition, behavior annotations, mutation policy, and enabled state. The request definition SHALL be the canonical create payload and persistence source. Before writing, the backend SHALL compile the complete effective request and return location-aware issues for invalid references, duplicate ids or names, incompatible types, invalid headers or JSON, GET/HEAD bodies, unsupported optional placements, protected-auth overrides, unsafe paths, or invalid mutation metadata. Invalid tools SHALL NOT be enabled or advertised. A server SHALL NOT exceed 50 tools.
 
-#### Scenario: Add valid GET tool
+#### Scenario: Add valid typed GET tool
 
-- **WHEN** the owner adds `get_contact` with a literal `/contacts/` path segment, required string input `contactId`, and a path binding to that input
-- **THEN** the tool is stored enabled, compiled successfully, and has read-only behavior metadata
+- **WHEN** the owner adds `get_contact` with literal and agent-input path segments referencing stable ids
+- **THEN** the typed definition and compiled plan are stored atomically and the enabled tool is available to the gateway
 
-#### Scenario: Invalid tool is not enabled
+#### Scenario: Fixed braces remain fixed
 
-- **WHEN** a tool contains an unresolved binding or conflicting definitions for the same agent input
-- **THEN** save returns structured validation issues and the tool is not enabled or advertised
+- **WHEN** the owner creates a tool with a fixed header value `Example {{name}}`
+- **THEN** the persisted binding remains literal after save and reopen
+
+#### Scenario: Invalid typed tool is not enabled
+
+- **WHEN** a definition references a missing server-value or agent-input id
+- **THEN** save returns a structured issue at that binding and does not enable the tool
 
 #### Scenario: Optional path input is rejected
 
 - **WHEN** the owner marks an agent input used in a path segment as optional
-- **THEN** compilation fails with a validation issue explaining that path segments cannot be omitted
+- **THEN** compilation returns a blocking issue explaining that path segments cannot be omitted
 
 #### Scenario: Mutation stays off until allowed
 
 - **WHEN** the owner adds a DELETE tool without explicit mutation permission
-- **THEN** the tool remains disabled and no UI copy describes it as a read-only DELETE
+- **THEN** the tool remains disabled and is not described as read-only
 
 #### Scenario: Tool name conflict
 
@@ -157,12 +162,22 @@ The system SHALL provide a dry-run curl parse that validates origin and base-pat
 
 ### Requirement: Owner can edit and delete tools
 
-The system SHALL let the owner update any tool field (name, description, method, path template, request template, params, `allowMutation`, `enabled`) on a server they own, and delete a tool. Deleting a tool SHALL keep its historical call logs (their `toolId` becomes null). Name uniqueness per server SHALL be enforced on update.
+The system SHALL let the owner update any typed tool field and delete a tool on a server they own. Editing SHALL preserve definition-local ids for unchanged nodes and SHALL compile and persist the request definition atomically with its effective plan. Duplicating SHALL generate new definition-local ids and rewrite internal references while preserving valid server-value ids. Legacy fields SHALL NOT override a typed definition. Deleting a tool SHALL keep historical call logs with null `toolId`, and tool names SHALL remain unique per server.
 
-#### Scenario: Edit path template
+#### Scenario: Edit origin without text inference
 
-- **WHEN** the owner updates a tool's path template from `/contacts/{{id}}` to `/contacts/{{contactId}}` and declares param `contactId`
-- **THEN** subsequent executions resolve the new template
+- **WHEN** the owner changes one query value from Fixed to an existing Server configuration
+- **THEN** the saved query entry references that server-value id and unrelated node ids remain unchanged
+
+#### Scenario: Duplicate rewrites local ids
+
+- **WHEN** the owner duplicates a typed tool
+- **THEN** the new tool has distinct entry and agent-input ids with all internal references valid and the same external server-value references
+
+#### Scenario: Legacy fields cannot downgrade typed data
+
+- **WHEN** an outdated client submits legacy fields for a tool that already has a typed definition
+- **THEN** the system rejects the downgrade and preserves the typed definition and compiled plan
 
 #### Scenario: Delete tool keeps history
 
@@ -227,50 +242,70 @@ Server, tool, and variable-definition fields SHALL be sufficient to reconstruct 
 
 ### Requirement: Studio tool fields choose a value origin
 
-The SPA SHALL let the owner assign every structured request value exactly one persisted origin: Fixed, Server configuration, Server secret, or Agent input. Fixed values SHALL be literal and SHALL never be scanned for template syntax. Server origins SHALL reference a stable server-value id and visibly identify whether it is configuration or secret. Agent inputs SHALL reference one input definition with description, JSON Schema type/constraints, required state, examples, and sensitive flag. Saving and reopening SHALL preserve the selected origin without reclassification from text.
+The SPA SHALL represent every structured request value as exactly one typed origin: Fixed, Server configuration, Server secret, or Agent input. Fixed values SHALL retain their literal or JSON primitive value. Server origins SHALL retain a server-value id and optional prefix/suffix. Agent origins SHALL retain an agent-input id whose metadata is stored once in the definition. The SPA SHALL submit these bindings directly and SHALL load them directly on reopen without compiling or inferring `{{placeholder}}` strings.
 
-#### Scenario: Fixed braces stay literal
+#### Scenario: Server secret is persisted by id
 
-- **WHEN** the owner saves fixed value `Example {{name}}`
-- **THEN** execution sends those characters literally and does not resolve `name`
+- **WHEN** the owner selects secret `api_token` with prefix `Bearer ` for a header
+- **THEN** the request payload and stored definition reference the secret id and never serialize its display name as a placeholder
 
-#### Scenario: Server secret is explicit
+#### Scenario: Typed JSON literal stays typed
 
-- **WHEN** the owner chooses secret `api_token` with prefix `Bearer ` for a header
-- **THEN** the persisted binding references that secret id and does not declare an agent input
+- **WHEN** the owner sets a JSON field to fixed boolean `false`
+- **THEN** the definition stores boolean false rather than string `"false"`
 
-#### Scenario: Agent input is explicit
+#### Scenario: Reorder preserves identity
 
-- **WHEN** the owner binds query key `locationId` to agent input `location_id`
-- **THEN** the persisted request references that input id and the generated MCP schema exposes `location_id`
+- **WHEN** the owner reorders query entries
+- **THEN** their ids and bindings remain unchanged while their array order is updated
 
 ### Requirement: Studio tool dialog is a request builder
 
-The create/edit/duplicate tool dialog SHALL show identity (name, description), method and path together, then inner tabs for Query, Headers, and Body. It SHALL NOT show a standalone Params list for values already represented as Agent origins on those parts. Body type `form` SHALL use the same origin rows as query. Body type `json` SHALL use origin rows when the stored body is a flat JSON object, and an Advanced textarea otherwise. Body type `raw` SHALL use Advanced. Advanced SHALL offer variable insert/autocomplete and SHALL list Agent leftovers only for placeholders in that textarea that are not server variables.
+The create/edit/duplicate tool dialog SHALL mirror the versioned request-definition model for path, ordered query/header/form entries, structured JSON, raw bodies, and the shared agent-input registry. It SHALL NOT build legacy template maps as its save payload. Structured fields SHALL reference agent inputs rather than duplicate their metadata. Advanced raw bodies SHALL insert explicit binding-id tokens and SHALL treat undeclared brace text literally. Compile issues SHALL attach to stable node ids when available.
+
+#### Scenario: Shared agent input is edited once
+
+- **WHEN** two request locations reference one agent input
+- **THEN** editing its description or constraints updates the single registry entry used by both locations
+
+#### Scenario: Advanced literal braces survive
+
+- **WHEN** a raw body contains undeclared `{{example}}`
+- **THEN** the editor saves and reloads it as literal text
+
+#### Scenario: Issue remains attached after reorder
+
+- **WHEN** a query row with a compile issue is reordered
+- **THEN** the issue remains associated with its stable row id
 
 #### Scenario: Structured fields do not repeat in a Params list
 
-- **WHEN** the owner sets one Agent query row and no Advanced body placeholders
-- **THEN** the dialog does not render a separate Params section listing that query param
+- **WHEN** the owner binds one query entry to an agent input and has no other use of that input
+- **THEN** the dialog references the shared registry entry without rendering a duplicate standalone parameter
 
-#### Scenario: Nested JSON stays Advanced
+#### Scenario: Nested JSON remains lossless
 
-- **WHEN** the owner edits a tool whose JSON body is a nested object
-- **THEN** the Body tab shows the Advanced textarea, not origin rows
+- **WHEN** the owner opens and saves a typed nested JSON body
+- **THEN** its recursive nodes, primitive types, binding ids, and field order remain unchanged
 
 ### Requirement: Studio infers origins when opening a saved tool
 
-For versioned request definitions, the SPA SHALL load the persisted origins exactly and SHALL NOT infer them from current server-value names. For legacy templates only, the backend SHALL run compatibility analysis; unambiguous origins MAY be proposed, while ambiguous placeholders SHALL be shown as blocking migration issues and the tool SHALL remain disabled until the owner resolves them.
+For a versioned request definition, the SPA SHALL load persisted origins, ids, types, order, and metadata exactly and SHALL NOT run template inference. For a legacy-only tool, the backend SHALL return either an unambiguous typed conversion draft or blocking location-aware diagnostics. Saving an accepted draft SHALL convert the record permanently; ambiguous tools SHALL remain disabled until the owner resolves each source.
 
-#### Scenario: New definition survives value changes
+#### Scenario: Typed definition survives catalog changes
 
-- **WHEN** a fixed or agent-input binding shares text with a subsequently created server value
-- **THEN** reopening the tool preserves its original binding source
+- **WHEN** a server value is added with the same name as an existing fixed or agent binding
+- **THEN** reopening the typed tool preserves its persisted sources
+
+#### Scenario: Unambiguous legacy tool is converted once
+
+- **WHEN** the owner opens an unambiguous legacy tool and saves the proposed typed draft
+- **THEN** later opens use the persisted definition without invoking legacy analysis
 
 #### Scenario: Ambiguous legacy placeholder is not guessed
 
-- **WHEN** a legacy `{{name}}` could refer to both a declared input and a server value
-- **THEN** the Studio shows a migration issue and does not enable the tool automatically
+- **WHEN** a legacy placeholder could refer to both an agent input and server value
+- **THEN** the Studio shows a blocking source-selection issue and does not enable the tool automatically
 
 ### Requirement: Studio can edit a server variable
 
@@ -302,17 +337,17 @@ The Settings server-values list SHALL require destructive confirmation before de
 
 ### Requirement: Server defaults use Fixed or Variable origins
 
-The Settings editor SHALL label server-wide entries as common request values and SHALL allow Fixed, Server configuration, or Server secret bindings, never Agent input. Fixed values SHALL remain literal. Auth-owned keys SHALL be displayed as protected and SHALL be editable only through the Auth card.
+The Settings editor SHALL read and write typed ordered common entries. Each entry SHALL have a stable id and a Fixed, Server configuration, or Server secret origin; Agent input is forbidden. Saving SHALL preserve stable server-value ids and SHALL atomically recompile affected enabled tools. Auth-owned keys SHALL be displayed as protected and editable only through the Auth card.
 
-#### Scenario: Common header from configuration
+#### Scenario: Common binding survives rename
 
-- **WHEN** the owner binds common header `Version` to server configuration `api_version`
-- **THEN** every compiled tool inherits that value unless it defines an allowed non-auth override
+- **WHEN** a common header references configuration id `value_1` and its display name changes
+- **THEN** Settings and compiled tools retain the same binding without reclassification
 
-#### Scenario: Auth key is protected
+#### Scenario: Common update reports affected tools
 
-- **WHEN** authentication owns the `Authorization` header
-- **THEN** the common-values editor and tool editor cannot override that key
+- **WHEN** a candidate common entry invalidates two enabled tools
+- **THEN** save writes nothing and returns diagnostics identifying both tools and request locations
 
 ### Requirement: Owner chooses authentication when creating a server
 
@@ -391,12 +426,17 @@ When a playground or studio request fails with `MCP_TEMPLATE_UNRESOLVED`, the SP
 
 ### Requirement: Studio shows an effective request preview
 
-Before enabling a tool, the SPA SHALL show the compiled method, URL shape, query, headers, and body using example agent inputs, with all secret values redacted. The preview SHALL show inherited common values, protected auth injection, omitted optional entries, and validation issues.
+Before enabling a tool, the SPA SHALL submit the unsaved typed request definition to the same backend compiler used by persistence. The preview SHALL show the compiled method, URL shape, query, headers, and body with secret values redacted, inherited common entries, protected auth injection, omitted optional entries, and location-aware issues. Preview SHALL perform no writes and SHALL NOT translate the definition through legacy templates.
 
-#### Scenario: Preview redacts secret and shows inheritance
+#### Scenario: Preview matches subsequent save
 
-- **WHEN** a tool inherits Bearer auth and a common version header
-- **THEN** preview shows `Authorization: Bearer [REDACTED]`, the version header, and the tool-local request fields
+- **WHEN** the owner previews and then saves an unchanged typed definition against unchanged server configuration
+- **THEN** both operations return the same compile outcome and effective plan shape
+
+#### Scenario: Preview does not persist draft ids
+
+- **WHEN** preview rejects a definition
+- **THEN** no tool, common entry, compiled plan, or server value is written
 
 ### Requirement: Enabled and mutation controls are independent and truthful
 
