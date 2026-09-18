@@ -18,6 +18,10 @@ const setVariable = vi.hoisted(() => vi.fn());
 const createServer = vi.hoisted(() => vi.fn());
 const createToolFromCurl = vi.hoisted(() => vi.fn());
 const createTool = vi.hoisted(() => vi.fn());
+const updateTool = vi.hoisted(() => vi.fn());
+const duplicateTool = vi.hoisted(() => vi.fn());
+const previewToolCompile = vi.hoisted(() => vi.fn());
+const getToolEditorState = vi.hoisted(() => vi.fn());
 const listVariables = vi.hoisted(() => vi.fn());
 const deleteVariable = vi.hoisted(() => vi.fn());
 const deleteServer = vi.hoisted(() => vi.fn());
@@ -39,6 +43,10 @@ vi.mock("../services/mcp-studio-service.js", async () => {
     createServer,
     createToolFromCurl,
     createTool,
+    updateTool,
+    duplicateTool,
+    previewToolCompile,
+    getToolEditorState,
     listVariables,
     deleteVariable,
     deleteServer,
@@ -163,19 +171,22 @@ describe("platform MCP", () => {
 
         expect(names).toEqual(
           [
-            "add_tool",
             "add_tool_from_curl",
             "create_server",
+            "create_tool",
             "delete_server",
             "delete_tool",
             "delete_variable",
+            "duplicate_tool",
             "get_connection_snippet",
             "list_recent_calls",
             "list_servers",
             "list_tools",
             "list_variables",
+            "preview_tool",
             "set_variable",
             "test_tool",
+            "update_tool",
           ].sort(),
         );
         // Platform never accepts a plaintext auth recipe on create_server.
@@ -260,42 +271,126 @@ describe("platform MCP", () => {
       }
     });
 
-    it("routes add_tool payloads to the studio service", async () => {
-      createTool.mockResolvedValue({ id: "mct_1", name: "get_contact" });
+    it("routes create_tool typed payloads to the studio service", async () => {
+      createTool.mockResolvedValue({
+        id: "mct_1",
+        name: "get_contact",
+        method: "GET",
+        requestDefinition: {
+          version: 1,
+          pathSegments: [],
+          query: [],
+          headers: [],
+          body: { bodyType: "none" },
+          agentInputs: [],
+        },
+        compileStatus: "valid",
+        compileIssues: [],
+        annotations: null,
+        allowMutation: false,
+        enabled: true,
+        source: "manual",
+      });
       listVariables.mockResolvedValue([]);
       const client = await connectClient(["author"]);
       try {
         const result = await client.callTool({
-          name: "add_tool",
+          name: "create_tool",
           arguments: {
             serverId: "mcs_1",
             name: "get_contact",
             method: "GET",
-            pathTemplate: "/contacts/{{id}}",
+            requestDefinition: {
+              version: 1,
+              pathSegments: [
+                {
+                  id: "path_1",
+                  value: { kind: "literal", value: "/contacts/" },
+                },
+                {
+                  id: "path_2",
+                  value: { kind: "agentInput", agentInputId: "ain_1" },
+                },
+              ],
+              query: [],
+              headers: [],
+              body: { bodyType: "none" },
+              agentInputs: [
+                { id: "ain_1", name: "id", required: true, type: "string" },
+              ],
+            },
           },
         });
         expect(result.isError).toBeFalsy();
         expect(createTool).toHaveBeenCalled();
+        const text = (
+          result.content as Array<{ type: string; text: string }>
+        )[0].text;
+        // Canonical typed result, no legacy compatibility fields.
+        expect(text).not.toContain("pathTemplate");
+        expect(text).not.toContain("requestTemplate");
       } finally {
         await client.close();
       }
     });
 
-    it("denies add_tool secret bindings without secret_reference scope", async () => {
+    it("rejects mixed typed and legacy create_tool payloads", async () => {
+      const client = await connectClient(["author"]);
+      try {
+        const result = await client.callTool({
+          name: "create_tool",
+          arguments: {
+            serverId: "mcs_1",
+            name: "get_contact",
+            method: "GET",
+            pathTemplate: "/contacts/{{id}}",
+            requestDefinition: {
+              version: 1,
+              pathSegments: [],
+              query: [],
+              headers: [],
+              body: { bodyType: "none" },
+              agentInputs: [],
+            },
+          },
+        });
+        expect(result.isError).toBe(true);
+        expect(createTool).not.toHaveBeenCalled();
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("denies secret server-value bindings without secret_reference scope", async () => {
       listVariables.mockResolvedValue([
         { id: "msv_1", name: "api_token", isSecret: true, hasValue: true },
       ]);
       const client = await connectClient(["author"]);
       try {
         const result = await client.callTool({
-          name: "add_tool",
+          name: "create_tool",
           arguments: {
             serverId: "mcs_1",
             name: "secure_get",
             method: "GET",
-            pathTemplate: "/x",
-            requestTemplate: {
-              headers: { Authorization: "Bearer {{api_token}}" },
+            requestDefinition: {
+              version: 1,
+              pathSegments: [
+                { id: "path_1", value: { kind: "literal", value: "/x" } },
+              ],
+              query: [],
+              headers: [
+                {
+                  id: "hdr_1",
+                  name: "X-Token",
+                  value: {
+                    kind: "serverValue",
+                    serverValueId: "msv_1",
+                  },
+                },
+              ],
+              body: { bodyType: "none" },
+              agentInputs: [],
             },
           },
         });
@@ -305,6 +400,139 @@ describe("platform MCP", () => {
         )[0].text;
         expect(text).toContain(APP_ERROR_CODES.MCP_SCOPE_DENIED);
         expect(createTool).not.toHaveBeenCalled();
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("allows owned secret references with secret_reference scope", async () => {
+      createTool.mockResolvedValue({
+        id: "mct_1",
+        name: "secure_get",
+        method: "GET",
+        requestDefinition: { version: 1 },
+        compileStatus: "valid",
+        compileIssues: [],
+        annotations: null,
+        allowMutation: false,
+        enabled: true,
+        source: "manual",
+      });
+      listVariables.mockResolvedValue([
+        { id: "msv_1", name: "api_token", isSecret: true, hasValue: true },
+      ]);
+      const client = await connectClient(["author", "secret_reference"]);
+      try {
+        const result = await client.callTool({
+          name: "create_tool",
+          arguments: {
+            serverId: "mcs_1",
+            name: "secure_get",
+            method: "GET",
+            requestDefinition: {
+              version: 1,
+              pathSegments: [
+                { id: "path_1", value: { kind: "literal", value: "/x" } },
+              ],
+              query: [],
+              headers: [
+                {
+                  id: "hdr_1",
+                  name: "X-Token",
+                  value: {
+                    kind: "serverValue",
+                    serverValueId: "msv_1",
+                  },
+                },
+              ],
+              body: { bodyType: "none" },
+              agentInputs: [],
+            },
+          },
+        });
+        expect(result.isError).toBeFalsy();
+        expect(createTool).toHaveBeenCalled();
+        const text = (
+          result.content as Array<{ type: string; text: string }>
+        )[0].text;
+        expect(text).not.toContain("api_token");
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("previews and duplicates through the typed services", async () => {
+      previewToolCompile.mockResolvedValue({
+        ok: false,
+        issues: [
+          {
+            path: "query[0]",
+            id: "query_1",
+            code: APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED,
+            message: "unresolved",
+            severity: "error",
+          },
+        ],
+        plan: null,
+      });
+      duplicateTool.mockResolvedValue({
+        id: "mct_2",
+        name: "get_contact_copy",
+        method: "GET",
+        requestDefinition: { version: 1 },
+        compileStatus: "valid",
+        compileIssues: [],
+        annotations: null,
+        allowMutation: false,
+        enabled: true,
+        source: "manual",
+      });
+      getToolEditorState.mockResolvedValue({
+        toolId: "mct_1",
+        typed: true,
+        definition: {
+          version: 1,
+          pathSegments: [],
+          query: [],
+          headers: [],
+          body: { bodyType: "none" },
+          agentInputs: [],
+        },
+        issues: [],
+        conversionDraft: null,
+        conversionIssues: [],
+      });
+      listVariables.mockResolvedValue([]);
+      const client = await connectClient(["author"]);
+      try {
+        const preview = await client.callTool({
+          name: "preview_tool",
+          arguments: {
+            serverId: "mcs_1",
+            method: "GET",
+            requestDefinition: {
+              version: 1,
+              pathSegments: [],
+              query: [],
+              headers: [],
+              body: { bodyType: "none" },
+              agentInputs: [],
+            },
+          },
+        });
+        expect(preview.isError).toBeFalsy();
+        const previewText = (
+          preview.content as Array<{ type: string; text: string }>
+        )[0].text;
+        expect(previewText).toContain(APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED);
+        expect(previewText).toContain("query_1");
+
+        const dup = await client.callTool({
+          name: "duplicate_tool",
+          arguments: { serverId: "mcs_1", toolId: "mct_1" },
+        });
+        expect(dup.isError).toBeFalsy();
+        expect(duplicateTool).toHaveBeenCalled();
       } finally {
         await client.close();
       }
@@ -355,6 +583,33 @@ describe("platform MCP", () => {
           "s".repeat(32),
         );
       } finally {
+        await client.close();
+      }
+    });
+
+    it("refuses to overwrite an existing secret through set_variable", async () => {
+      listVariables.mockResolvedValueOnce([
+        { id: "msv_1", name: "api_token", isSecret: true, hasValue: true },
+      ]);
+      const client = await connectClient(["author"]);
+      try {
+        const result = await client.callTool({
+          name: "set_variable",
+          arguments: {
+            serverId: "mcs_1",
+            name: "api_token",
+            kind: "config",
+            value: "plaintext",
+          },
+        });
+        expect(result.isError).toBe(true);
+        const text = (
+          result.content as Array<{ type: string; text: string }>
+        )[0].text;
+        expect(text).toContain(APP_ERROR_CODES.MCP_PLAINTEXT_SECRET);
+        expect(setVariable).not.toHaveBeenCalled();
+      } finally {
+        listVariables.mockResolvedValue([]);
         await client.close();
       }
     });

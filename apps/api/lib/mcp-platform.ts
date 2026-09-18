@@ -14,9 +14,12 @@ import type { AppContext } from "./context.js";
 import { APP_ERROR_CODES, AppError, appJsonError } from "./app-error.js";
 import { extractBearerToken } from "./mcp-agent-token.js";
 import {
-  createLegacyToolCommandSchema,
+  createToolCommandSchema,
   curlConfirmCommandSchema,
+  duplicateToolCommandSchema,
+  previewToolCompileCommandSchema,
   setServerValueCommandSchema,
+  updateToolCommandSchema,
 } from "./mcp-domain-commands.js";
 import {
   handleMcpHttpRequest,
@@ -27,8 +30,11 @@ import {
   MCP_GATEWAY_REQUEST_SIZE_LIMIT,
   type McpPlatformScope,
 } from "./mcp-policy.js";
+import {
+  scanDefinitionIds,
+  type McpRequestDefinition,
+} from "./mcp-request-definition.js";
 import { releaseServerSlot, tryAcquireInvocation } from "./mcp-rate-limit.js";
-import { extractPlaceholders } from "./mcp-template.js";
 import { executeMappedTool } from "../services/mcp-executor-service.js";
 import {
   authenticateAgentToken,
@@ -38,15 +44,19 @@ import {
   deleteServer,
   deleteTool,
   deleteVariable,
+  duplicateTool,
   getConnectionSnippet,
   getServerName,
+  getToolEditorState,
   getToolName,
   listCallLogs,
   listServers,
   listTools,
   listVariables,
+  previewToolCompile,
   resolveApiOrigin,
   setVariable,
+  updateTool,
 } from "../services/mcp-studio-service.js";
 
 const paginationShape = {
@@ -90,27 +100,76 @@ function isTrustedOrigin(origin: string, appOrigin: string): boolean {
   }
 }
 
-function collectLegacyTemplatePlaceholders(input: {
-  pathTemplate: string;
-  requestTemplate?: {
-    query?: Record<string, string>;
-    headers?: Record<string, string>;
-    body?: string | null;
-  } | null;
-}): string[] {
-  const names = new Set<string>();
-  for (const name of extractPlaceholders(input.pathTemplate)) names.add(name);
-  const template = input.requestTemplate ?? {};
-  for (const value of Object.values(template.query ?? {})) {
-    for (const name of extractPlaceholders(value)) names.add(name);
+type PlatformToolRow = {
+  id: string;
+  name: string;
+  description: string | null;
+  method: string;
+  requestDefinition: unknown;
+  compileStatus: string | null;
+  compileIssues: unknown;
+  annotations: unknown;
+  allowMutation: boolean;
+  enabled: boolean;
+  source: string;
+};
+
+/**
+ * Strips legacy compatibility fields and resolved server values so Platform
+ * agents reason only about the canonical typed definition and id-addressable
+ * compile issues.
+ */
+function toPlatformToolResult(tool: PlatformToolRow) {
+  return {
+    id: tool.id,
+    name: tool.name,
+    description: tool.description,
+    method: tool.method,
+    requestDefinition: tool.requestDefinition,
+    compileStatus: tool.compileStatus,
+    compileIssues: tool.compileIssues,
+    annotations: tool.annotations,
+    allowMutation: tool.allowMutation,
+    enabled: tool.enabled,
+    source: tool.source,
+  };
+}
+
+/**
+ * Requires `secret_reference` before any secret server-value id is resolved.
+ * The generic denial does not reveal whether the id exists. Loading the value
+ * catalog only inspects kind/metadata; it never decrypts a secret value.
+ */
+async function assertTypedServerValueScopes(input: {
+  db: Parameters<typeof listVariables>[0];
+  userId: string;
+  serverId: string;
+  definition: McpRequestDefinition;
+  hasSecretReference: boolean;
+  hasScope: (scope: McpPlatformScope) => boolean;
+}): Promise<void> {
+  const refs = scanDefinitionIds(input.definition).serverValueRefs;
+  if (refs.length === 0) return;
+  if (!input.hasScope("author")) {
+    throw new AppError({
+      appCode: APP_ERROR_CODES.MCP_SCOPE_DENIED,
+      message: "Author scope is required to write tools.",
+      status: 403,
+      details: { scopes: ["author"] },
+    });
   }
-  for (const value of Object.values(template.headers ?? {})) {
-    for (const name of extractPlaceholders(value)) names.add(name);
+  if (input.hasSecretReference) return;
+  const variables = await listVariables(input.db, input.userId, input.serverId);
+  const byId = new Map(variables.map((variable) => [variable.id, variable]));
+  const secretHit = refs.some((ref) => byId.get(ref.id)?.isSecret === true);
+  if (secretHit) {
+    throw new AppError({
+      appCode: APP_ERROR_CODES.MCP_SCOPE_DENIED,
+      message: "This operation is not permitted with the current token scopes.",
+      status: 403,
+      details: { scopes: ["secret_reference"] },
+    });
   }
-  if (typeof template.body === "string") {
-    for (const name of extractPlaceholders(template.body)) names.add(name);
-  }
-  return [...names];
 }
 
 export function createPlatformMcpRoutes() {
@@ -240,19 +299,27 @@ export function createPlatformMcpRoutes() {
         mcp.registerTool(
           "list_tools",
           {
-            description: "List tools on a server you own.",
+            description:
+              "List tools on a server you own, including each canonical typed request definition and id-addressable compile issues.",
             inputSchema: z.object({ ...serverIdShape, ...paginationShape }),
           },
           asToolResult(
-            (args: {
+            async (args: {
               serverId: string;
               page?: number;
               pageSize?: 10 | 20 | 50;
-            }) =>
-              listTools(db, userId, args.serverId, {
+            }) => {
+              const page = await listTools(db, userId, args.serverId, {
                 page: args.page ?? 1,
                 pageSize: args.pageSize ?? 10,
-              }),
+              });
+              return {
+                ...page,
+                items: page.items.map((tool) =>
+                  toPlatformToolResult(tool as unknown as PlatformToolRow),
+                ),
+              };
+            },
           ),
         );
 
@@ -330,50 +397,139 @@ export function createPlatformMcpRoutes() {
         );
 
         mcp.registerTool(
-          "add_tool",
+          "create_tool",
           {
             description:
-              "Add a REST tool to a server you own. Binding a secret server value requires the secret_reference scope.",
-            inputSchema: createLegacyToolCommandSchema,
+              "Create a REST tool from a versioned typed request definition with literal, serverValue, and agentInput bindings. Binding a secret server value requires the secret_reference scope.",
+            inputSchema: createToolCommandSchema,
           },
           asToolResult(async (args) => {
-            if (!hasScope("secret_reference")) {
-              const placeholders = collectLegacyTemplatePlaceholders({
-                pathTemplate: args.pathTemplate,
-                requestTemplate: args.requestTemplate,
-              });
-              if (placeholders.length > 0) {
-                const variables =
-                  (await listVariables(db, userId, args.serverId)) ?? [];
-                const secretNames = new Set(
-                  variables
-                    .filter((variable) => variable.isSecret)
-                    .map((variable) => variable.name),
-                );
-                const secretHit = placeholders.find((name) =>
-                  secretNames.has(name),
-                );
-                if (secretHit) {
-                  throw new AppError({
-                    appCode: APP_ERROR_CODES.MCP_SCOPE_DENIED,
-                    message:
-                      "Binding a secret server value requires the secret_reference scope.",
-                    status: 403,
-                    details: { scopes: ["secret_reference"] },
-                  });
-                }
-              }
-            }
-            return createTool(db, userId, args.serverId, {
+            await assertTypedServerValueScopes({
+              db,
+              userId,
+              serverId: args.serverId,
+              definition: args.requestDefinition,
+              hasSecretReference: hasScope("secret_reference"),
+              hasScope,
+            });
+            const tool = await createTool(db, userId, args.serverId, {
               name: args.name,
               description: args.description,
               method: args.method,
-              pathTemplate: args.pathTemplate,
-              requestTemplate: args.requestTemplate,
-              params: args.params,
+              requestDefinition: args.requestDefinition,
               allowMutation: args.allowMutation,
               enabled: args.enabled,
             });
+            return toPlatformToolResult(tool as unknown as PlatformToolRow);
+          }),
+        );
+
+        mcp.registerTool(
+          "update_tool",
+          {
+            description:
+              "Update a tool you own using a versioned typed request definition. Legacy template fields are not accepted; mixed payloads are rejected.",
+            inputSchema: updateToolCommandSchema,
+          },
+          asToolResult(async (args) => {
+            let effectiveDefinition = args.requestDefinition;
+            if (!effectiveDefinition) {
+              const state = await getToolEditorState(
+                db,
+                userId,
+                args.serverId,
+                args.toolId,
+              );
+              if (state.definition) effectiveDefinition = state.definition;
+            }
+            if (effectiveDefinition) {
+              await assertTypedServerValueScopes({
+                db,
+                userId,
+                serverId: args.serverId,
+                definition: effectiveDefinition,
+                hasSecretReference: hasScope("secret_reference"),
+                hasScope,
+              });
+            }
+            const tool = await updateTool(
+              db,
+              userId,
+              args.serverId,
+              args.toolId,
+              {
+                name: args.name,
+                description: args.description,
+                method: args.method,
+                requestDefinition: args.requestDefinition,
+                allowMutation: args.allowMutation,
+                enabled: args.enabled,
+              },
+            );
+            return toPlatformToolResult(tool as unknown as PlatformToolRow);
+          }),
+        );
+
+        mcp.registerTool(
+          "preview_tool",
+          {
+            description:
+              "Dry-run compile a typed request definition against the server's current values, common entries, and auth configuration. Writes nothing.",
+            inputSchema: previewToolCompileCommandSchema,
+          },
+          asToolResult(async (args) => {
+            await assertTypedServerValueScopes({
+              db,
+              userId,
+              serverId: args.serverId,
+              definition: args.requestDefinition,
+              hasSecretReference: hasScope("secret_reference"),
+              hasScope,
+            });
+            return previewToolCompile(db, userId, args.serverId, {
+              method: args.method,
+              requestDefinition: args.requestDefinition,
+              allowMutation: args.allowMutation,
+            });
+          }),
+        );
+
+        mcp.registerTool(
+          "duplicate_tool",
+          {
+            description:
+              "Duplicate a typed tool, regenerating definition-local ids while preserving referenced server-value ids.",
+            inputSchema: duplicateToolCommandSchema,
+          },
+          asToolResult(async (args) => {
+            const state = await getToolEditorState(
+              db,
+              userId,
+              args.serverId,
+              args.toolId,
+            );
+            if (state.definition) {
+              await assertTypedServerValueScopes({
+                db,
+                userId,
+                serverId: args.serverId,
+                definition: state.definition,
+                hasSecretReference: hasScope("secret_reference"),
+                hasScope,
+              });
+            }
+            const tool = await duplicateTool(
+              db,
+              userId,
+              args.serverId,
+              args.toolId,
+              {
+                name: args.name,
+                description: args.description,
+                enabled: args.enabled,
+              },
+            );
+            return toPlatformToolResult(tool as unknown as PlatformToolRow);
           }),
         );
 
@@ -422,13 +578,27 @@ export function createPlatformMcpRoutes() {
               "Create or update a non-secret server configuration value. Secrets cannot be created or rotated through Platform MCP.",
             inputSchema: setServerValueCommandSchema,
           },
-          asToolResult((args) => {
+          asToolResult(async (args) => {
             if (args.kind === "secret") {
               throw new AppError({
                 appCode: APP_ERROR_CODES.MCP_PLAINTEXT_SECRET,
                 message:
                   "Platform MCP cannot create or rotate secrets; use the Studio secret flow.",
                 status: 400,
+              });
+            }
+            const variables =
+              (await listVariables(db, userId, args.serverId)) ?? [];
+            if (
+              variables.some(
+                (variable) => variable.name === args.name && variable.isSecret,
+              )
+            ) {
+              throw new AppError({
+                appCode: APP_ERROR_CODES.MCP_PLAINTEXT_SECRET,
+                message:
+                  "Refusing to overwrite a secret server value; rotate it through the Studio secret flow.",
+                status: 409,
               });
             }
             return setVariable(

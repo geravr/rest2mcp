@@ -1,16 +1,22 @@
 import { paginationInputSchema } from "@repo/core";
 import { z } from "zod";
 import { serverAuthRecipeSchema } from "../lib/mcp-auth-recipe.js";
+import { mcpCommonEntriesSchema } from "../lib/mcp-request-definition.js";
 import {
   createLegacyToolCommandSchema,
   createPlatformTokenCommandSchema,
+  createToolCommandSchema,
   curlConfirmCommandSchema,
+  duplicateToolCommandSchema,
+  previewLegacyToolCompileCommandSchema,
   previewToolCompileCommandSchema,
   updateLegacyToolCommandSchema,
+  updateToolCommandSchema,
 } from "../lib/mcp-domain-commands.js";
 import { protectedProcedure, router } from "../lib/trpc.js";
 import { executeMappedTool } from "../services/mcp-executor-service.js";
 import {
+  createLegacyTool,
   createServer,
   createServerToken,
   createTool,
@@ -19,9 +25,12 @@ import {
   deleteServer,
   deleteTool,
   deleteVariable,
+  duplicateTool,
   getConnectionSnippet,
   getPlatformTokenMeta,
   getServer,
+  getServerCommon,
+  getToolEditorState,
   createPlatformToken,
   listCallLogs,
   listServerTokens,
@@ -29,13 +38,16 @@ import {
   listTools,
   listVariables,
   previewCurlImport,
+  previewLegacyToolCompile,
   previewToolCompile,
   resolveApiOrigin,
   revokePlatformToken,
   revokeServerToken,
   setServerAuth,
   testConnection,
+  updateLegacyTool,
   updateServer,
+  updateServerCommon,
   updateTool,
   updateVariable,
 } from "../services/mcp-studio-service.js";
@@ -148,9 +160,16 @@ export const mcpRouter = router({
     ),
 
   createTool: protectedProcedure
-    .input(createLegacyToolCommandSchema)
+    .input(createToolCommandSchema)
     .mutation(({ ctx, input }) =>
       createTool(ctx.dbDirect, ctx.user.id, input.serverId, input),
+    ),
+
+  /** Explicit legacy compatibility path; first-party clients use `createTool`. */
+  createLegacyTool: protectedProcedure
+    .input(createLegacyToolCommandSchema)
+    .mutation(({ ctx, input }) =>
+      createLegacyTool(ctx.dbDirect, ctx.user.id, input.serverId, input),
     ),
 
   createToolFromCurl: protectedProcedure
@@ -169,8 +188,14 @@ export const mcpRouter = router({
       previewCurlImport(ctx.db, ctx.user.id, input.serverId, input.curl),
     ),
 
+  toolEditorState: protectedProcedure
+    .input(serverIdInput.extend({ toolId: z.string().min(1) }))
+    .query(({ ctx, input }) =>
+      getToolEditorState(ctx.db, ctx.user.id, input.serverId, input.toolId),
+    ),
+
   updateTool: protectedProcedure
-    .input(updateLegacyToolCommandSchema)
+    .input(updateToolCommandSchema)
     .mutation(({ ctx, input }) =>
       updateTool(
         ctx.dbDirect,
@@ -179,6 +204,29 @@ export const mcpRouter = router({
         input.toolId,
         input,
       ),
+    ),
+
+  /** Explicit legacy compatibility path; rejects typed records. */
+  updateLegacyTool: protectedProcedure
+    .input(updateLegacyToolCommandSchema)
+    .mutation(({ ctx, input }) =>
+      updateLegacyTool(
+        ctx.dbDirect,
+        ctx.user.id,
+        input.serverId,
+        input.toolId,
+        input,
+      ),
+    ),
+
+  duplicateTool: protectedProcedure
+    .input(duplicateToolCommandSchema)
+    .mutation(({ ctx, input }) =>
+      duplicateTool(ctx.dbDirect, ctx.user.id, input.serverId, input.toolId, {
+        name: input.name,
+        description: input.description,
+        enabled: input.enabled,
+      }),
     ),
 
   deleteTool: protectedProcedure
@@ -192,10 +240,35 @@ export const mcpRouter = router({
     .mutation(({ ctx, input }) =>
       previewToolCompile(ctx.db, ctx.user.id, input.serverId, {
         method: input.method,
+        requestDefinition: input.requestDefinition,
+        allowMutation: input.allowMutation,
+      }),
+    ),
+
+  /** Explicit legacy compatibility preview; first-party clients use the typed path. */
+  previewLegacyToolCompile: protectedProcedure
+    .input(previewLegacyToolCompileCommandSchema)
+    .mutation(({ ctx, input }) =>
+      previewLegacyToolCompile(ctx.db, ctx.user.id, input.serverId, {
+        method: input.method,
         pathTemplate: input.pathTemplate,
         requestTemplate: input.requestTemplate,
         params: input.params,
         allowMutation: input.allowMutation,
+      }),
+    ),
+
+  serverCommon: protectedProcedure
+    .input(serverIdInput)
+    .query(({ ctx, input }) =>
+      getServerCommon(ctx.db, ctx.user.id, input.serverId),
+    ),
+
+  updateServerCommon: protectedProcedure
+    .input(serverIdInput.extend({ common: mcpCommonEntriesSchema }))
+    .mutation(({ ctx, input }) =>
+      updateServerCommon(ctx.dbDirect, ctx.user.id, input.serverId, {
+        common: input.common,
       }),
     ),
 
