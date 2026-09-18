@@ -3,6 +3,7 @@ import { APP_ERROR_CODES } from "@repo/core";
 import { AppError } from "./app-error.js";
 import {
   extractPlaceholders,
+  renderQueryMap,
   renderTemplate,
   type RenderScope,
 } from "./mcp-template.js";
@@ -62,6 +63,7 @@ describe("renderTemplate resolution", () => {
       expect((error as AppError).appCode).toBe(
         APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED,
       );
+      expect((error as AppError).details).toEqual({ placeholder: "missing" });
     }
   });
 
@@ -74,6 +76,95 @@ describe("renderTemplate resolution", () => {
     });
     renderTemplate("Bearer {{api_token}} {{region}}", "header", scope);
     expect([...scope.secretsUsed]).toEqual(["sk_live_123"]);
+  });
+});
+
+describe("renderQueryMap optional omission", () => {
+  const optionalParams = [
+    { name: "email", required: false },
+    { name: "phone", required: false },
+    { name: "limit", required: false },
+    { name: "region", required: false },
+    { name: "id", required: false },
+    { name: "contactId", required: false },
+  ];
+
+  it("omits optional exact query keys when unresolved", () => {
+    const scope = makeScope({ args: { email: "a@b.com" } });
+    expect(
+      renderQueryMap(
+        {
+          email: "{{email}}",
+          phone: "{{phone}}",
+          limit: "{{limit}}",
+        },
+        scope,
+        optionalParams,
+      ),
+    ).toEqual({ email: "a%40b.com" });
+  });
+
+  it("keeps optional query keys that resolve from variables", () => {
+    const scope = makeScope({
+      variables: { region: { value: "us", isSecret: false } },
+    });
+    expect(
+      renderQueryMap({ region: "{{region}}" }, scope, optionalParams),
+    ).toEqual({ region: "us" });
+  });
+
+  it("fails required query placeholders", () => {
+    const scope = makeScope();
+    try {
+      renderQueryMap({ email: "{{email}}" }, scope, [
+        { name: "email", required: true },
+      ]);
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(AppError);
+      expect((error as AppError).appCode).toBe(
+        APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED,
+      );
+      expect((error as AppError).details).toEqual({ placeholder: "email" });
+    }
+  });
+
+  it("fails undeclared exact query placeholders", () => {
+    const scope = makeScope();
+    try {
+      renderQueryMap({ foo: "{{foo}}" }, scope, optionalParams);
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(AppError);
+      expect((error as AppError).appCode).toBe(
+        APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED,
+      );
+      expect((error as AppError).details).toEqual({ placeholder: "foo" });
+    }
+  });
+
+  it("fails prefixed query values even when the param is optional", () => {
+    const scope = makeScope();
+    try {
+      renderQueryMap({ q: "id:{{id}}" }, scope, optionalParams);
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(AppError);
+      expect((error as AppError).details).toEqual({ placeholder: "id" });
+    }
+  });
+
+  it("does not omit unresolved optional path placeholders", () => {
+    const scope = makeScope();
+    try {
+      renderTemplate("/contacts/{{contactId}}", "path", scope);
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(AppError);
+      expect((error as AppError).details).toEqual({
+        placeholder: "contactId",
+      });
+    }
   });
 });
 

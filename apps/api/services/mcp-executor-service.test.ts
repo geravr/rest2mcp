@@ -227,10 +227,112 @@ describe("executeMappedTool", () => {
     ).rejects.toSatisfy(
       (error: unknown) =>
         error instanceof AppError &&
-        error.appCode === APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED,
+        error.appCode === APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED &&
+        error.details?.placeholder === "id",
     );
     expect(fetchMock).not.toHaveBeenCalled();
     expect(db.insert).toHaveBeenCalled();
+  });
+
+  it("omits optional query keys for a GHL-style lookup and still calls upstream", async () => {
+    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
+    const fetchMock = vi.fn().mockResolvedValue(okResponse({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const tokenCipher = encryptCredential("pat-secret", SECRET);
+    const tool = {
+      ...getTool,
+      name: "get_contacts_lookup",
+      pathTemplate: "/contacts/",
+      params: [
+        { name: "email", required: false, type: "string" },
+        { name: "phone", required: false, type: "string" },
+        { name: "limit", required: false, type: "string" },
+        { name: "nextcursor", required: false, type: "string" },
+      ],
+      requestTemplate: {
+        query: {
+          email: "{{email}}",
+          phone: "{{phone}}",
+          limit: "{{limit}}",
+          nextCursor: "{{nextcursor}}",
+          locationId: "{{location_id}}",
+        },
+        headers: { Authorization: "Bearer {{api_token}}" },
+      },
+    };
+    const db = makeDb([
+      [liveServer],
+      [tool],
+      [
+        {
+          name: "location_id",
+          isSecret: false,
+          value: "loc_1",
+          ciphertext: null,
+        },
+        {
+          name: "api_token",
+          isSecret: true,
+          value: null,
+          ciphertext: tokenCipher,
+        },
+      ],
+      [],
+    ]);
+
+    const result = await executeMappedTool(db as never, {
+      serverId: "mcs_1",
+      ownerUserId: "usr_owner",
+      toolId: "mct_1",
+      args: { email: "a@b.com" },
+      source: "playground",
+      credentialSecret: SECRET,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [requestedUrl, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
+    const url = new URL(String(requestedUrl));
+    expect(url.searchParams.get("email")).toBe("a@b.com");
+    expect(url.searchParams.get("locationId")).toBe("loc_1");
+    expect(url.searchParams.has("phone")).toBe(false);
+    expect(url.searchParams.has("limit")).toBe(false);
+    expect(url.searchParams.has("nextCursor")).toBe(false);
+    expect(new Headers(init.headers).get("authorization")).toBe(
+      "Bearer pat-secret",
+    );
+  });
+
+  it("still fails missing required query params without contacting upstream", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const tool = {
+      ...getTool,
+      pathTemplate: "/contacts/",
+      params: [{ name: "email", required: true, type: "string" }],
+      requestTemplate: {
+        query: { email: "{{email}}" },
+      },
+    };
+    const db = makeDb([[liveServer], [tool], []]);
+
+    await expect(
+      executeMappedTool(db as never, {
+        serverId: "mcs_1",
+        ownerUserId: "usr_owner",
+        toolId: "mct_1",
+        args: {},
+        source: "playground",
+        credentialSecret: SECRET,
+      }),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.appCode === APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED &&
+        error.details?.placeholder === "email",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("renders variables in path, query, headers, and body", async () => {

@@ -27,6 +27,7 @@ import {
   assertUpstreamUrlSafe,
 } from "../lib/mcp-ssrf.js";
 import {
+  renderQueryMap,
   renderTemplate,
   type RenderScope,
   type TemplateVariable,
@@ -111,8 +112,9 @@ function buildRequest(
     ...(template.query ?? {}),
   };
   const queryParts: string[] = [];
-  for (const [key, valueTemplate] of Object.entries(queryEntries)) {
-    const rendered = renderTemplate(valueTemplate, "query", scope);
+  for (const [key, rendered] of Object.entries(
+    renderQueryMap(queryEntries, scope, tool.params),
+  )) {
     queryParts.push(`${encodeURIComponent(key)}=${rendered}`);
   }
   if (queryParts.length > 0) {

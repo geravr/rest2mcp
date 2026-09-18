@@ -22,6 +22,12 @@ export type RenderScope = {
 
 const PLACEHOLDER_PATTERN = /\{\{([A-Za-z][A-Za-z0-9_]*)\}\}/g;
 const QUOTED_PLACEHOLDER_PATTERN = /"\{\{([A-Za-z][A-Za-z0-9_]*)\}\}"/g;
+const EXACT_PLACEHOLDER_PATTERN = /^\{\{([A-Za-z][A-Za-z0-9_]*)\}\}$/;
+
+export type QueryOmitParam = {
+  name: string;
+  required: boolean;
+};
 
 export function extractPlaceholders(template: string): string[] {
   const names = new Set<string>();
@@ -56,6 +62,7 @@ function resolvePlaceholder(
     appCode: APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED,
     message: `Template placeholder "${name}" has no matching argument or server variable.`,
     status: 400,
+    details: { placeholder: name },
   });
 }
 
@@ -146,4 +153,36 @@ export function renderTemplate(
     const resolved = resolvePlaceholder(name, scope);
     return escapeForContext(resolved.value, context);
   });
+}
+
+/**
+ * Renders a merged query map. Omits a key when its value is exactly `{{name}}`,
+ * `name` is a declared tool param with `required: false`, and neither an
+ * argument nor a server variable provides it. All other unresolved cases fail.
+ */
+export function renderQueryMap(
+  query: Record<string, string>,
+  scope: RenderScope,
+  params: QueryOmitParam[] | null | undefined,
+): Record<string, string> {
+  const optionalNames = new Set(
+    (params ?? [])
+      .filter((param) => param.required === false)
+      .map((param) => param.name),
+  );
+  const result: Record<string, string> = {};
+  for (const [key, valueTemplate] of Object.entries(query)) {
+    const exact = EXACT_PLACEHOLDER_PATTERN.exec(valueTemplate);
+    if (exact) {
+      const name = exact[1];
+      const arg = scope.args[name];
+      const hasArg = arg !== undefined && arg !== null;
+      const hasVariable = scope.variables[name] !== undefined;
+      if (!hasArg && !hasVariable && optionalNames.has(name)) {
+        continue;
+      }
+    }
+    result[key] = renderTemplate(valueTemplate, "query", scope);
+  }
+  return result;
 }
