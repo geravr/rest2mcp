@@ -19,43 +19,48 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Switch,
   Textarea,
 } from "@repo/ui";
+import { Link } from "@tanstack/react-router";
 import { LoaderCircle } from "lucide-react";
 import { useState } from "react";
 
-type MarkableValue = {
+type CurlOccurrence = {
+  occurrenceId: string;
+  location: "path" | "query" | "header" | "form" | "json";
+  key?: string;
+  jsonPath?: string;
   value: string;
-  location: "path" | "query" | "header" | "body";
-  key: string | null;
 };
 
 type MarkingState = {
-  as: "literal" | "param" | "variable";
+  as: "literal" | "agentInput";
   name: string;
-  isSecret: boolean;
 };
 
-// Mirrors the API patterns in mcp-studio-service.ts; variables are stricter.
-const PARAM_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]*$/;
-const VARIABLE_NAME_PATTERN = /^[a-z][a-z0-9_]*$/;
+// Mirrors mcpValueNameSchema on the API: [a-z][a-z0-9_]*.
+const AGENT_INPUT_NAME_PATTERN = /^[a-z][a-z0-9_]*$/;
 
-function suggestName(markable: MarkableValue, index: number): string {
-  const source = markable.key ?? markable.value;
+function suggestName(occurrence: CurlOccurrence, index: number): string {
+  const source = occurrence.jsonPath ?? occurrence.key ?? occurrence.value;
   const cleaned = source
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "")
     .replace(/^(\d)/, "p_$1");
-  return cleaned.length > 0 ? cleaned.slice(0, 40) : `param_${index + 1}`;
+  return cleaned.length > 0 ? cleaned.slice(0, 40) : `input_${index + 1}`;
 }
 
 function truncate(value: string, length = 48): string {
   return value.length > length ? `${value.slice(0, length)}…` : value;
 }
 
-/** Two-phase curl import: paste → preview with per-value markings → create. */
+/**
+ * Two-phase safe curl import: paste → preview with per-occurrence markings →
+ * confirm. The backend never returns a detected credential's value, never
+ * creates or rotates server values/authentication here, and always creates
+ * exactly one disabled draft tool.
+ */
 export function CurlImportDialog({
   serverId,
   onClose,
@@ -67,89 +72,76 @@ export function CurlImportDialog({
   const parsePreview = useParseCurlPreview();
   const createFromCurl = useCreateMcpToolFromCurl();
   const [curl, setCurl] = useState("");
-  const [markings, setMarkings] = useState<Record<number, MarkingState>>({});
-  const [authMarking, setAuthMarking] = useState<{
-    name: string;
-    isSecret: boolean;
-  } | null>(null);
+  const [markings, setMarkings] = useState<Record<string, MarkingState>>({});
   const [report, setReport] = useState<{
-    variables: number;
-    params: number;
-    existingAuthKept: boolean;
+    excludedCredentials: number;
+    issues: number;
   } | null>(null);
 
   const preview = parsePreview.data ?? null;
+  const occurrences = (preview?.occurrences ?? []) as CurlOccurrence[];
 
-  const markingFor = (markable: MarkableValue, index: number): MarkingState =>
-    markings[index] ?? {
+  const markingFor = (
+    occurrence: CurlOccurrence,
+    index: number,
+  ): MarkingState =>
+    markings[occurrence.occurrenceId] ?? {
       as: "literal",
-      name: suggestName(markable, index),
-      isSecret: false,
+      name: suggestName(occurrence, index),
     };
 
-  const setMarking = (index: number, patch: Partial<MarkingState>) => {
-    const markable = preview?.values[index];
-    if (!markable) return;
-    const current = markingFor(markable, index);
+  const setMarking = (occurrenceId: string, patch: Partial<MarkingState>) => {
+    const occurrence = occurrences.find((o) => o.occurrenceId === occurrenceId);
+    const index = occurrences.findIndex((o) => o.occurrenceId === occurrenceId);
+    if (!occurrence) return;
+    const current = markingFor(occurrence, index);
     setMarkings((prev) => ({
       ...prev,
-      [index]: { ...current, ...patch },
+      [occurrenceId]: { ...current, ...patch },
     }));
   };
 
   const activeMarkings = Object.entries(markings)
-    .map(([index, marking]) => ({
-      index: Number(index),
+    .map(([occurrenceId, marking]) => ({
+      occurrenceId,
       marking,
-      value: preview?.values[Number(index)]?.value ?? "",
+      occurrence: occurrences.find((o) => o.occurrenceId === occurrenceId),
     }))
-    .filter((entry) => entry.marking.as !== "literal" && entry.value);
+    .filter(
+      (entry) =>
+        entry.marking.as !== "literal" && entry.occurrence !== undefined,
+    );
 
-  const invalidMarking =
-    activeMarkings.some((entry) => {
-      const pattern =
-        entry.marking.as === "variable"
-          ? VARIABLE_NAME_PATTERN
-          : PARAM_NAME_PATTERN;
-      return !pattern.test(entry.marking.name);
-    }) ||
-    (authMarking !== null && !VARIABLE_NAME_PATTERN.test(authMarking.name));
+  const invalidMarking = activeMarkings.some(
+    (entry) => !AGENT_INPUT_NAME_PATTERN.test(entry.marking.name),
+  );
 
   const confirm = () => {
     if (!preview) return;
-    const authMarkings =
-      preview.auth && authMarking
-        ? [
-            {
-              value: preview.auth.value,
-              as: "variable" as const,
-              name: authMarking.name,
-              isSecret: authMarking.isSecret,
-            },
-          ]
-        : [];
     createFromCurl.mutate(
       {
         serverId,
         curl,
-        markings: [
-          ...authMarkings,
-          ...activeMarkings.map((entry) => ({
-            value: entry.value,
-            as: entry.marking.as as "param" | "variable",
+        markings: activeMarkings.map((entry) => ({
+          location: entry.occurrence!.location,
+          key: entry.occurrence!.key,
+          jsonPath: entry.occurrence!.jsonPath,
+          occurrenceId: entry.occurrenceId,
+          as: "agentInput" as const,
+          agentInput: {
+            id: entry.marking.name,
             name: entry.marking.name,
-            ...(entry.marking.as === "variable"
-              ? { isSecret: entry.marking.isSecret }
-              : {}),
-          })),
-        ],
+            required: true,
+            sensitive: false,
+            type: "string" as const,
+          },
+        })),
       },
       {
         onSuccess: (result) => {
           setReport({
-            variables: result.capturedVariables.length,
-            params: result.capturedParams.length,
-            existingAuthKept: result.existingAuthKept,
+            excludedCredentials: result.excludedCredentials.length,
+            issues: result.issues.length,
           });
         },
       },
@@ -172,14 +164,32 @@ export function CurlImportDialog({
           <>
             <Alert>
               <AlertDescription>
-                {report.existingAuthKept
-                  ? t.servers.existingAuthKept
-                  : t.servers.captureReport
-                      .replace("{variables}", String(report.variables))
-                      .replace("{params}", String(report.params))}
+                {t.servers.curlImportSummary.replace(
+                  "{issues}",
+                  String(report.issues),
+                )}
               </AlertDescription>
             </Alert>
+            {report.excludedCredentials > 0 ? (
+              <Alert>
+                <AlertDescription>
+                  {t.servers.curlImportCredentialsCta}
+                </AlertDescription>
+              </Alert>
+            ) : null}
             <DialogFooter>
+              {report.excludedCredentials > 0 ? (
+                <Button asChild variant="outline">
+                  <Link
+                    to="/servers/$serverId"
+                    params={{ serverId }}
+                    search={{ tab: "settings" }}
+                    onClick={onClose}
+                  >
+                    {t.servers.curlGoToAuth}
+                  </Link>
+                </Button>
+              ) : null}
               <Button type="button" onClick={onClose}>
                 {t.servers.cancel}
               </Button>
@@ -190,21 +200,7 @@ export function CurlImportDialog({
             className="space-y-3"
             onSubmit={(event) => {
               event.preventDefault();
-              parsePreview.mutate(
-                { serverId, curl },
-                {
-                  onSuccess: (result) => {
-                    setAuthMarking(
-                      result.auth
-                        ? {
-                            name: result.auth.variableName,
-                            isSecret: true,
-                          }
-                        : null,
-                    );
-                  },
-                },
-              );
+              parsePreview.mutate({ serverId, curl });
             }}
           >
             <Field>
@@ -242,74 +238,56 @@ export function CurlImportDialog({
             <div className="flex items-center gap-2">
               <Badge variant="outline">{preview.method}</Badge>
               <code className="break-all font-mono text-xs">
-                {preview.pathTemplate}
+                {preview.relativePath}
               </code>
             </div>
 
-            {preview.auth && authMarking ? (
+            {preview.excludedCredentials.length > 0 ? (
               <Alert>
-                <AlertDescription className="space-y-3">
-                  <p>{t.servers.authPreMarked}</p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="secondary" className="font-mono text-xs">
-                      {preview.auth.headerName}
-                    </Badge>
-                    <Input
-                      value={authMarking.name}
-                      onChange={(event) =>
-                        setAuthMarking({
-                          ...authMarking,
-                          name: event.target.value,
-                        })
-                      }
-                      placeholder={t.servers.markingNamePlaceholder}
-                      aria-label={t.servers.markingName}
-                      autoComplete="off"
-                      spellCheck={false}
-                      className="w-44 font-mono text-xs"
-                    />
-                    <label className="flex items-center gap-2 text-sm">
-                      <Switch
-                        checked={authMarking.isSecret}
-                        onCheckedChange={(isSecret) =>
-                          setAuthMarking({ ...authMarking, isSecret })
-                        }
-                      />
-                      {t.servers.markSecret}
-                    </label>
-                  </div>
+                <AlertDescription className="space-y-2">
+                  {preview.excludedCredentials.map((credential) => (
+                    <p key={`${credential.kind}-${credential.headerName}`}>
+                      {t.servers.credentialExcluded
+                        .replace("{kind}", credential.kind)
+                        .replace("{header}", credential.headerName)}
+                    </p>
+                  ))}
                 </AlertDescription>
               </Alert>
             ) : null}
 
             <ul className="space-y-2">
-              {preview.values.map((markable, index) => {
-                const marking = markingFor(markable, index);
+              {occurrences.map((occurrence, index) => {
+                const marking = markingFor(occurrence, index);
                 return (
                   <li
-                    key={`${markable.location}-${markable.key ?? index}`}
+                    key={occurrence.occurrenceId}
                     className="space-y-2 rounded-md border border-border p-3"
                   >
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant="secondary" className="font-mono text-xs">
-                        {t.servers.locations[markable.location]}
-                        {markable.key ? ` · ${markable.key}` : ""}
+                        {t.servers.locations[occurrence.location]}
+                        {occurrence.key
+                          ? ` · ${occurrence.key}`
+                          : occurrence.jsonPath
+                            ? ` · ${occurrence.jsonPath}`
+                            : ""}
                       </Badge>
                       <code className="break-all font-mono text-xs">
-                        {truncate(markable.value)}
+                        {truncate(occurrence.value)}
                       </code>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <Select
                         value={marking.as}
                         onValueChange={(as) =>
-                          setMarking(index, {
+                          setMarking(occurrence.occurrenceId, {
                             as: as as MarkingState["as"],
                           })
                         }
                       >
                         <SelectTrigger
-                          className="w-36"
+                          className="w-40"
                           aria-label={t.servers.markingAs}
                         >
                           <SelectValue />
@@ -318,41 +296,25 @@ export function CurlImportDialog({
                           <SelectItem value="literal">
                             {t.servers.markAsLiteral}
                           </SelectItem>
-                          <SelectItem value="param">
+                          <SelectItem value="agentInput">
                             {t.servers.markAsParam}
-                          </SelectItem>
-                          <SelectItem value="variable">
-                            {t.servers.markAsVariable}
                           </SelectItem>
                         </SelectContent>
                       </Select>
-                      {marking.as !== "literal" ? (
-                        <>
-                          <Input
-                            value={marking.name}
-                            onChange={(event) =>
-                              setMarking(index, {
-                                name: event.target.value,
-                              })
-                            }
-                            placeholder={t.servers.markingNamePlaceholder}
-                            aria-label={t.servers.markingName}
-                            autoComplete="off"
-                            spellCheck={false}
-                            className="w-40 font-mono text-xs"
-                          />
-                          {marking.as === "variable" ? (
-                            <label className="flex items-center gap-2 text-sm">
-                              <Switch
-                                checked={marking.isSecret}
-                                onCheckedChange={(isSecret) =>
-                                  setMarking(index, { isSecret })
-                                }
-                              />
-                              {t.servers.markSecret}
-                            </label>
-                          ) : null}
-                        </>
+                      {marking.as === "agentInput" ? (
+                        <Input
+                          value={marking.name}
+                          onChange={(event) =>
+                            setMarking(occurrence.occurrenceId, {
+                              name: event.target.value,
+                            })
+                          }
+                          placeholder={t.servers.markingNamePlaceholder}
+                          aria-label={t.servers.markingName}
+                          autoComplete="off"
+                          spellCheck={false}
+                          className="w-40 font-mono text-xs"
+                        />
                       ) : null}
                     </div>
                   </li>
@@ -374,7 +336,6 @@ export function CurlImportDialog({
                 onClick={() => {
                   parsePreview.reset();
                   setMarkings({});
-                  setAuthMarking(null);
                 }}
               >
                 {t.servers.curlBack}

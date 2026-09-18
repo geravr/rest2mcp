@@ -9,6 +9,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Switch,
 } from "@repo/ui";
 
 const TYPED_OPTIONS: AuthFormType[] = [
@@ -159,6 +160,23 @@ export function ServerAuthFields({
               placeholder={t.servers.authValuePlaceholder}
             />
           </Field>
+          <div className="flex items-start gap-2 rounded-md border border-border bg-muted/30 p-3">
+            <Switch
+              id={`${idPrefix}-query-ack`}
+              checked={value.queryExposureAcknowledged}
+              disabled={disabled}
+              onCheckedChange={(checked) =>
+                set("queryExposureAcknowledged", checked)
+              }
+              className="mt-0.5"
+            />
+            <Label
+              htmlFor={`${idPrefix}-query-ack`}
+              className="text-sm font-normal text-muted-foreground"
+            >
+              {t.servers.authQueryAckLabel}
+            </Label>
+          </div>
         </>
       ) : null}
 

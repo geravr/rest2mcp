@@ -86,6 +86,35 @@ export const enErrors = {
         "A variable with this name already exists on the server.",
       [APP_ERROR_CODES.MCP_PLAINTEXT_SECRET]:
         "Store secrets in a secret variable and reference it with {{name}} instead of pasting them literally.",
+      [APP_ERROR_CODES.MCP_COMPILE_INVALID]:
+        "This tool definition is invalid and cannot be enabled.",
+      [APP_ERROR_CODES.MCP_TOOL_DISABLED]: "This tool is disabled.",
+      [APP_ERROR_CODES.MCP_SERVER_PAUSED]:
+        "This MCP server is paused and has no callable tools.",
+      [APP_ERROR_CODES.MCP_RATE_LIMITED]:
+        "Too many requests. Wait and try again.",
+      [APP_ERROR_CODES.MCP_TIMEOUT]: "The upstream request timed out.",
+      [APP_ERROR_CODES.MCP_REDIRECT_REJECTED]:
+        "The upstream redirect was rejected by policy.",
+      [APP_ERROR_CODES.MCP_PATH_ESCAPE]:
+        "The request path would escape the configured base path.",
+      [APP_ERROR_CODES.MCP_ORIGIN_INVALID]:
+        "The Origin header is not allowed for this endpoint.",
+      [APP_ERROR_CODES.MCP_REQUEST_TOO_LARGE]: "The request body is too large.",
+      [APP_ERROR_CODES.MCP_SCOPE_DENIED]:
+        "This platform token does not include the required scope.",
+      [APP_ERROR_CODES.MCP_DESTRUCTIVE_CONFIRMATION_REQUIRED]:
+        "Confirm the resource name to continue this destructive operation.",
+      [APP_ERROR_CODES.MCP_VALUE_IN_USE]:
+        "This server value is still referenced and cannot be deleted.",
+      [APP_ERROR_CODES.MCP_AUTH_ACK_REQUIRED]:
+        "Query authentication requires explicit acknowledgement of secret exposure.",
+      [APP_ERROR_CODES.MCP_UPSTREAM_HTTP_ERROR]:
+        "The upstream API returned an HTTP error.",
+      [APP_ERROR_CODES.MCP_MUTATION_INDETERMINATE]:
+        "The mutation may have completed, but the final upstream outcome is unknown.",
+      [APP_ERROR_CODES.MCP_BINARY_UNSUPPORTED]:
+        "Binary upstream responses are not returned as text.",
 
       [APP_ERROR_CODES.ROUTE_NOT_FOUND]: "This API route does not exist.",
       [APP_ERROR_CODES.INTERNAL_ERROR]:

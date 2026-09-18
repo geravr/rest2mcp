@@ -71,12 +71,14 @@ export function PathPartsEditor({
   parts,
   onChange,
   variableNames,
+  variableKinds,
   disabled,
   pathInputId,
 }: {
   parts: PathPart[];
   onChange: (parts: PathPart[]) => void;
   variableNames: string[];
+  variableKinds?: Record<string, "config" | "secret">;
   disabled?: boolean;
   pathInputId?: string;
 }) {
@@ -129,6 +131,7 @@ export function PathPartsEditor({
                   <VariablePicker
                     value={part.name}
                     variableNames={variableNames}
+                    variableKinds={variableKinds}
                     disabled={disabled}
                     compact
                     onChange={(name) =>
@@ -204,6 +207,10 @@ export function PathPartsEditor({
                 required={part.required}
                 onRequiredChange={(required) =>
                   update(index, { ...part, required })
+                }
+                sensitive={part.sensitive ?? false}
+                onSensitiveChange={(sensitive) =>
+                  update(index, { ...part, sensitive })
                 }
                 disabled={disabled}
               />

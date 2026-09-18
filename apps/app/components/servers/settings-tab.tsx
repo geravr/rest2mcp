@@ -36,7 +36,7 @@ import {
   Label,
   Switch,
 } from "@repo/ui";
-import { LoaderCircle, Pencil, Trash2 } from "lucide-react";
+import { LoaderCircle, Lock, Pencil, Trash2 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -66,6 +66,7 @@ type ServerIdentity = {
 function ServerDefaultsCard({
   serverId,
   variableNames,
+  variableKinds,
   defaultHeaders,
   defaultQuery,
   pending,
@@ -73,6 +74,7 @@ function ServerDefaultsCard({
 }: {
   serverId: string;
   variableNames: string[];
+  variableKinds?: Record<string, "config" | "secret">;
   defaultHeaders: Record<string, string> | null;
   defaultQuery: Record<string, string> | null;
   pending: boolean;
@@ -126,6 +128,7 @@ function ServerDefaultsCard({
                 rows={headersDraft}
                 onChange={setHeadersDraft}
                 variableNames={variableNames}
+                variableKinds={variableKinds}
                 mode="defaults"
                 emptyLabel={t.servers.emptyHeaderRows}
               />
@@ -136,6 +139,7 @@ function ServerDefaultsCard({
                 rows={queryDraft}
                 onChange={setQueryDraft}
                 variableNames={variableNames}
+                variableKinds={variableKinds}
                 mode="defaults"
                 emptyLabel={t.servers.emptyQueryRows}
               />
@@ -199,6 +203,9 @@ export function ServerSettingsTab({
   const [variableSecret, setVariableSecret] = useState(true);
 
   const variableNames = (variables.data ?? []).map((variable) => variable.name);
+  const variableKinds = Object.fromEntries(
+    (variables.data ?? []).map((variable) => [variable.name, variable.kind]),
+  );
   const identityDirty =
     name.trim() !== server.name ||
     baseUrl.trim() !== server.baseUrl ||
@@ -430,53 +437,70 @@ export function ServerSettingsTab({
             </p>
           ) : (
             <ul className="divide-y divide-border rounded-md border border-border">
-              {variables.data.map((variable) => (
-                <li key={variable.id} className="px-3 py-2.5">
-                  <div className="flex items-center gap-3">
-                    <code className="min-w-0 flex-1 truncate font-mono text-xs">
-                      {variable.name}
-                    </code>
-                    {variable.isSecret ? (
-                      <Badge variant="secondary" className="shrink-0">
-                        {t.servers.variableSecretBadge}
+              {variables.data.map((variable) => {
+                const authOwned = variable.owner === "auth";
+                return (
+                  <li key={variable.id} className="px-3 py-2.5">
+                    <div className="flex items-center gap-3">
+                      <code className="min-w-0 flex-1 truncate font-mono text-xs">
+                        {variable.name}
+                      </code>
+                      <Badge
+                        variant={variable.isSecret ? "secondary" : "outline"}
+                        className="shrink-0"
+                      >
+                        {variable.isSecret
+                          ? t.servers.variableSecretBadge
+                          : t.servers.variableConfigBadge}
                       </Badge>
-                    ) : null}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="shrink-0"
-                      aria-label={t.servers.editVariable}
-                      onClick={() =>
-                        setEditVariable({
-                          name: variable.name,
-                          isSecret: variable.isSecret,
-                          value: variable.value ?? undefined,
-                        })
-                      }
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="shrink-0 text-muted-foreground hover:text-destructive"
-                      aria-label={t.servers.deleteVariable}
-                      onClick={() => setDeleteVariableName(variable.name)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  <p className="mt-1 truncate text-xs text-muted-foreground">
-                    {variable.isSecret
-                      ? variable.hasValue
-                        ? t.servers.variableHasValue
-                        : t.servers.variableNoValue
-                      : variable.value}
-                  </p>
-                </li>
-              ))}
+                      {authOwned ? (
+                        <Badge
+                          variant="outline"
+                          className="shrink-0 gap-1 text-muted-foreground"
+                        >
+                          <Lock className="h-3 w-3" aria-hidden="true" />
+                          {t.servers.variableAuthOwnedBadge}
+                        </Badge>
+                      ) : null}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="shrink-0"
+                        disabled={authOwned}
+                        aria-label={t.servers.editVariable}
+                        onClick={() =>
+                          setEditVariable({
+                            name: variable.name,
+                            isSecret: variable.isSecret,
+                            value: variable.value ?? undefined,
+                          })
+                        }
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="shrink-0 text-muted-foreground hover:text-destructive"
+                        disabled={authOwned}
+                        aria-label={t.servers.deleteVariable}
+                        onClick={() => setDeleteVariableName(variable.name)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <p className="mt-1 truncate text-xs text-muted-foreground">
+                      {variable.isSecret
+                        ? variable.hasValue
+                          ? t.servers.variableHasValue
+                          : t.servers.variableNoValue
+                        : variable.value}
+                    </p>
+                  </li>
+                );
+              })}
             </ul>
           )}
 
@@ -567,6 +591,7 @@ export function ServerSettingsTab({
       <ServerDefaultsCard
         serverId={server.id}
         variableNames={variableNames}
+        variableKinds={variableKinds}
         defaultHeaders={defaultHeaders}
         defaultQuery={defaultQuery}
         pending={updateServer.isPending}

@@ -190,6 +190,18 @@ export function useParseCurlPreview() {
   });
 }
 
+export function usePreviewToolCompile() {
+  const { t } = useTranslations();
+  const baseOptions = api.mcp.previewToolCompile.mutationOptions();
+  return useMutation({
+    ...baseOptions,
+    onError: (error, ...rest) => {
+      baseOptions.onError?.(error, ...rest);
+      toast.error(resolveErrorMessage(error, t));
+    },
+  });
+}
+
 export function useCreateMcpTool() {
   const { t } = useTranslations();
   const invalidate = useInvalidateMcp();

@@ -4,7 +4,11 @@ import {
   SourceRowEditor,
 } from "@/components/servers/source-row-editor";
 import { TemplateValueInput } from "@/components/servers/template-value-input";
-import { useCreateMcpTool, useUpdateMcpTool } from "@/hooks/use-mcp";
+import {
+  useCreateMcpTool,
+  usePreviewToolCompile,
+  useUpdateMcpTool,
+} from "@/hooks/use-mcp";
 import { useTranslations } from "@/i18n/use-translations";
 import {
   collectAgentParams,
@@ -28,6 +32,7 @@ import {
 import {
   Alert,
   AlertDescription,
+  Badge,
   Button,
   Dialog,
   DialogContent,
@@ -50,14 +55,22 @@ import {
   TabsTrigger,
   Textarea,
 } from "@repo/ui";
-import { LoaderCircle } from "lucide-react";
+import { ChevronDown, ChevronRight, LoaderCircle, Wand2 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
 const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] as const;
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 type BodyType = "none" | "json" | "form" | "raw";
 
 export type ToolParamDraft = AgentMeta;
+
+export type ToolCompileIssue = {
+  path: string;
+  code: string;
+  message: string;
+  severity: "error" | "warning";
+};
 
 export type ToolFormTool = {
   id: string;
@@ -74,6 +87,14 @@ export type ToolFormTool = {
   params: ToolParamDraft[] | null;
   allowMutation: boolean;
   enabled: boolean;
+  compileStatus?: string | null;
+  compileIssues?: ToolCompileIssue[] | null;
+};
+
+export type ToolFormServerValue = {
+  id: string;
+  name: string;
+  kind: "config" | "secret";
 };
 
 type TemplateWarning = {
@@ -143,6 +164,58 @@ function hasOverlayMenuOpen(): boolean {
   );
 }
 
+type PreviewBinding =
+  | { kind: "literal"; value: string | number | boolean | null }
+  | { kind: "serverValue"; serverValueId: string }
+  | { kind: "agentInput"; agentInputId: string };
+
+/** Shape of the opaque compiled plan record returned by `previewToolCompile`. */
+type CompiledPlanPreview = {
+  annotations: {
+    readOnlyHint?: boolean;
+    destructiveHint?: boolean;
+    idempotentHint?: boolean;
+  };
+  headers: Array<{ name: string; source: PreviewBinding }>;
+  query: Array<{ name: string; source: PreviewBinding }>;
+  agentInputs: Array<{ id: string; name: string }>;
+};
+
+function asCompiledPlanPreview(
+  plan: Record<string, unknown> | null | undefined,
+): CompiledPlanPreview | null {
+  if (!plan) return null;
+  return plan as unknown as CompiledPlanPreview;
+}
+
+function describeBinding(
+  binding: PreviewBinding,
+  ctx: {
+    serverValueNameById: Record<string, string>;
+    serverValueKindById: Record<string, "config" | "secret">;
+    agentInputNameById: Record<string, string>;
+    secretLabel: string;
+    agentLabel: string;
+  },
+): string {
+  if (binding.kind === "literal") {
+    return typeof binding.value === "string"
+      ? binding.value
+      : JSON.stringify(binding.value);
+  }
+  if (binding.kind === "serverValue") {
+    const name =
+      ctx.serverValueNameById[binding.serverValueId] ?? binding.serverValueId;
+    if (ctx.serverValueKindById[binding.serverValueId] === "secret") {
+      return ctx.secretLabel;
+    }
+    return `{{${name}}}`;
+  }
+  const name =
+    ctx.agentInputNameById[binding.agentInputId] ?? binding.agentInputId;
+  return `{{${name}}} (${ctx.agentLabel})`;
+}
+
 /**
  * Shared create/edit/duplicate tool form. Mount conditionally so state
  * initializes from `tool`. When a save returns template warnings the dialog
@@ -152,12 +225,14 @@ function hasOverlayMenuOpen(): boolean {
 export function ToolFormDialog({
   serverId,
   variableNames,
+  variables = [],
   tool,
   duplicate = false,
   onClose,
 }: {
   serverId: string;
   variableNames: string[];
+  variables?: ToolFormServerValue[];
   tool?: ToolFormTool;
   duplicate?: boolean;
   onClose: () => void;
@@ -165,8 +240,22 @@ export function ToolFormDialog({
   const { t } = useTranslations();
   const createTool = useCreateMcpTool();
   const updateTool = useUpdateMcpTool();
+  const previewCompile = usePreviewToolCompile();
   const isEdit = Boolean(tool) && !duplicate;
   const paramMap = paramsByName(tool?.params);
+  const variableKinds = useMemo(
+    () =>
+      Object.fromEntries(variables.map((value) => [value.name, value.kind])),
+    [variables],
+  );
+  const serverValueNameById = useMemo(
+    () => Object.fromEntries(variables.map((value) => [value.id, value.name])),
+    [variables],
+  );
+  const serverValueKindById = useMemo(
+    () => Object.fromEntries(variables.map((value) => [value.id, value.kind])),
+    [variables],
+  );
 
   const initialName = tool ? (duplicate ? `${tool.name}_copy` : tool.name) : "";
   const initialMethod = (METHODS as readonly string[]).includes(
@@ -218,12 +307,17 @@ export function ToolFormDialog({
     isEdit && tool ? tool.id : null,
   );
   const [discardOpen, setDiscardOpen] = useState(false);
+  const [mutationConfirmOpen, setMutationConfirmOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const preview = previewCompile.data ?? null;
   const savedRef = useRef(false);
 
   const isPending = createTool.isPending || updateTool.isPending;
   const effectiveEdit = isEdit || savedToolId !== null;
   const showAdvanced =
     bodyType === "raw" || (bodyType === "json" && jsonAdvanced);
+  const isMutatingMethod = MUTATING_METHODS.has(method);
+  const previewBlocksEnable = preview !== null && !preview.ok;
 
   const isDirty = useMemo(() => {
     if (savedRef.current) return false;
@@ -301,7 +395,7 @@ export function ToolFormDialog({
     onClose();
   };
 
-  const submit = () => {
+  const buildRequestPayload = () => {
     const pathTemplate = joinPath(pathParts);
     let body: string | null = null;
     if (bodyType === "form") {
@@ -331,6 +425,24 @@ export function ToolFormDialog({
       body,
       ...(bodyType === "none" ? {} : { bodyType }),
     };
+    return { pathTemplate, requestTemplate, params };
+  };
+
+  const runPreview = () => {
+    const { pathTemplate, requestTemplate, params } = buildRequestPayload();
+    setPreviewOpen(true);
+    previewCompile.mutate({
+      serverId,
+      method,
+      pathTemplate,
+      requestTemplate,
+      params,
+      allowMutation,
+    });
+  };
+
+  const submit = () => {
+    const { pathTemplate, requestTemplate, params } = buildRequestPayload();
     const payload = {
       serverId,
       name,
@@ -340,7 +452,7 @@ export function ToolFormDialog({
       requestTemplate,
       params,
       allowMutation,
-      enabled,
+      enabled: previewBlocksEnable ? false : enabled,
     };
     const onSuccess = (result: {
       id: string;
@@ -359,6 +471,20 @@ export function ToolFormDialog({
     } else {
       createTool.mutate(payload, { onSuccess });
     }
+  };
+
+  const requestAllowMutationChange = (next: boolean) => {
+    if (!next && allowMutation && enabled && isMutatingMethod) {
+      setMutationConfirmOpen(true);
+      return;
+    }
+    setAllowMutation(next);
+  };
+
+  const confirmMutationRevoke = () => {
+    setAllowMutation(false);
+    setEnabled(false);
+    setMutationConfirmOpen(false);
   };
 
   const switchBodyType = (next: BodyType) => {
@@ -483,6 +609,7 @@ export function ToolFormDialog({
                   parts={pathParts}
                   onChange={setPathParts}
                   variableNames={variableNames}
+                  variableKinds={variableKinds}
                   pathInputId="tool-form-path"
                 />
               </Field>
@@ -505,6 +632,7 @@ export function ToolFormDialog({
                   rows={query}
                   onChange={setQuery}
                   variableNames={variableNames}
+                  variableKinds={variableKinds}
                   emptyLabel={t.servers.emptyQueryRows}
                 />
               </TabsContent>
@@ -513,6 +641,7 @@ export function ToolFormDialog({
                   rows={headers}
                   onChange={setHeaders}
                   variableNames={variableNames}
+                  variableKinds={variableKinds}
                   emptyLabel={t.servers.emptyHeaderRows}
                 />
               </TabsContent>
@@ -574,6 +703,7 @@ export function ToolFormDialog({
                     rows={formRows}
                     onChange={setFormRows}
                     variableNames={variableNames}
+                    variableKinds={variableKinds}
                     emptyLabel={t.servers.emptyFormRows}
                   />
                 ) : null}
@@ -582,6 +712,7 @@ export function ToolFormDialog({
                     rows={jsonRows}
                     onChange={setJsonRows}
                     variableNames={variableNames}
+                    variableKinds={variableKinds}
                     emptyLabel={t.servers.emptyFormRows}
                   />
                 ) : null}
@@ -644,29 +775,229 @@ export function ToolFormDialog({
               </Alert>
             ) : null}
 
-            <div className="space-y-3 rounded-md border border-border p-3">
-              <label className="flex items-center justify-between gap-4 text-sm">
-                <span>
-                  <span className="font-medium">{t.servers.allowMutation}</span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">
-                    {t.servers.allowMutationHelp}
-                  </span>
+            {tool?.compileStatus === "invalid" &&
+            tool.compileIssues &&
+            tool.compileIssues.length > 0 &&
+            !preview ? (
+              <Alert variant="destructive">
+                <AlertDescription className="space-y-1">
+                  <p>
+                    {t.servers.previewSavedIssues.replace(
+                      "{count}",
+                      String(tool.compileIssues.length),
+                    )}
+                  </p>
+                  {tool.compileIssues.slice(0, 8).map((issue) => (
+                    <p
+                      key={`${issue.path}-${issue.code}-${issue.message}`}
+                      className="font-mono text-xs"
+                    >
+                      {issue.path}: {issue.message}
+                    </p>
+                  ))}
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            <div className="rounded-md border border-border">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between gap-2 p-3 text-left text-sm font-medium"
+                onClick={() => setPreviewOpen((open) => !open)}
+              >
+                <span className="flex items-center gap-2">
+                  <Wand2 className="h-4 w-4 text-muted-foreground" />
+                  {t.servers.previewTitle}
                 </span>
-                <Switch
-                  checked={allowMutation}
-                  onCheckedChange={setAllowMutation}
-                />
-              </label>
-              <label className="flex items-center justify-between gap-4 text-sm">
-                <span>
-                  <span className="font-medium">{t.servers.enabled}</span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">
-                    {t.servers.enabledHelp}
-                  </span>
-                </span>
-                <Switch checked={enabled} onCheckedChange={setEnabled} />
-              </label>
+                {previewOpen ? (
+                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                )}
+              </button>
+              {previewOpen ? (
+                <div className="space-y-3 border-t border-border p-3">
+                  <p className="text-xs text-muted-foreground">
+                    {t.servers.previewDescription}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={previewCompile.isPending}
+                    onClick={runPreview}
+                  >
+                    {previewCompile.isPending ? (
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                    ) : null}
+                    {previewCompile.isPending
+                      ? t.servers.previewRunning
+                      : t.servers.previewRun}
+                  </Button>
+                  {preview ? (
+                    <div className="space-y-3">
+                      {preview.issues.length > 0 ? (
+                        <Alert
+                          variant={
+                            preview.issues.some(
+                              (issue) => issue.severity === "error",
+                            )
+                              ? "destructive"
+                              : "default"
+                          }
+                        >
+                          <AlertDescription className="space-y-1">
+                            {preview.issues.map((issue) => (
+                              <p
+                                key={`${issue.path}:${issue.code}:${issue.message}`}
+                                className="font-mono text-xs"
+                              >
+                                {issue.path}: {issue.message}
+                              </p>
+                            ))}
+                          </AlertDescription>
+                        </Alert>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">
+                          {t.servers.previewValid}
+                        </p>
+                      )}
+                      {preview.ok && preview.plan
+                        ? (() => {
+                            const plan = asCompiledPlanPreview(preview.plan);
+                            if (!plan) return null;
+                            const agentInputNameById = Object.fromEntries(
+                              plan.agentInputs.map((input) => [
+                                input.id,
+                                input.name,
+                              ]),
+                            );
+                            const bindingCtx = {
+                              serverValueNameById,
+                              serverValueKindById,
+                              agentInputNameById,
+                              secretLabel: t.servers.previewSecretValue,
+                              agentLabel: t.servers.previewAgentInput,
+                            };
+                            return (
+                              <div className="space-y-2">
+                                <div className="flex flex-wrap gap-1">
+                                  {plan.annotations.readOnlyHint ? (
+                                    <Badge variant="outline">
+                                      {t.servers.annotationReadOnly}
+                                    </Badge>
+                                  ) : null}
+                                  {plan.annotations.destructiveHint ? (
+                                    <Badge variant="outline">
+                                      {t.servers.annotationDestructive}
+                                    </Badge>
+                                  ) : null}
+                                  {plan.annotations.idempotentHint ? (
+                                    <Badge variant="outline">
+                                      {t.servers.annotationIdempotent}
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                                {plan.headers.length > 0 ||
+                                plan.query.length > 0 ? (
+                                  <ul className="space-y-1 font-mono text-xs">
+                                    {plan.headers.map((entry) => (
+                                      <li key={`h-${entry.name}`}>
+                                        {t.servers.requestPartHeaders}:{" "}
+                                        {entry.name} ={" "}
+                                        {describeBinding(
+                                          entry.source,
+                                          bindingCtx,
+                                        )}
+                                      </li>
+                                    ))}
+                                    {plan.query.map((entry) => (
+                                      <li key={`q-${entry.name}`}>
+                                        {t.servers.requestPartQuery}:{" "}
+                                        {entry.name} ={" "}
+                                        {describeBinding(
+                                          entry.source,
+                                          bindingCtx,
+                                        )}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : null}
+                              </div>
+                            );
+                          })()
+                        : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
+
+            {mutationConfirmOpen ? (
+              <div
+                className="rounded-md border border-destructive/40 bg-muted/40 p-4"
+                role="region"
+                aria-label={t.servers.mutationConfirmTitle}
+              >
+                <p className="text-sm font-medium">
+                  {t.servers.mutationConfirmTitle}
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {t.servers.mutationConfirmDescription}
+                </p>
+                <div className="mt-3 flex flex-row justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="border-border bg-background"
+                    onClick={() => setMutationConfirmOpen(false)}
+                  >
+                    {t.servers.cancel}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={confirmMutationRevoke}
+                  >
+                    {t.servers.mutationConfirmConfirm}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3 rounded-md border border-border p-3">
+                <label className="flex items-center justify-between gap-4 text-sm">
+                  <span>
+                    <span className="font-medium">
+                      {t.servers.allowMutation}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      {t.servers.allowMutationHelp}
+                    </span>
+                  </span>
+                  <Switch
+                    aria-label={t.servers.allowMutation}
+                    checked={allowMutation}
+                    onCheckedChange={requestAllowMutationChange}
+                  />
+                </label>
+                <label className="flex items-center justify-between gap-4 text-sm">
+                  <span>
+                    <span className="font-medium">{t.servers.enabled}</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      {previewBlocksEnable
+                        ? t.servers.enabledBlockedHelp
+                        : t.servers.enabledHelp}
+                    </span>
+                  </span>
+                  <Switch
+                    aria-label={t.servers.enabled}
+                    checked={enabled && !previewBlocksEnable}
+                    disabled={previewBlocksEnable}
+                    onCheckedChange={setEnabled}
+                  />
+                </label>
+              </div>
+            )}
           </div>
 
           {discardOpen ? (

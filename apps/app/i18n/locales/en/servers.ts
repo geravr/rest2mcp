@@ -67,11 +67,11 @@ export const enServers = {
     iconPhotoDescription: "Upload a JPG, PNG, or WebP image up to 5 MB.",
     invalidIconType: "Upload a JPG, PNG, or WebP image.",
     iconTooLarge: "Icon images must be 5 MB or smaller.",
-    variables: "Variables",
+    variables: "Server values",
     variablesDescription:
-      "Values tools reference by name. Secret variables are encrypted and never shown again.",
+      "Configuration and secrets tools reference by name. Secret values are encrypted and never shown again.",
     noVariables:
-      "No variables yet. Add a secret for API keys so they stay out of tool definitions.",
+      "No server values yet. Add a secret for API keys so they stay out of tool definitions.",
     variableName: "Variable name",
     variableNamePlaceholder: "api_token",
     variableNameHint:
@@ -81,6 +81,8 @@ export const enServers = {
     variableValue: "Value",
     variableSecret: "Secret",
     variableSecretBadge: "Secret",
+    variableConfigBadge: "Config",
+    variableAuthOwnedBadge: "Managed by Authentication",
     variableHasValue: "Value stored",
     variableNoValue: "No value stored",
     addVariable: "Add variable",
@@ -142,7 +144,7 @@ export const enServers = {
     defaultsUnsaved: "Unsaved changes",
     snippetTitle: "Connection snippet",
     snippetDescription:
-      "Paste this URL into an MCP client and send the agent token as Bearer.",
+      "Paste this URL into an MCP client and send the agent token as Bearer. Upstream 4xx/5xx return as MCP tool errors with a structured envelope; curl import never stores credentials — configure Auth separately.",
     createToken: "Create agent token",
     creatingToken: "Creating…",
     tokenShownOnce: "Copy this token now. It will not be shown again.",
@@ -196,10 +198,14 @@ export const enServers = {
     authParamNamePlaceholder: "api_key",
     authParamValue: "Parameter value",
     authValuePlaceholder: "Paste secret",
+    authQueryAckLabel:
+      "I understand this credential will appear in URLs, server logs, and browser history.",
     authUsername: "Username",
     authPassword: "Password",
     authCustomHelp:
       "This server uses a custom auth setup. Edit default headers or query below, or pick a simple type to replace the mapped credential.",
+    authProtectedKeysLabel:
+      "Keys managed by authentication (protected from tool and default overrides):",
     authTitle: "Authentication",
     authDescription:
       "Credentials are stored as encrypted secrets. You will not see the value again after saving.",
@@ -214,6 +220,7 @@ export const enServers = {
       "Mutations are not allowed for this tool. Enable allow mutation in Tools.",
     invokeServerPaused: "This server is paused. Resume it to invoke tools.",
     resultStatus: "HTTP {status}",
+    resultError: "The upstream request did not complete successfully.",
     saveChanges: "Save changes",
     savingChanges: "Saving…",
     dangerZoneTitle: "Danger zone",
@@ -262,6 +269,18 @@ export const enServers = {
       boolean: "Boolean",
       json: "JSON",
     },
+    paramSensitive: "Sensitive",
+    paramSensitiveHelp:
+      "Never logged or previewed; masked as a password field in the playground.",
+    paramConstraints: "Constraints",
+    paramMinLength: "Min length",
+    paramMaxLength: "Max length",
+    paramPattern: "Pattern (regex)",
+    paramPatternPlaceholder: "^[A-Z]{2}\\d+$",
+    paramMinimum: "Minimum",
+    paramMaximum: "Maximum",
+    paramExamples: "Examples",
+    paramExamplesPlaceholder: "value1, value2",
     warningPlaceholderWithoutParam:
       "{{name}} is used but has no declared param or variable.",
     warningParamWithoutPlaceholder:
@@ -273,26 +292,50 @@ export const enServers = {
     curlParse: "Parse",
     curlParsing: "Parsing…",
     curlPreviewDescription:
-      "Mark each highlighted value as an agent param, a stored variable, or leave it literal.",
+      "Mark each highlighted value as an agent input, or leave it literal.",
     locations: {
       path: "Path",
       query: "Query",
       header: "Header",
-      body: "Body",
+      json: "Body",
+      form: "Body",
     },
-    markAsParam: "Agent param",
-    markAsVariable: "Variable",
+    markAsParam: "Agent input",
     markAsLiteral: "Literal",
-    markSecret: "Secret",
     markingAs: "Mark as",
-    markingName: "Variable or param name",
+    markingName: "Agent input name",
     markingNamePlaceholder: "name",
     invalidMarkingName:
-      "Invalid name: variables start with a lowercase letter and use only lowercase letters, digits, and underscores; params may also use uppercase.",
-    authPreMarked: "Detected credential — stored as a secret variable.",
+      "Invalid name: use a lowercase letter followed by lowercase letters, digits, or underscores.",
+    credentialExcluded:
+      "Detected credential ({kind}, {header}) was excluded. Configure authentication separately in the Auth card.",
     curlCreate: "Create tool",
     curlBack: "Back",
-    captureReport: "Captured {variables} variables and {params} params.",
+    curlImportSummary:
+      "Draft tool created and disabled. {issues} validation issue(s) found — review them before enabling it.",
+    curlImportCredentialsCta:
+      "This curl command included credentials. They were never stored — configure authentication separately below.",
+    curlGoToAuth: "Go to Authentication",
     viewCallLog: "View call log",
+    previewTitle: "Effective request preview",
+    previewDescription:
+      "Compiles the request the same way the gateway will, using current server values and authentication. Secret values are never shown.",
+    previewRun: "Preview",
+    previewRunning: "Compiling…",
+    previewValid: "This request compiles without issues.",
+    previewSecretValue: "•••• (secret value)",
+    previewAgentInput: "agent input",
+    previewSavedIssues:
+      "This tool has {count} unresolved compile issue(s) from the last save. Run Preview to see details.",
+    compileInvalidShort: "Fix compile issues to enable",
+    annotationReadOnly: "Read-only",
+    annotationDestructive: "Destructive",
+    annotationIdempotent: "Idempotent",
+    mutationConfirmTitle: "Revoke mutation permission?",
+    mutationConfirmDescription:
+      "This tool sends a mutating request. Turning off Allow mutation will also disable it.",
+    mutationConfirmConfirm: "Revoke and disable",
+    enabledBlockedHelp:
+      "This tool cannot be enabled until the compile issues above are resolved.",
   },
 } as const;

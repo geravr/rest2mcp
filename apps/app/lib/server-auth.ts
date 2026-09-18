@@ -14,6 +14,8 @@ export type AuthFormState = {
   headerValue: string;
   paramName: string;
   paramValue: string;
+  /** Required before a query recipe can be saved: query strings are visible in logs and history. */
+  queryExposureAcknowledged: boolean;
   username: string;
   password: string;
 };
@@ -22,7 +24,12 @@ export type AuthRecipePayload =
   | { type: "none" }
   | { type: "bearer"; token: string }
   | { type: "header"; headerName: string; value: string }
-  | { type: "query"; paramName: string; value: string }
+  | {
+      type: "query";
+      paramName: string;
+      value: string;
+      queryExposureAcknowledged: true;
+    }
   | { type: "basic"; username: string; password: string };
 
 export type InferredAuth = {
@@ -30,6 +37,8 @@ export type InferredAuth = {
   variableName?: string;
   headerName?: string;
   paramName?: string;
+  /** Header/query keys currently owned by authentication (names only, never values). */
+  protectedKeys?: { headers: string[]; query: string[] };
 };
 
 export const DEFAULT_AUTH_FORM: AuthFormState = {
@@ -39,6 +48,7 @@ export const DEFAULT_AUTH_FORM: AuthFormState = {
   headerValue: "",
   paramName: "api_key",
   paramValue: "",
+  queryExposureAcknowledged: false,
   username: "",
   password: "",
 };
@@ -75,8 +85,13 @@ export function buildAuthRecipe(
   if (state.type === "query") {
     const paramName = state.paramName.trim();
     const value = state.paramValue.trim();
-    if (!paramName || !value) return null;
-    return { type: "query", paramName, value };
+    if (!paramName || !value || !state.queryExposureAcknowledged) return null;
+    return {
+      type: "query",
+      paramName,
+      value,
+      queryExposureAcknowledged: true,
+    };
   }
   const username = state.username.trim();
   if (!username || !state.password) return null;

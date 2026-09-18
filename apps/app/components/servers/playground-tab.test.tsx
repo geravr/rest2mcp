@@ -66,16 +66,18 @@ describe("ServerPlaygroundTab", () => {
         _input: unknown,
         options?: {
           onSuccess?: (payload: {
-            body: string;
+            ok: boolean;
             httpStatus: number;
             callLogId: string;
+            envelope: { body?: string; data?: unknown };
           }) => void;
         },
       ) => {
         options?.onSuccess?.({
-          body: '{"error":"unauthorized"}',
+          ok: false,
           httpStatus: 401,
           callLogId: "log_1",
+          envelope: { body: '{"error":"unauthorized"}' },
         });
       },
     );
@@ -126,40 +128,36 @@ describe("ServerPlaygroundTab", () => {
 
   it("clears the previous result panel on a new submit", async () => {
     const user = userEvent.setup();
+    type EnvelopePayload = {
+      ok: boolean;
+      httpStatus: number;
+      callLogId: string | null;
+      envelope: { body?: string; data?: unknown };
+    };
     invokeMutate
       .mockImplementationOnce(
         (
           _input: unknown,
-          options?: {
-            onSuccess?: (payload: {
-              body: string;
-              httpStatus: number;
-              callLogId: string | null;
-            }) => void;
-          },
+          options?: { onSuccess?: (payload: EnvelopePayload) => void },
         ) => {
           options?.onSuccess?.({
-            body: "first",
+            ok: true,
             httpStatus: 200,
             callLogId: null,
+            envelope: { body: "first" },
           });
         },
       )
       .mockImplementationOnce(
         (
           _input: unknown,
-          options?: {
-            onSuccess?: (payload: {
-              body: string;
-              httpStatus: number;
-              callLogId: string | null;
-            }) => void;
-          },
+          options?: { onSuccess?: (payload: EnvelopePayload) => void },
         ) => {
           options?.onSuccess?.({
-            body: "second",
+            ok: true,
             httpStatus: 200,
             callLogId: null,
+            envelope: { body: "second" },
           });
         },
       );

@@ -6,13 +6,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@repo/ui";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Lock } from "lucide-react";
 import { useState } from "react";
 
 export function VariablePicker({
   value,
   onChange,
   variableNames,
+  variableKinds,
   disabled,
   id,
   compact = false,
@@ -20,6 +21,8 @@ export function VariablePicker({
   value: string;
   onChange: (name: string) => void;
   variableNames: string[];
+  /** Optional name -> kind map to distinguish config from secret values. */
+  variableKinds?: Record<string, "config" | "secret">;
   disabled?: boolean;
   id?: string;
   compact?: boolean;
@@ -80,10 +83,16 @@ export function VariablePicker({
           variableNames.map((name) => (
             <DropdownMenuItem
               key={name}
-              className="min-h-10 py-2 font-mono text-xs"
+              className="min-h-10 items-center gap-1.5 py-2 font-mono text-xs"
               onSelect={() => onChange(name)}
             >
               {name}
+              {variableKinds?.[name] === "secret" ? (
+                <Lock
+                  className="h-3 w-3 shrink-0 text-muted-foreground"
+                  aria-hidden="true"
+                />
+              ) : null}
             </DropdownMenuItem>
           ))
         )}

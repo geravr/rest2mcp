@@ -96,6 +96,38 @@ export const esErrors = {
         "Ya existe una variable con este nombre en el servidor.",
       [APP_ERROR_CODES.MCP_PLAINTEXT_SECRET]:
         "Guarda los secretos en una variable secreta y referénciala con {{name}} en lugar de pegarlos literalmente.",
+      [APP_ERROR_CODES.MCP_COMPILE_INVALID]:
+        "La definición de esta herramienta no es válida y no se puede habilitar.",
+      [APP_ERROR_CODES.MCP_TOOL_DISABLED]:
+        "Esta herramienta está deshabilitada.",
+      [APP_ERROR_CODES.MCP_SERVER_PAUSED]:
+        "Este servidor MCP está en pausa y no tiene herramientas invocables.",
+      [APP_ERROR_CODES.MCP_RATE_LIMITED]:
+        "Demasiadas solicitudes. Espera e inténtalo de nuevo.",
+      [APP_ERROR_CODES.MCP_TIMEOUT]:
+        "La solicitud al origen agotó el tiempo de espera.",
+      [APP_ERROR_CODES.MCP_REDIRECT_REJECTED]:
+        "La redirección del origen fue rechazada por política.",
+      [APP_ERROR_CODES.MCP_PATH_ESCAPE]:
+        "La ruta de la solicitud escaparía de la ruta base configurada.",
+      [APP_ERROR_CODES.MCP_ORIGIN_INVALID]:
+        "El encabezado Origin no está permitido en este endpoint.",
+      [APP_ERROR_CODES.MCP_REQUEST_TOO_LARGE]:
+        "El cuerpo de la solicitud es demasiado grande.",
+      [APP_ERROR_CODES.MCP_SCOPE_DENIED]:
+        "Este token de plataforma no incluye el alcance requerido.",
+      [APP_ERROR_CODES.MCP_DESTRUCTIVE_CONFIRMATION_REQUIRED]:
+        "Confirma el nombre del recurso para continuar esta operación destructiva.",
+      [APP_ERROR_CODES.MCP_VALUE_IN_USE]:
+        "Este valor del servidor aún está referenciado y no se puede eliminar.",
+      [APP_ERROR_CODES.MCP_AUTH_ACK_REQUIRED]:
+        "La autenticación por query requiere reconocimiento explícito de exposición del secreto.",
+      [APP_ERROR_CODES.MCP_UPSTREAM_HTTP_ERROR]:
+        "La API de origen devolvió un error HTTP.",
+      [APP_ERROR_CODES.MCP_MUTATION_INDETERMINATE]:
+        "La mutación pudo haberse completado, pero el resultado final del origen es desconocido.",
+      [APP_ERROR_CODES.MCP_BINARY_UNSUPPORTED]:
+        "Las respuestas binarias del origen no se devuelven como texto.",
 
       [APP_ERROR_CODES.ROUTE_NOT_FOUND]: "Esta ruta de API no existe.",
       [APP_ERROR_CODES.INTERNAL_ERROR]:

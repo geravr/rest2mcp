@@ -2,7 +2,11 @@ import { VariablePicker } from "@/components/servers/variable-picker";
 import { useTranslations } from "@/i18n/use-translations";
 import {
   emptyFixedRow,
+  joinCommaList,
+  parseCommaList,
   slugifyAgentName,
+  type AgentConstraints,
+  type AgentMeta,
   type AgentParamType,
   type SourceRow,
 } from "@/lib/value-origin";
@@ -18,7 +22,8 @@ import {
   SelectValue,
   Switch,
 } from "@repo/ui";
-import { Plus, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, X } from "lucide-react";
+import { useState } from "react";
 
 const PARAM_TYPES: AgentParamType[] = ["string", "number", "boolean", "json"];
 
@@ -59,6 +64,131 @@ function agentNameFollowsKey(row: SourceRow): boolean {
   return row.name === "" || row.name === slugifyAgentName(row.key);
 }
 
+function AgentConstraintsFields({
+  type,
+  constraints,
+  onChange,
+  disabled,
+}: {
+  type: AgentParamType;
+  constraints: AgentConstraints;
+  onChange: (patch: Partial<AgentConstraints>) => void;
+  disabled?: boolean;
+}) {
+  const { t } = useTranslations();
+  const isNumeric = type === "number";
+  const isString = type === "string";
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      {isString ? (
+        <>
+          <Field>
+            <Label className="text-xs">{t.servers.paramMinLength}</Label>
+            <Input
+              type="number"
+              min={0}
+              value={constraints.minLength ?? ""}
+              disabled={disabled}
+              aria-label={t.servers.paramMinLength}
+              onChange={(event) =>
+                onChange({
+                  minLength:
+                    event.target.value === ""
+                      ? undefined
+                      : Number(event.target.value),
+                })
+              }
+            />
+          </Field>
+          <Field>
+            <Label className="text-xs">{t.servers.paramMaxLength}</Label>
+            <Input
+              type="number"
+              min={0}
+              value={constraints.maxLength ?? ""}
+              disabled={disabled}
+              aria-label={t.servers.paramMaxLength}
+              onChange={(event) =>
+                onChange({
+                  maxLength:
+                    event.target.value === ""
+                      ? undefined
+                      : Number(event.target.value),
+                })
+              }
+            />
+          </Field>
+          <Field className="sm:col-span-2">
+            <Label className="text-xs">{t.servers.paramPattern}</Label>
+            <Input
+              value={constraints.pattern ?? ""}
+              disabled={disabled}
+              placeholder={t.servers.paramPatternPlaceholder}
+              className="font-mono text-xs"
+              aria-label={t.servers.paramPattern}
+              onChange={(event) =>
+                onChange({ pattern: event.target.value || undefined })
+              }
+            />
+          </Field>
+        </>
+      ) : null}
+      {isNumeric ? (
+        <>
+          <Field>
+            <Label className="text-xs">{t.servers.paramMinimum}</Label>
+            <Input
+              type="number"
+              value={constraints.minimum ?? ""}
+              disabled={disabled}
+              aria-label={t.servers.paramMinimum}
+              onChange={(event) =>
+                onChange({
+                  minimum:
+                    event.target.value === ""
+                      ? undefined
+                      : Number(event.target.value),
+                })
+              }
+            />
+          </Field>
+          <Field>
+            <Label className="text-xs">{t.servers.paramMaximum}</Label>
+            <Input
+              type="number"
+              value={constraints.maximum ?? ""}
+              disabled={disabled}
+              aria-label={t.servers.paramMaximum}
+              onChange={(event) =>
+                onChange({
+                  maximum:
+                    event.target.value === ""
+                      ? undefined
+                      : Number(event.target.value),
+                })
+              }
+            />
+          </Field>
+        </>
+      ) : null}
+      <Field className="sm:col-span-2">
+        <Label className="text-xs">{t.servers.paramExamples}</Label>
+        <Input
+          value={joinCommaList(constraints.examples as string[] | undefined)}
+          disabled={disabled}
+          placeholder={t.servers.paramExamplesPlaceholder}
+          className="font-mono text-xs"
+          aria-label={t.servers.paramExamples}
+          onChange={(event) =>
+            onChange({ examples: parseCommaList(event.target.value) })
+          }
+        />
+      </Field>
+    </div>
+  );
+}
+
 export function AgentParamCard({
   title,
   name,
@@ -71,6 +201,10 @@ export function AgentParamCard({
   onTypeChange,
   required,
   onRequiredChange,
+  sensitive = false,
+  onSensitiveChange,
+  constraints,
+  onConstraintsChange,
   disabled,
   nested = false,
 }: {
@@ -85,10 +219,15 @@ export function AgentParamCard({
   onTypeChange: (type: AgentParamType) => void;
   required: boolean;
   onRequiredChange: (required: boolean) => void;
+  sensitive?: boolean;
+  onSensitiveChange?: (sensitive: boolean) => void;
+  constraints?: AgentConstraints;
+  onConstraintsChange?: (patch: Partial<AgentConstraints>) => void;
   disabled?: boolean;
   nested?: boolean;
 }) {
   const { t } = useTranslations();
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const legacyAgentName =
     !onNameChange && name && paramKey && name !== slugifyAgentName(paramKey);
 
@@ -161,7 +300,47 @@ export function AgentParamCard({
             />
           </div>
         </Field>
+        {onSensitiveChange ? (
+          <Field>
+            <Label className="text-xs">{t.servers.paramSensitive}</Label>
+            <div className="flex h-10 items-center">
+              <Switch
+                checked={sensitive}
+                disabled={disabled}
+                aria-label={t.servers.paramSensitive}
+                onCheckedChange={onSensitiveChange}
+              />
+            </div>
+          </Field>
+        ) : null}
       </div>
+      {onConstraintsChange ? (
+        <div>
+          <button
+            type="button"
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            disabled={disabled}
+            onClick={() => setAdvancedOpen((open) => !open)}
+          >
+            {advancedOpen ? (
+              <ChevronDown className="h-3 w-3" />
+            ) : (
+              <ChevronRight className="h-3 w-3" />
+            )}
+            {t.servers.paramConstraints}
+          </button>
+          {advancedOpen ? (
+            <div className="mt-3">
+              <AgentConstraintsFields
+                type={type}
+                constraints={constraints ?? {}}
+                onChange={onConstraintsChange}
+                disabled={disabled}
+              />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -198,6 +377,7 @@ export function SourceRowEditor({
   rows,
   onChange,
   variableNames,
+  variableKinds,
   mode = "tool",
   disabled,
   emptyLabel,
@@ -205,6 +385,7 @@ export function SourceRowEditor({
   rows: SourceRow[];
   onChange: (rows: SourceRow[]) => void;
   variableNames: string[];
+  variableKinds?: Record<string, "config" | "secret">;
   mode?: SourceOriginMode;
   disabled?: boolean;
   emptyLabel?: string;
@@ -311,6 +492,7 @@ export function SourceRowEditor({
                 <VariablePicker
                   value={row.name}
                   variableNames={variableNames}
+                  variableKinds={variableKinds}
                   disabled={disabled}
                   onChange={(name) => update(index, { ...row, name })}
                 />
@@ -346,6 +528,14 @@ export function SourceRowEditor({
               onRequiredChange={(nextRequired) =>
                 update(index, { ...row, required: nextRequired })
               }
+              sensitive={row.sensitive ?? false}
+              onSensitiveChange={(sensitive) =>
+                update(index, { ...row, sensitive })
+              }
+              constraints={row}
+              onConstraintsChange={(patch) =>
+                update(index, { ...row, ...patch })
+              }
               disabled={disabled}
             />
           ) : null}
@@ -370,26 +560,14 @@ export function AgentLeftoverFields({
   onChange,
   disabled,
 }: {
-  params: Array<{
-    name: string;
-    description?: string;
-    type: AgentParamType;
-    required: boolean;
-  }>;
-  onChange: (
-    params: Array<{
-      name: string;
-      description?: string;
-      type: AgentParamType;
-      required: boolean;
-    }>,
-  ) => void;
+  params: AgentMeta[];
+  onChange: (params: AgentMeta[]) => void;
   disabled?: boolean;
 }) {
   const { t } = useTranslations();
   if (params.length === 0) return null;
 
-  const update = (name: string, patch: Partial<(typeof params)[number]>) =>
+  const update = (name: string, patch: Partial<AgentMeta>) =>
     onChange(
       params.map((param) =>
         param.name === name ? { ...param, ...patch } : param,
@@ -411,6 +589,10 @@ export function AgentLeftoverFields({
           onTypeChange={(type) => update(param.name, { type })}
           required={param.required}
           onRequiredChange={(required) => update(param.name, { required })}
+          sensitive={param.sensitive ?? false}
+          onSensitiveChange={(sensitive) => update(param.name, { sensitive })}
+          constraints={param}
+          onConstraintsChange={(patch) => update(param.name, patch)}
           disabled={disabled}
         />
       ))}

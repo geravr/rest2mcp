@@ -10,7 +10,9 @@ export const esSettings = {
     platform: {
       title: "MCP de plataforma",
       description:
-        "Permite que tu agente actual cree servidores y herramientas desde un MCP dedicado.",
+        "Permite que tu agente actual cree servidores y herramientas desde un MCP dedicado. Los tokens requieren alcances y caducan; vuelve a crearlos tras la migración si el tuyo fue revocado.",
+      errorGuidance:
+        "Los 4xx/5xx del origen terminan como errores de herramienta MCP con un envelope estructurado. Configura la autenticación en Studio por separado: la importación curl nunca guarda credenciales.",
       urlLabel: "Endpoint",
       createToken: "Crear token de plataforma",
       creatingToken: "Creando...",
@@ -20,6 +22,28 @@ export const esSettings = {
       hasToken: "Prefijo del token activo: {prefix}",
       noToken: "No hay token de plataforma activo.",
       copySnippet: "Copiar snippet",
+      activeScopesLabel: "Alcances:",
+      expiresAtLabel: "Expira el {date}",
+      scopesLabel: "Alcances para el próximo token",
+      expiryLabel: "Expira en",
+      expiryDays: "{days} días",
+      scopes: {
+        read: "Lectura",
+        author: "Autoría",
+        invoke: "Invocación",
+        secret_reference: "Referencia a secretos",
+        destructive: "Destructivo",
+      },
+      scopeDescriptions: {
+        read: "Listar servidores, herramientas y metadatos de valores del servidor.",
+        author:
+          "Crear y editar servidores, herramientas y valores del servidor.",
+        invoke: "Invocar herramientas a través del MCP de plataforma.",
+        secret_reference:
+          "Referenciar ids de secretos existentes en la configuración de auth sin exponer valores.",
+        destructive:
+          "Eliminar servidores, herramientas y valores del servidor.",
+      },
     },
 
     profile: {

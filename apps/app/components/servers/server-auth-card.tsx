@@ -11,6 +11,7 @@ import { isAppErrorCode } from "@repo/core";
 import {
   Alert,
   AlertDescription,
+  Badge,
   Button,
   Card,
   CardContent,
@@ -45,6 +46,11 @@ export function ServerAuthCard({
     authFormFromInferred(auth),
   );
 
+  const protectedKeys = [
+    ...(auth.protectedKeys?.headers ?? []),
+    ...(auth.protectedKeys?.query ?? []),
+  ];
+
   const testResult = testConnection.data;
   const testPhrasing = (() => {
     if (!testResult) return null;
@@ -78,6 +84,24 @@ export function ServerAuthCard({
         <CardDescription>{t.servers.authDescription}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        {protectedKeys.length > 0 ? (
+          <div className="space-y-1.5">
+            <p className="text-xs text-muted-foreground">
+              {t.servers.authProtectedKeysLabel}
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {protectedKeys.map((key) => (
+                <Badge
+                  key={key}
+                  variant="outline"
+                  className="font-mono text-xs"
+                >
+                  {key}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <ServerAuthFields
           value={authForm}
           onChange={setAuthForm}

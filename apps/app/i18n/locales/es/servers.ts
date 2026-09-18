@@ -67,11 +67,11 @@ export const esServers = {
     iconPhotoDescription: "Sube una imagen JPG, PNG o WebP de hasta 5 MB.",
     invalidIconType: "Sube una imagen JPG, PNG o WebP.",
     iconTooLarge: "El icono debe pesar 5 MB o menos.",
-    variables: "Variables",
+    variables: "Valores del servidor",
     variablesDescription:
-      "Valores que las herramientas referencian por nombre. Las variables secretas se cifran y no se vuelven a mostrar.",
+      "Configuración y secretos que las herramientas referencian por nombre. Los valores secretos se cifran y no se vuelven a mostrar.",
     noVariables:
-      "Aún no hay variables. Añade un secreto para las API keys y déjalas fuera de las definiciones.",
+      "Aún no hay valores del servidor. Añade un secreto para las API keys y déjalas fuera de las definiciones.",
     variableName: "Nombre de variable",
     variableNamePlaceholder: "api_token",
     variableNameHint:
@@ -81,6 +81,8 @@ export const esServers = {
     variableValue: "Valor",
     variableSecret: "Secreta",
     variableSecretBadge: "Secreta",
+    variableConfigBadge: "Configuración",
+    variableAuthOwnedBadge: "Gestionado por Autenticación",
     variableHasValue: "Valor guardado",
     variableNoValue: "Sin valor",
     addVariable: "Añadir variable",
@@ -143,7 +145,7 @@ export const esServers = {
     defaultsUnsaved: "Cambios sin guardar",
     snippetTitle: "Snippet de conexión",
     snippetDescription:
-      "Pega esta URL en un cliente MCP y envía el token de agente como Bearer.",
+      "Pega esta URL en un cliente MCP y envía el token de agente como Bearer. Los 4xx/5xx del origen vuelven como errores de herramienta MCP con un envelope estructurado; la importación curl nunca guarda credenciales — configura Auth por separado.",
     createToken: "Crear token de agente",
     creatingToken: "Creando…",
     tokenShownOnce: "Copia este token ahora. No se volverá a mostrar.",
@@ -198,10 +200,14 @@ export const esServers = {
     authParamNamePlaceholder: "api_key",
     authParamValue: "Valor del parámetro",
     authValuePlaceholder: "Pega el secreto",
+    authQueryAckLabel:
+      "Entiendo que esta credencial aparecerá en URLs, registros del servidor e historial del navegador.",
     authUsername: "Usuario",
     authPassword: "Contraseña",
     authCustomHelp:
       "Este servidor usa una autenticación personalizada. Edita los headers o query por defecto abajo, o elige un tipo simple para reemplazar la credencial mapeada.",
+    authProtectedKeysLabel:
+      "Claves gestionadas por la autenticación (protegidas frente a herramientas y valores por defecto):",
     authTitle: "Autenticación",
     authDescription:
       "Las credenciales se guardan como secretos cifrados. No verás el valor de nuevo después de guardar.",
@@ -218,6 +224,7 @@ export const esServers = {
     invokeServerPaused:
       "Este servidor está en pausa. Reanúdalo para invocar herramientas.",
     resultStatus: "HTTP {status}",
+    resultError: "La solicitud al origen no se completó correctamente.",
     saveChanges: "Guardar cambios",
     savingChanges: "Guardando…",
     dangerZoneTitle: "Zona de peligro",
@@ -268,6 +275,18 @@ export const esServers = {
       boolean: "Booleano",
       json: "JSON",
     },
+    paramSensitive: "Sensible",
+    paramSensitiveHelp:
+      "Nunca se registra ni se muestra; se enmascara como contraseña en el playground.",
+    paramConstraints: "Restricciones",
+    paramMinLength: "Longitud mínima",
+    paramMaxLength: "Longitud máxima",
+    paramPattern: "Patrón (regex)",
+    paramPatternPlaceholder: "^[A-Z]{2}\\d+$",
+    paramMinimum: "Mínimo",
+    paramMaximum: "Máximo",
+    paramExamples: "Ejemplos",
+    paramExamplesPlaceholder: "valor1, valor2",
     warningPlaceholderWithoutParam:
       "{{name}} se usa pero no tiene parámetro ni variable declarada.",
     warningParamWithoutPlaceholder:
@@ -279,26 +298,50 @@ export const esServers = {
     curlParse: "Analizar",
     curlParsing: "Analizando…",
     curlPreviewDescription:
-      "Marca cada valor resaltado como parámetro del agente, variable guardada, o déjalo literal.",
+      "Marca cada valor resaltado como entrada del agente, o déjalo literal.",
     locations: {
       path: "Ruta",
       query: "Query",
       header: "Header",
-      body: "Body",
+      json: "Cuerpo",
+      form: "Cuerpo",
     },
-    markAsParam: "Parámetro del agente",
-    markAsVariable: "Variable",
+    markAsParam: "Entrada del agente",
     markAsLiteral: "Literal",
-    markSecret: "Secreta",
     markingAs: "Marcar como",
-    markingName: "Nombre de variable o parámetro",
+    markingName: "Nombre de la entrada del agente",
     markingNamePlaceholder: "nombre",
     invalidMarkingName:
-      "Nombre inválido: las variables empiezan con minúscula y solo usan minúsculas, dígitos y guiones bajos; los parámetros admiten mayúsculas.",
-    authPreMarked: "Credencial detectada — se guardará como variable secreta.",
+      "Nombre inválido: usa una letra minúscula seguida de minúsculas, dígitos o guiones bajos.",
+    credentialExcluded:
+      "Se excluyó la credencial detectada ({kind}, {header}). Configura la autenticación por separado en la tarjeta de Auth.",
     curlCreate: "Crear herramienta",
     curlBack: "Atrás",
-    captureReport: "Capturadas {variables} variables y {params} parámetros.",
+    curlImportSummary:
+      "Herramienta borrador creada y deshabilitada. Se encontraron {issues} problema(s) de validación — revísalos antes de habilitarla.",
+    curlImportCredentialsCta:
+      "Este comando curl incluía credenciales. Nunca se guardaron — configura la autenticación por separado abajo.",
+    curlGoToAuth: "Ir a Autenticación",
     viewCallLog: "Ver registro",
+    previewTitle: "Vista previa de la petición efectiva",
+    previewDescription:
+      "Compila la petición igual que lo hará el gateway, usando los valores del servidor y la autenticación actuales. Los valores secretos nunca se muestran.",
+    previewRun: "Previsualizar",
+    previewRunning: "Compilando…",
+    previewValid: "Esta petición compila sin problemas.",
+    previewSecretValue: "•••• (valor secreto)",
+    previewAgentInput: "entrada del agente",
+    previewSavedIssues:
+      "Esta herramienta tiene {count} problema(s) de compilación sin resolver desde el último guardado. Ejecuta la vista previa para ver los detalles.",
+    compileInvalidShort: "Corrige la compilación para habilitar",
+    annotationReadOnly: "Solo lectura",
+    annotationDestructive: "Destructiva",
+    annotationIdempotent: "Idempotente",
+    mutationConfirmTitle: "¿Revocar el permiso de mutación?",
+    mutationConfirmDescription:
+      "Esta herramienta envía una petición que muta datos. Desactivar Permitir mutación también la deshabilitará.",
+    mutationConfirmConfirm: "Revocar y deshabilitar",
+    enabledBlockedHelp:
+      "Esta herramienta no se puede habilitar hasta resolver los problemas de compilación anteriores.",
   },
 } as const;

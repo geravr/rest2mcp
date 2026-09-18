@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToolFormDialog, type ToolFormTool } from "./tool-form-dialog";
 
@@ -10,12 +11,39 @@ type SaveOptions = {
   }) => void;
 };
 
+type PreviewResult = {
+  ok: boolean;
+  issues: Array<{
+    path: string;
+    code: string;
+    message: string;
+    severity: "error" | "warning";
+  }>;
+  plan: unknown;
+};
+
 const createMutate = vi.fn<(input: unknown, options?: SaveOptions) => void>();
 const updateMutate = vi.fn<(input: unknown, options?: SaveOptions) => void>();
+const previewMutate = vi.fn<(input: unknown) => void>();
+let previewResultQueue: PreviewResult[] = [];
 
 vi.mock("@/hooks/use-mcp", () => ({
   useCreateMcpTool: () => ({ mutate: createMutate, isPending: false }),
   useUpdateMcpTool: () => ({ mutate: updateMutate, isPending: false }),
+  // A real useState-backed mock so `.data` reactively drives re-renders,
+  // mirroring the real TanStack Query mutation hook's behavior.
+  usePreviewToolCompile: () => {
+    const [data, setData] = useState<PreviewResult | undefined>(undefined);
+    return {
+      data,
+      isPending: false,
+      mutate: (input: unknown) => {
+        previewMutate(input);
+        const next = previewResultQueue.shift();
+        if (next) setData(next);
+      },
+    };
+  },
 }));
 
 const toolFixture: ToolFormTool = {
@@ -42,6 +70,44 @@ describe("ToolFormDialog", () => {
   beforeEach(() => {
     createMutate.mockReset();
     updateMutate.mockReset();
+    previewMutate.mockReset();
+    previewResultQueue = [];
+  });
+
+  it("blocks enabling a tool once the preview reports a compile error", async () => {
+    const user = userEvent.setup();
+    previewResultQueue = [
+      {
+        ok: false,
+        issues: [
+          {
+            path: "query.limit",
+            code: "MCP_TEMPLATE_UNRESOLVED",
+            message: "Placeholder has no declared source.",
+            severity: "error",
+          },
+        ],
+        plan: null,
+      },
+    ];
+
+    render(
+      <ToolFormDialog serverId="mcs_1" variableNames={[]} onClose={() => {}} />,
+    );
+
+    await user.type(screen.getByLabelText(/tool name/i), "search");
+    await user.type(screen.getByLabelText(/^path$/i), "/search");
+
+    expect(screen.getByLabelText(/^enabled$/i)).not.toBeDisabled();
+
+    await user.click(
+      screen.getByRole("button", { name: /effective request preview/i }),
+    );
+    await user.click(screen.getByRole("button", { name: /^preview$/i }));
+
+    expect(previewMutate).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/no declared source/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^enabled$/i)).toBeDisabled();
   });
 
   it("switches to editing the saved tool when the create returns warnings", async () => {

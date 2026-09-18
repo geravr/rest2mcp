@@ -5,6 +5,16 @@ export type AgentMeta = {
   description?: string;
   type: AgentParamType;
   required: boolean;
+  /** Never logged/previewed; masked as a password field in the playground. */
+  sensitive?: boolean;
+  minimum?: number;
+  maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+  enum?: Array<string | number | boolean>;
+  examples?: unknown[];
+  allowEmpty?: boolean;
 };
 
 export type ValueOrigin =
@@ -34,6 +44,15 @@ export function defaultAgentMeta(
     description: existing?.description,
     type: existing?.type ?? "string",
     required: existing?.required ?? true,
+    sensitive: existing?.sensitive,
+    minimum: existing?.minimum,
+    maximum: existing?.maximum,
+    minLength: existing?.minLength,
+    maxLength: existing?.maxLength,
+    pattern: existing?.pattern,
+    enum: existing?.enum,
+    examples: existing?.examples,
+    allowEmpty: existing?.allowEmpty,
   };
 }
 
@@ -358,6 +377,15 @@ export function collectAgentParams(origins: ValueOrigin[]): AgentMeta[] {
       description: origin.description,
       type: origin.type,
       required: origin.required,
+      sensitive: origin.sensitive,
+      minimum: origin.minimum,
+      maximum: origin.maximum,
+      minLength: origin.minLength,
+      maxLength: origin.maxLength,
+      pattern: origin.pattern,
+      enum: origin.enum,
+      examples: origin.examples,
+      allowEmpty: origin.allowEmpty,
     });
   }
   return params;
@@ -410,6 +438,34 @@ export function emptyFixedRow(): SourceRow {
   return { key: "", origin: "fixed", value: "" };
 }
 
+export type AgentConstraints = Pick<
+  AgentMeta,
+  | "minimum"
+  | "maximum"
+  | "minLength"
+  | "maxLength"
+  | "pattern"
+  | "enum"
+  | "examples"
+  | "allowEmpty"
+>;
+
+/** Comma-separated editor value for `enum`/`examples` lists (kept as strings). */
+export function joinCommaList(
+  values: Array<string | number | boolean> | unknown[] | undefined,
+): string {
+  if (!values || values.length === 0) return "";
+  return values.map((value) => String(value)).join(", ");
+}
+
+export function parseCommaList(text: string): string[] | undefined {
+  const items = text
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+  return items.length > 0 ? items : undefined;
+}
+
 export function originsFromPath(parts: PathPart[]): ValueOrigin[] {
   const origins: ValueOrigin[] = [];
   for (const part of parts) {
@@ -422,6 +478,15 @@ export function originsFromPath(parts: PathPart[]): ValueOrigin[] {
         description: part.description,
         type: part.type,
         required: part.required,
+        sensitive: part.sensitive,
+        minimum: part.minimum,
+        maximum: part.maximum,
+        minLength: part.minLength,
+        maxLength: part.maxLength,
+        pattern: part.pattern,
+        enum: part.enum,
+        examples: part.examples,
+        allowEmpty: part.allowEmpty,
       });
     }
   }

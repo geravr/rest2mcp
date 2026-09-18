@@ -69,6 +69,11 @@ export function ServerToolsTab({
   const [curlOpen, setCurlOpen] = useState(false);
   const atCap = (data?.total ?? 0) >= MCP_MAX_TOOLS;
   const variableNames = (variables.data ?? []).map((variable) => variable.name);
+  const variableRefs = (variables.data ?? []).map((variable) => ({
+    id: variable.id,
+    name: variable.name,
+    kind: variable.kind,
+  }));
 
   return (
     <div className="space-y-6">
@@ -126,31 +131,48 @@ export function ServerToolsTab({
                   {tool.pathTemplate}
                 </TableCell>
                 <TableCell>
-                  <Switch
-                    checked={tool.enabled}
-                    disabled={updateTool.isPending}
-                    onCheckedChange={(enabled) =>
-                      updateTool.mutate({
-                        serverId,
-                        toolId: tool.id,
-                        enabled,
-                        allowMutation: tool.allowMutation,
-                      })
-                    }
-                  />
+                  <div className="flex flex-col gap-1">
+                    <Switch
+                      checked={tool.enabled}
+                      disabled={
+                        updateTool.isPending || tool.compileStatus === "invalid"
+                      }
+                      onCheckedChange={(enabled) =>
+                        updateTool.mutate({
+                          serverId,
+                          toolId: tool.id,
+                          enabled,
+                          allowMutation: tool.allowMutation,
+                        })
+                      }
+                    />
+                    {tool.compileStatus === "invalid" ? (
+                      <span className="text-xs text-destructive">
+                        {t.servers.compileInvalidShort}
+                      </span>
+                    ) : null}
+                  </div>
                 </TableCell>
                 <TableCell>
                   <Switch
                     checked={tool.allowMutation}
                     disabled={updateTool.isPending}
-                    onCheckedChange={(allowMutation) =>
+                    onCheckedChange={(allowMutation) => {
+                      if (
+                        !allowMutation &&
+                        tool.allowMutation &&
+                        tool.enabled &&
+                        !window.confirm(t.servers.mutationConfirmDescription)
+                      ) {
+                        return;
+                      }
                       updateTool.mutate({
                         serverId,
                         toolId: tool.id,
                         allowMutation,
                         enabled: allowMutation ? tool.enabled : false,
-                      })
-                    }
+                      });
+                    }}
                   />
                 </TableCell>
                 <TableCell>
@@ -212,6 +234,7 @@ export function ServerToolsTab({
         <ToolFormDialog
           serverId={serverId}
           variableNames={variableNames}
+          variables={variableRefs}
           tool={formState.kind === "create" ? undefined : formState.tool}
           duplicate={formState.kind === "duplicate"}
           onClose={() => setFormState(null)}

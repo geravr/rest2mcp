@@ -45,6 +45,7 @@ export function ServerPlaygroundTab({
     body: string;
     httpStatus: number | null;
     callLogId: string | null;
+    ok: boolean;
   } | null>(null);
 
   const tool = tools.data?.items.find((item) => item.id === toolId) ?? null;
@@ -106,10 +107,32 @@ export function ServerPlaygroundTab({
       { serverId, toolId: tool.id, args },
       {
         onSuccess: (payload) => {
+          const envelope = payload.envelope;
+          const body =
+            envelope.data !== undefined
+              ? JSON.stringify(envelope, null, 2)
+              : (envelope.body ?? JSON.stringify(envelope, null, 2));
           setResult({
-            body: payload.body,
+            body,
             httpStatus: payload.httpStatus,
             callLogId: payload.callLogId,
+            ok: payload.ok,
+          });
+        },
+        onError: (error) => {
+          setResult({
+            body: JSON.stringify(
+              {
+                ok: false,
+                appCode: null,
+                message: resolveErrorMessage(error, t),
+              },
+              null,
+              2,
+            ),
+            httpStatus: null,
+            callLogId: null,
+            ok: false,
           });
         },
       },
@@ -213,9 +236,21 @@ export function ServerPlaygroundTab({
             ) : (
               <Input
                 id={`play-param-${param.name}`}
-                type={param.type === "number" ? "number" : "text"}
+                type={
+                  param.sensitive
+                    ? "password"
+                    : param.type === "number"
+                      ? "number"
+                      : "text"
+                }
                 value={typeof raw === "string" ? raw : ""}
                 onChange={(event) => setValue(param.name, event.target.value)}
+                autoComplete="off"
+                minLength={param.minLength}
+                maxLength={param.maxLength}
+                min={param.minimum}
+                max={param.maximum}
+                pattern={param.pattern}
                 className={cn(
                   showMissing && "border-destructive",
                   showInvalidNumber && "border-destructive",
@@ -272,6 +307,9 @@ export function ServerPlaygroundTab({
               </Link>
             ) : null}
           </div>
+          {!result.ok ? (
+            <p className="text-sm text-destructive">{t.servers.resultError}</p>
+          ) : null}
           <pre className="overflow-auto rounded-md bg-muted p-3 text-xs">
             {result.body}
           </pre>

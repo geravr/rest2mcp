@@ -10,7 +10,9 @@ export const enSettings = {
     platform: {
       title: "Platform MCP",
       description:
-        "Let your existing agent build servers and tools through a dedicated MCP.",
+        "Let your existing agent build servers and tools through a dedicated MCP. Tokens require scopes and expire; recreate after migration if your token was revoked.",
+      errorGuidance:
+        "Upstream 4xx/5xx complete as MCP tool errors with a structured envelope. Configure authentication in Studio separately — curl import never stores credentials.",
       urlLabel: "Endpoint",
       createToken: "Create platform token",
       creatingToken: "Creating...",
@@ -20,6 +22,26 @@ export const enSettings = {
       hasToken: "Active token prefix: {prefix}",
       noToken: "No active platform token.",
       copySnippet: "Copy snippet",
+      activeScopesLabel: "Scopes:",
+      expiresAtLabel: "Expires {date}",
+      scopesLabel: "Scopes for the next token",
+      expiryLabel: "Expires in",
+      expiryDays: "{days} days",
+      scopes: {
+        read: "Read",
+        author: "Author",
+        invoke: "Invoke",
+        secret_reference: "Secret reference",
+        destructive: "Destructive",
+      },
+      scopeDescriptions: {
+        read: "List servers, tools, and server value metadata.",
+        author: "Create and edit servers, tools, and server values.",
+        invoke: "Call tools through the platform MCP.",
+        secret_reference:
+          "Reference existing secret ids in auth configuration without exposing values.",
+        destructive: "Delete servers, tools, and server values.",
+      },
     },
 
     profile: {
