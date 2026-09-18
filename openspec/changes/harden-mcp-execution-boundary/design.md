@@ -117,7 +117,9 @@ Rollback restores the compatibility reader and old gateway result adapter. Becau
 
 ## Open Questions
 
-- What default call-log retention period should ship: 7, 14, or 30 days?
-- Which safe upstream response headers should be included beyond `content-type`, `location`, `link`, `etag`, and `retry-after`?
-- Should query-secret placement be warning-plus-confirmation or prohibited for newly configured auth?
-- What initial per-token rate and per-server concurrency limits fit expected production traffic?
+Resolved for the initial ship (see `apps/api/lib/mcp-policy.ts`):
+
+- Call-log retention: **14 days**.
+- Safe response headers: `content-type`, `location`, `link`, `etag`, `retry-after`, plus `cache-control`, `vary`, `x-request-id`, and common `x-ratelimit-*` headers.
+- Query-secret placement: **acknowledge** — allowed only with explicit exposure acknowledgement on auth configuration.
+- Initial limits (single-process): 60 req capacity / 1 per second refill per token; 20 mutation capacity / ~0.33 per second; 10 concurrent upstream calls per server; 256 KiB gateway request size; 15s full-request deadline.
