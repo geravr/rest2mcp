@@ -174,15 +174,99 @@ export async function assertResolvedAddressesSafe(
   }
 }
 
-export function assertSameHostRedirect(from: URL, location: string): URL {
-  const next = new URL(location, from);
-  if (next.hostname.toLowerCase() !== from.hostname.toLowerCase()) {
-    hostNotAllowed();
+function redirectRejected(): never {
+  throw appError({
+    appCode: APP_ERROR_CODES.MCP_REDIRECT_REJECTED,
+    message: "The upstream redirect was rejected by policy.",
+    status: 502,
+  });
+}
+
+/** Default port for a protocol, used to compare origins where one side omits an explicit port. */
+function effectivePort(url: URL): string {
+  if (url.port) return url.port;
+  return url.protocol === "https:" ? "443" : "80";
+}
+
+/**
+ * Same-origin redirect policy: identical protocol, hostname, and effective
+ * port. HTTPS-to-HTTP downgrades, port changes, and userinfo are rejected
+ * regardless of hostname match.
+ */
+export function assertSameOriginRedirect(from: URL, location: string): URL {
+  let next: URL;
+  try {
+    next = new URL(location, from);
+  } catch {
+    return redirectRejected();
   }
+
   if (next.protocol !== "http:" && next.protocol !== "https:") {
-    hostNotAllowed();
+    return redirectRejected();
+  }
+  if (next.username || next.password) {
+    return redirectRejected();
+  }
+  if (from.protocol === "https:" && next.protocol === "http:") {
+    return redirectRejected();
+  }
+  if (next.hostname.toLowerCase() !== from.hostname.toLowerCase()) {
+    return redirectRejected();
+  }
+  if (effectivePort(next) !== effectivePort(from)) {
+    return redirectRejected();
   }
   return next;
+}
+
+function decodePathSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
+/** Collapses `.`/`..` segments after percent-decoding each path segment. */
+function normalizeAndCollapsePath(path: string): string {
+  const isAbsolute = path.startsWith("/");
+  const stack: string[] = [];
+  for (const rawSegment of path.split("/")) {
+    const segment = decodePathSegment(rawSegment);
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") {
+      if (stack.length > 0) stack.pop();
+      continue;
+    }
+    stack.push(segment);
+  }
+  const joined = stack.join("/");
+  return isAbsolute ? `/${joined}` : joined;
+}
+
+/**
+ * Confines a resolved absolute path under the server's configured base path.
+ * Decodes percent-encoding and collapses dot segments before comparing, so
+ * encoded traversal (`%2e%2e`) is caught the same as literal `..`.
+ */
+export function assertPathWithinBase(
+  basePath: string,
+  absolutePath: string,
+): void {
+  const normalizedBase = normalizeAndCollapsePath(basePath || "/") || "/";
+  const normalizedPath = normalizeAndCollapsePath(absolutePath || "/") || "/";
+  const withinBase =
+    normalizedBase === "/"
+      ? normalizedPath.startsWith("/")
+      : normalizedPath === normalizedBase ||
+        normalizedPath.startsWith(`${normalizedBase}/`);
+  if (!withinBase) {
+    throw appError({
+      appCode: APP_ERROR_CODES.MCP_PATH_ESCAPE,
+      message: "The request path would escape the configured base path.",
+      status: 400,
+    });
+  }
 }
 
 export async function assertUpstreamUrlSafe(

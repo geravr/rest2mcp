@@ -9,24 +9,23 @@ vi.mock("node:dns/promises", () => ({
 }));
 
 import {
-  assertSameHostRedirect,
+  assertPathWithinBase,
+  assertSameOriginRedirect,
   assertUpstreamUrlSafe,
   isBlockedIpAddress,
 } from "./mcp-ssrf.js";
 
-function expectHostRejected(fn: () => unknown) {
-  expect(fn).toThrow(AppError);
+function expectAppCode(fn: () => unknown, appCode: string) {
   try {
     fn();
+    throw new Error("expected function to throw");
   } catch (error) {
     expect(error).toBeInstanceOf(AppError);
-    expect((error as AppError).appCode).toBe(
-      APP_ERROR_CODES.MCP_HOST_NOT_ALLOWED,
-    );
+    expect((error as AppError).appCode).toBe(appCode);
   }
 }
 
-describe("mcp-ssrf", () => {
+describe("mcp-ssrf: address policy", () => {
   beforeEach(() => {
     lookupMock.mockReset();
   });
@@ -73,21 +72,119 @@ describe("mcp-ssrf", () => {
     );
     expect(url.hostname).toBe("api.example.com");
   });
+});
 
-  it("rejects cross-host redirects", () => {
-    expectHostRejected(() =>
-      assertSameHostRedirect(
-        new URL("https://api.example.com/a"),
-        "https://evil.example/b",
-      ),
-    );
-  });
-
-  it("allows same-host redirects", () => {
-    const next = assertSameHostRedirect(
+describe("assertSameOriginRedirect", () => {
+  it("allows a same-origin relative redirect", () => {
+    const next = assertSameOriginRedirect(
       new URL("https://api.example.com/a"),
       "/b",
     );
     expect(next.toString()).toBe("https://api.example.com/b");
+  });
+
+  it("allows an explicit same-origin absolute redirect", () => {
+    const next = assertSameOriginRedirect(
+      new URL("https://api.example.com/a"),
+      "https://api.example.com/b",
+    );
+    expect(next.pathname).toBe("/b");
+  });
+
+  it("rejects a cross-host redirect", () => {
+    expectAppCode(
+      () =>
+        assertSameOriginRedirect(
+          new URL("https://api.example.com/a"),
+          "https://evil.example/b",
+        ),
+      APP_ERROR_CODES.MCP_REDIRECT_REJECTED,
+    );
+  });
+
+  it("rejects a port change even on the same hostname", () => {
+    expectAppCode(
+      () =>
+        assertSameOriginRedirect(
+          new URL("https://api.example.com/a"),
+          "https://api.example.com:8443/a",
+        ),
+      APP_ERROR_CODES.MCP_REDIRECT_REJECTED,
+    );
+  });
+
+  it("rejects an HTTPS-to-HTTP downgrade", () => {
+    expectAppCode(
+      () =>
+        assertSameOriginRedirect(
+          new URL("https://api.example.com/a"),
+          "http://api.example.com/a",
+        ),
+      APP_ERROR_CODES.MCP_REDIRECT_REJECTED,
+    );
+  });
+
+  it("rejects a redirect target carrying userinfo", () => {
+    expectAppCode(
+      () =>
+        assertSameOriginRedirect(
+          new URL("https://api.example.com/a"),
+          "https://user:pass@api.example.com/a",
+        ),
+      APP_ERROR_CODES.MCP_REDIRECT_REJECTED,
+    );
+  });
+
+  it("rejects a non-HTTP(S) redirect scheme", () => {
+    expectAppCode(
+      () =>
+        assertSameOriginRedirect(
+          new URL("https://api.example.com/a"),
+          "file:///etc/passwd",
+        ),
+      APP_ERROR_CODES.MCP_REDIRECT_REJECTED,
+    );
+  });
+
+  it("allows an explicit default port matching an implicit one", () => {
+    const next = assertSameOriginRedirect(
+      new URL("https://api.example.com/a"),
+      "https://api.example.com:443/b",
+    );
+    expect(next.pathname).toBe("/b");
+  });
+});
+
+describe("assertPathWithinBase", () => {
+  it("allows a path confined under the base path", () => {
+    expect(() => assertPathWithinBase("/v1", "/v1/contacts/1")).not.toThrow();
+  });
+
+  it("allows the base path itself", () => {
+    expect(() => assertPathWithinBase("/v1", "/v1")).not.toThrow();
+  });
+
+  it("rejects a literal dot-segment escape above the base path", () => {
+    expectAppCode(
+      () => assertPathWithinBase("/v1", "/v1/../../secret"),
+      APP_ERROR_CODES.MCP_PATH_ESCAPE,
+    );
+  });
+
+  it("rejects a percent-encoded dot-segment escape", () => {
+    expectAppCode(
+      () => assertPathWithinBase("/v1", "/v1/%2e%2e/%2e%2e/secret"),
+      APP_ERROR_CODES.MCP_PATH_ESCAPE,
+    );
+  });
+
+  it("allows a path that dot-segments back into the base path", () => {
+    expect(() =>
+      assertPathWithinBase("/v1", "/v1/contacts/../items"),
+    ).not.toThrow();
+  });
+
+  it("treats an empty base path as root, allowing any absolute path", () => {
+    expect(() => assertPathWithinBase("", "/anything/here")).not.toThrow();
   });
 });

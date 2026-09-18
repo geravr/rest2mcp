@@ -15,6 +15,7 @@ import { createAuth } from "./lib/auth.js";
 import type { AppContext } from "./lib/context.js";
 import { createDb } from "./lib/db.js";
 import { env } from "./lib/env.js";
+import { drainAuditQueue } from "./lib/mcp-audit-queue.js";
 import {
   errorHandler,
   notFoundHandler,
@@ -96,6 +97,7 @@ ensureSuperAdmin(db, env).catch((err) => {
 });
 
 async function shutdown() {
+  await drainAuditQueue(db);
   await shutdownPostHogClient(env);
   process.exit(0);
 }

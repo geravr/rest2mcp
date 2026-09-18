@@ -1,6 +1,13 @@
+import {
+  MCP_RESPONSE_BYTE_LIMIT,
+  MCP_UPSTREAM_DEADLINE_MS,
+} from "./mcp-policy.js";
+
 const LOG_SUMMARY_LIMIT = 64 * 1024;
-export const MCP_RESPONSE_LIMIT = 256 * 1024;
-export const MCP_UPSTREAM_TIMEOUT_MS = 15_000;
+/** Kept as an alias so existing callers do not need to migrate imports. */
+export const MCP_RESPONSE_LIMIT = MCP_RESPONSE_BYTE_LIMIT;
+/** Kept as an alias so existing callers do not need to migrate imports. */
+export const MCP_UPSTREAM_TIMEOUT_MS = MCP_UPSTREAM_DEADLINE_MS;
 export const MCP_MAX_TOOLS_PER_SERVER = 50;
 
 const SECRET_PATTERNS = [
