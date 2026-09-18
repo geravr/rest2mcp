@@ -7,6 +7,7 @@ import {
   isAuthHeaderName,
   normalizeAuthPaste,
   recipeToMapping,
+  serverAuthRecipeSchema,
 } from "./mcp-auth-recipe.js";
 
 describe("normalizeAuthPaste", () => {
@@ -89,6 +90,27 @@ describe("recipeToMapping", () => {
     expect(mapping.defaultHeadersPatch).toEqual({
       "X-Shopify-Access-Token": "{{x_shopify_access_token}}",
     });
+  });
+});
+
+describe("serverAuthRecipeSchema", () => {
+  it("accepts a query recipe with the exposure acknowledgement", () => {
+    const parsed = serverAuthRecipeSchema.parse({
+      type: "query",
+      paramName: "api_key",
+      value: "secret",
+      queryExposureAcknowledged: true,
+    });
+    expect(parsed).toMatchObject({ queryExposureAcknowledged: true });
+  });
+
+  it("allows the acknowledgement to be omitted at the schema level", () => {
+    const parsed = serverAuthRecipeSchema.parse({
+      type: "query",
+      paramName: "api_key",
+      value: "secret",
+    });
+    expect(parsed.type).toBe("query");
   });
 });
 

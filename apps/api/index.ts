@@ -16,16 +16,16 @@ export type { AppRouter } from "./lib/app.js";
 export type { AppContext } from "./lib/context.js";
 export type { ExecuteMappedToolResult } from "./services/mcp-executor-service.js";
 export type {
+  ConfirmCurlImportInput,
+  ConfirmCurlImportOptions,
+  CreatePlatformTokenInput,
   CreateServerInput,
-  CreateToolFromCurlInput,
   CreateToolInput,
-  CurlMarkableValue,
-  CurlPreview,
-  CurlValueMarking,
   McpHttpMethod,
   McpServerStatus,
   McpServerWithMeta,
   McpToolSource,
+  ServerValueReference,
   SetVariableInput,
   TemplateWarning,
   TestConnectionResult,
@@ -37,6 +37,11 @@ export type {
   InferredServerAuth,
   ServerAuthRecipe,
 } from "./lib/mcp-auth-recipe.js";
+export type {
+  CurlImportCredentialDiagnostic,
+  CurlImportMarking,
+  CurlImportPreview,
+} from "./lib/mcp-curl-import.js";
 // Re-export context type to fix TypeScript portability issues
 export type * from "./lib/context.js";
 

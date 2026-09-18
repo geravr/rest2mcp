@@ -14,9 +14,11 @@ describe("mcp router lifecycle procedures", () => {
     expect(source).toContain("testConnection: protectedProcedure");
   });
 
-  it("accepts value markings on curl imports", () => {
-    expect(source).toContain("markings");
-    expect(source).toMatch(/as:\s*z\.enum\(\["param", "variable"\]\)/);
+  it("uses the shared safe curl-import command schema for value markings", () => {
+    expect(source).toContain("createToolFromCurl: protectedProcedure");
+    expect(source).toMatch(
+      /createToolFromCurl:[\s\S]*?curlConfirmCommandSchema/,
+    );
   });
 
   it("accepts optional isSecret on updateVariable", () => {

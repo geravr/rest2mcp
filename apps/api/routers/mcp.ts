@@ -1,6 +1,13 @@
 import { paginationInputSchema } from "@repo/core";
 import { z } from "zod";
 import { serverAuthRecipeSchema } from "../lib/mcp-auth-recipe.js";
+import {
+  createLegacyToolCommandSchema,
+  createPlatformTokenCommandSchema,
+  curlConfirmCommandSchema,
+  previewToolCompileCommandSchema,
+  updateLegacyToolCommandSchema,
+} from "../lib/mcp-domain-commands.js";
 import { protectedProcedure, router } from "../lib/trpc.js";
 import { executeMappedTool } from "../services/mcp-executor-service.js";
 import {
@@ -22,6 +29,7 @@ import {
   listTools,
   listVariables,
   previewCurlImport,
+  previewToolCompile,
   resolveApiOrigin,
   revokePlatformToken,
   revokeServerToken,
@@ -31,29 +39,6 @@ import {
   updateTool,
   updateVariable,
 } from "../services/mcp-studio-service.js";
-
-const httpMethodSchema = z.enum([
-  "GET",
-  "HEAD",
-  "POST",
-  "PUT",
-  "PATCH",
-  "DELETE",
-]);
-
-const requestTemplateSchema = z.object({
-  query: z.record(z.string(), z.string()).optional(),
-  headers: z.record(z.string(), z.string()).optional(),
-  body: z.string().nullable().optional(),
-  bodyType: z.enum(["json", "form", "raw"]).optional(),
-});
-
-const toolParamSchema = z.object({
-  name: z.string().trim().min(1).max(100),
-  description: z.string().trim().max(500).optional(),
-  required: z.boolean(),
-  type: z.enum(["string", "number", "boolean", "json"]),
-});
 
 const templateMapSchema = z.record(z.string(), z.string().max(8_000));
 
@@ -163,49 +148,15 @@ export const mcpRouter = router({
     ),
 
   createTool: protectedProcedure
-    .input(
-      serverIdInput.extend({
-        name: z.string().trim().min(1).max(64),
-        description: z.string().trim().max(2000).nullable().optional(),
-        method: httpMethodSchema,
-        pathTemplate: z.string().trim().min(1).max(500),
-        requestTemplate: requestTemplateSchema.optional(),
-        params: z.array(toolParamSchema).max(50).optional(),
-        allowMutation: z.boolean().optional(),
-        enabled: z.boolean().optional(),
-      }),
-    )
+    .input(createLegacyToolCommandSchema)
     .mutation(({ ctx, input }) =>
       createTool(ctx.dbDirect, ctx.user.id, input.serverId, input),
     ),
 
   createToolFromCurl: protectedProcedure
-    .input(
-      serverIdInput.extend({
-        curl: z.string().trim().min(1).max(20_000),
-        name: z.string().trim().min(1).max(64).optional(),
-        description: z.string().trim().max(2000).nullable().optional(),
-        markings: z
-          .array(
-            z.object({
-              value: z.string().min(1).max(8_000),
-              as: z.enum(["param", "variable"]),
-              name: z.string().trim().min(1).max(100),
-              isSecret: z.boolean().optional(),
-            }),
-          )
-          .max(50)
-          .optional(),
-      }),
-    )
+    .input(curlConfirmCommandSchema)
     .mutation(({ ctx, input }) =>
-      createToolFromCurl(
-        ctx.dbDirect,
-        ctx.user.id,
-        input.serverId,
-        input,
-        ctx.env.MCP_CREDENTIAL_SECRET,
-      ),
+      createToolFromCurl(ctx.dbDirect, ctx.user.id, input.serverId, input),
     ),
 
   parseCurlPreview: protectedProcedure
@@ -219,19 +170,7 @@ export const mcpRouter = router({
     ),
 
   updateTool: protectedProcedure
-    .input(
-      serverIdInput.extend({
-        toolId: z.string().min(1),
-        name: z.string().trim().min(1).max(64).optional(),
-        description: z.string().trim().max(2000).nullable().optional(),
-        method: httpMethodSchema.optional(),
-        pathTemplate: z.string().trim().min(1).max(500).optional(),
-        requestTemplate: requestTemplateSchema.optional(),
-        params: z.array(toolParamSchema).max(50).optional(),
-        allowMutation: z.boolean().optional(),
-        enabled: z.boolean().optional(),
-      }),
-    )
+    .input(updateLegacyToolCommandSchema)
     .mutation(({ ctx, input }) =>
       updateTool(
         ctx.dbDirect,
@@ -246,6 +185,18 @@ export const mcpRouter = router({
     .input(serverIdInput.extend({ toolId: z.string().min(1) }))
     .mutation(({ ctx, input }) =>
       deleteTool(ctx.dbDirect, ctx.user.id, input.serverId, input.toolId),
+    ),
+
+  previewToolCompile: protectedProcedure
+    .input(previewToolCompileCommandSchema)
+    .mutation(({ ctx, input }) =>
+      previewToolCompile(ctx.db, ctx.user.id, input.serverId, {
+        method: input.method,
+        pathTemplate: input.pathTemplate,
+        requestTemplate: input.requestTemplate,
+        params: input.params,
+        allowMutation: input.allowMutation,
+      }),
     ),
 
   variables: protectedProcedure
@@ -338,16 +289,23 @@ export const mcpRouter = router({
         args: z.record(z.string(), z.unknown()).optional(),
       }),
     )
-    .mutation(({ ctx, input }) =>
-      executeMappedTool(ctx.dbDirect, {
+    .mutation(async ({ ctx, input }) => {
+      const result = await executeMappedTool(ctx.dbDirect, {
         serverId: input.serverId,
         ownerUserId: ctx.user.id,
         toolId: input.toolId,
         args: input.args,
         source: "playground",
         credentialSecret: ctx.env.MCP_CREDENTIAL_SECRET,
-      }),
-    ),
+      });
+      return {
+        ok: result.ok,
+        httpStatus: result.httpStatus,
+        envelope: result.envelope,
+        durationMs: result.durationMs,
+        callLogId: result.callLogId,
+      };
+    }),
 
   callLogs: protectedProcedure
     .input(serverIdInput.extend(paginationInputSchema.shape))
@@ -360,9 +318,9 @@ export const mcpRouter = router({
   ),
 
   createPlatformToken: protectedProcedure
-    .input(z.object({ name: z.string().trim().max(80).optional() }).optional())
+    .input(createPlatformTokenCommandSchema.optional())
     .mutation(({ ctx, input }) =>
-      createPlatformToken(ctx.dbDirect, ctx.user.id, input?.name),
+      createPlatformToken(ctx.dbDirect, ctx.user.id, input ?? {}),
     ),
 
   revokePlatformToken: protectedProcedure.mutation(({ ctx }) =>

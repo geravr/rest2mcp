@@ -8,8 +8,12 @@ import {
   mcpServer,
   mcpServerVariable,
   mcpTool,
+  type McpAuthConfigurationRow,
+  type McpNamedEntryRow,
+  type McpPlatformScopeRow,
   type McpRequestTemplate,
   type McpServer,
+  type McpServerVariable,
   type McpToolParam,
 } from "@repo/db";
 import { and, count, desc, eq, inArray, isNull } from "drizzle-orm";
@@ -19,15 +23,36 @@ import {
   allCredentialMappingKeys,
   inferServerAuth,
   inferredAuthOwnedKeys,
+  isAuthHeaderName,
   recipeToMapping,
-  serverHasMappedAuth,
   templatesReferenceVariable,
   type ServerAuthRecipe,
 } from "../lib/mcp-auth-recipe.js";
 import { generateAgentToken, hashAgentToken } from "../lib/mcp-agent-token.js";
+import type { CompileServerValueRef } from "../lib/mcp-compiler.js";
+import { compileToolDefinition } from "../lib/mcp-compiler.js";
+import {
+  buildCurlImportDraft,
+  detectCurlCredentials,
+  previewCurlImport as buildCurlImportPreview,
+  type CurlImportMarking,
+  type CurlImportPreview,
+} from "../lib/mcp-curl-import.js";
 import { encryptCredential } from "../lib/mcp-crypto.js";
-import { isAuthHeaderName, parseCurlCommand } from "../lib/mcp-curl.js";
+import {
+  analyzeLegacyTool,
+  analyzeLegacyCommonEntries,
+  legacyTemplateFromDefinition,
+} from "../lib/mcp-legacy-migrate.js";
+import {
+  MCP_DEFAULT_PLATFORM_SCOPES,
+  MCP_PLATFORM_TOKEN_TTL_MS,
+} from "../lib/mcp-policy.js";
 import { MCP_MAX_TOOLS_PER_SERVER } from "../lib/mcp-redact.js";
+import type {
+  McpAuthConfiguration,
+  McpCommonEntries,
+} from "../lib/mcp-request-definition.js";
 import { assertUpstreamUrlSafe } from "../lib/mcp-ssrf.js";
 import { assertOwnedStorageAccessUrl } from "../lib/storage.js";
 import {
@@ -445,49 +470,230 @@ export async function createServer(
   }
 }
 
-function collectServerTemplateStrings(
-  server: Pick<McpServer, "defaultHeaders" | "defaultQuery">,
-  tools: Array<{
-    pathTemplate: string;
-    requestTemplate: McpRequestTemplate | null;
-  }>,
-): string[] {
-  const templates: string[] = [
-    ...Object.values(server.defaultHeaders ?? {}),
-    ...Object.values(server.defaultQuery ?? {}),
-  ];
-  for (const tool of tools) {
-    templates.push(tool.pathTemplate);
-    const request = tool.requestTemplate;
-    if (!request) continue;
-    templates.push(...Object.values(request.headers ?? {}));
-    templates.push(...Object.values(request.query ?? {}));
-    if (request.body) templates.push(request.body);
-  }
-  return templates;
+async function findVariableByName(
+  db: DB,
+  serverId: string,
+  name: string,
+): Promise<McpServerVariable | undefined> {
+  const [row] = await db
+    .select()
+    .from(mcpServerVariable)
+    .where(
+      and(
+        eq(mcpServerVariable.serverId, serverId),
+        eq(mcpServerVariable.name, name),
+      ),
+    )
+    .limit(1);
+  return row;
 }
 
-async function upsertSecretVariable(
+/**
+ * Finds a free slot for an auth-owned secret with the recipe's default name,
+ * or a distinct name when that one is already taken by a manual value. Never
+ * renames or reuses the manual row; auth always ends up owning a distinct
+ * value instead. Returns the existing row when the resolved name already
+ * belongs to an auth-owned (or legacy, ownerless) value, so the caller can
+ * rotate it in place instead of attempting a colliding insert.
+ */
+async function pickAuthOwnedVariableName(
+  db: DB,
+  serverId: string,
+  desiredName: string,
+): Promise<{ name: string; existing?: McpServerVariable }> {
+  let attempt = desiredName;
+  let suffix = 1;
+  for (;;) {
+    const existing = await findVariableByName(db, serverId, attempt);
+    if (!existing) return { name: attempt };
+    if (existing.owner !== "manual") return { name: attempt, existing };
+    suffix += 1;
+    attempt = `${desiredName}_auth${suffix > 2 ? `_${suffix}` : ""}`;
+  }
+}
+
+/** Upserts an auth-owned secret by row id (rotate) or creates a fresh one. */
+async function upsertAuthSecretVariable(
   db: DB,
   serverId: string,
   name: string,
   plaintext: string,
   credentialSecret: string,
-): Promise<void> {
-  await upsertCapturedVariable(
-    db,
-    serverId,
-    name,
-    plaintext,
-    true,
-    credentialSecret,
+  existingId?: string,
+): Promise<{ id: string; name: string }> {
+  const ciphertext = encryptCredential(plaintext, credentialSecret);
+  if (existingId) {
+    const [updated] = await db
+      .update(mcpServerVariable)
+      .set({
+        name,
+        isSecret: true,
+        kind: "secret",
+        owner: "auth",
+        value: null,
+        ciphertext,
+      })
+      .where(eq(mcpServerVariable.id, existingId))
+      .returning();
+    return { id: updated.id, name: updated.name };
+  }
+  const [created] = await db
+    .insert(mcpServerVariable)
+    .values({
+      serverId,
+      name,
+      isSecret: true,
+      kind: "secret",
+      owner: "auth",
+      ciphertext,
+    })
+    .returning();
+  return { id: created.id, name: created.name };
+}
+
+export type ServerValueReference = {
+  kind: "auth" | "common" | "tool";
+  id: string;
+  name?: string;
+};
+
+function bindingReferencesValue(binding: unknown, valueId: string): boolean {
+  return (
+    !!binding &&
+    typeof binding === "object" &&
+    (binding as { kind?: unknown }).kind === "serverValue" &&
+    (binding as { serverValueId?: unknown }).serverValueId === valueId
   );
+}
+
+/** Deep-scans a stored JSON tree (request definition or common entries) for a `serverValue` binding. */
+function definitionReferencesValue(node: unknown, valueId: string): boolean {
+  if (!node || typeof node !== "object") return false;
+  if (Array.isArray(node)) {
+    return node.some((item) => definitionReferencesValue(item, valueId));
+  }
+  if (bindingReferencesValue(node, valueId)) return true;
+  return Object.values(node as Record<string, unknown>).some((value) =>
+    definitionReferencesValue(value, valueId),
+  );
+}
+
+/** Every place (auth, common values, or a tool) that currently uses this server value. */
+export async function findServerValueReferences(
+  db: DB,
+  server: McpServer,
+  valueId: string,
+  valueName: string,
+): Promise<ServerValueReference[]> {
+  const references: ServerValueReference[] = [];
+
+  const authConfig = server.authConfiguration as McpAuthConfigurationRow | null;
+  if (
+    authConfig &&
+    (authConfig.bindings.some((binding) => binding.serverValueId === valueId) ||
+      authConfig.basicUsernameValueId === valueId ||
+      authConfig.basicPasswordValueId === valueId)
+  ) {
+    references.push({ kind: "auth", id: server.id, name: "Authentication" });
+  }
+
+  const commonEntries = server.commonEntries as {
+    headers: McpNamedEntryRow[];
+    query: McpNamedEntryRow[];
+  } | null;
+  const commonHit =
+    !!commonEntries &&
+    [...commonEntries.headers, ...commonEntries.query].some((entry) =>
+      bindingReferencesValue(entry.value, valueId),
+    );
+  const legacyCommonHit = templatesReferenceVariable(valueName, [
+    ...Object.values(server.defaultHeaders ?? {}),
+    ...Object.values(server.defaultQuery ?? {}),
+  ]);
+  if (commonHit || legacyCommonHit) {
+    references.push({ kind: "common", id: server.id, name: "Common values" });
+  }
+
+  const tools = await db
+    .select({
+      id: mcpTool.id,
+      name: mcpTool.name,
+      requestDefinition: mcpTool.requestDefinition,
+      pathTemplate: mcpTool.pathTemplate,
+      requestTemplate: mcpTool.requestTemplate,
+    })
+    .from(mcpTool)
+    .where(eq(mcpTool.serverId, server.id));
+
+  for (const tool of tools) {
+    const definitionHit = definitionReferencesValue(
+      tool.requestDefinition,
+      valueId,
+    );
+    const legacyHit = templatesReferenceVariable(valueName, [
+      tool.pathTemplate,
+      ...Object.values(tool.requestTemplate?.headers ?? {}),
+      ...Object.values(tool.requestTemplate?.query ?? {}),
+      ...(tool.requestTemplate?.body ? [tool.requestTemplate.body] : []),
+    ]);
+    if (definitionHit || legacyHit) {
+      references.push({ kind: "tool", id: tool.id, name: tool.name });
+    }
+  }
+
+  return references;
+}
+
+/** Header/query keys currently owned by authentication; never overridable elsewhere. */
+function protectedAuthKeys(server: McpServer): {
+  headers: Set<string>;
+  query: Set<string>;
+} {
+  const authConfig = server.authConfiguration as McpAuthConfigurationRow | null;
+  const headers = new Set<string>();
+  const query = new Set<string>();
+  for (const binding of authConfig?.bindings ?? []) {
+    if (binding.location === "header") headers.add(binding.key.toLowerCase());
+    else query.add(binding.key);
+  }
+  return { headers, query };
+}
+
+function assertNoProtectedAuthOverride(
+  server: McpServer,
+  headers: Record<string, string> | null | undefined,
+  query: Record<string, string> | null | undefined,
+): void {
+  const protectedKeys = protectedAuthKeys(server);
+  for (const key of Object.keys(headers ?? {})) {
+    if (protectedKeys.headers.has(key.toLowerCase())) {
+      throw appError({
+        appCode: APP_ERROR_CODES.MCP_COMPILE_INVALID,
+        message: `"${key}" is owned by authentication and cannot be set here.`,
+        status: 400,
+      });
+    }
+  }
+  for (const key of Object.keys(query ?? {})) {
+    if (protectedKeys.query.has(key)) {
+      throw appError({
+        appCode: APP_ERROR_CODES.MCP_COMPILE_INVALID,
+        message: `"${key}" is owned by authentication and cannot be set here.`,
+        status: 400,
+      });
+    }
+  }
 }
 
 /**
  * Apply an auth recipe onto an already-loaded server row inside a transaction.
- * Replaces previous recipe keys only; unrelated defaults (e.g. Version) stay.
- * `none` clears every credential default (including Custom multi-key setups).
+ * Persists an explicit `authConfiguration` referencing auth-owned secret ids
+ * and dual-writes the legacy `defaultHeaders`/`defaultQuery` templates for
+ * rollback compatibility. Secrets are always created/rotated with
+ * `owner: "auth"`; a manual value with a colliding name is never reused,
+ * overwritten, or deleted — auth picks a distinct name instead. `none`
+ * clears every auth-owned binding (including Custom multi-key setups) but
+ * never touches a manual value.
  */
 export async function applyAuthRecipe(
   db: DB,
@@ -495,44 +701,157 @@ export async function applyAuthRecipe(
   recipe: ServerAuthRecipe,
   credentialSecret: string,
 ): Promise<McpServer> {
+  if (recipe.type === "query" && !recipe.queryExposureAcknowledged) {
+    throw appError({
+      appCode: APP_ERROR_CODES.MCP_AUTH_ACK_REQUIRED,
+      message:
+        "Placing authentication in the query string requires explicit exposure acknowledgement.",
+      status: 400,
+    });
+  }
+
   const mapping = recipeToMapping(recipe);
-  const previous = inferServerAuth(server.defaultHeaders, server.defaultQuery);
-  const typedOwned = inferredAuthOwnedKeys(previous);
-  const previousOwned =
-    recipe.type === "none"
+  const previousAuthConfig =
+    (server.authConfiguration as McpAuthConfigurationRow | null) ?? null;
+
+  // Ownership tracking prefers the explicit configuration. Servers that
+  // predate it (no `authConfiguration` row yet) fall back to the same
+  // name-based inference the legacy reader has always used, purely so
+  // rotating/clearing auth on those servers keeps working during migration.
+  const legacyInferred = previousAuthConfig
+    ? null
+    : inferServerAuth(server.defaultHeaders, server.defaultQuery);
+  const legacyOwnedKeys = legacyInferred
+    ? inferredAuthOwnedKeys(legacyInferred)
+    : null;
+  const legacyAllOwnedKeys =
+    !previousAuthConfig && recipe.type === "none"
       ? allCredentialMappingKeys(server.defaultHeaders, server.defaultQuery)
-      : {
-          headerKeys: typedOwned.headerKeys,
-          queryKeys: typedOwned.queryKeys,
-          variableNames: typedOwned.variableName
-            ? [typedOwned.variableName]
-            : [],
-        };
+      : null;
+
+  const previousHeaderKeys = previousAuthConfig
+    ? previousAuthConfig.bindings
+        .filter((binding) => binding.location === "header")
+        .map((binding) => binding.key)
+    : (legacyAllOwnedKeys?.headerKeys ?? legacyOwnedKeys?.headerKeys ?? []);
+  const previousQueryKeys = previousAuthConfig
+    ? previousAuthConfig.bindings
+        .filter((binding) => binding.location === "query")
+        .map((binding) => binding.key)
+    : (legacyAllOwnedKeys?.queryKeys ?? legacyOwnedKeys?.queryKeys ?? []);
+
+  const previousOwnedValueIds = new Set<string>();
+  for (const binding of previousAuthConfig?.bindings ?? []) {
+    previousOwnedValueIds.add(binding.serverValueId);
+  }
+  if (previousAuthConfig?.basicUsernameValueId) {
+    previousOwnedValueIds.add(previousAuthConfig.basicUsernameValueId);
+  }
+  if (previousAuthConfig?.basicPasswordValueId) {
+    previousOwnedValueIds.add(previousAuthConfig.basicPasswordValueId);
+  }
+  const previousOwnedVariableNames = new Set<string>();
+  if (!previousAuthConfig) {
+    for (const name of legacyAllOwnedKeys?.variableNames ??
+      (legacyOwnedKeys?.variableName ? [legacyOwnedKeys.variableName] : [])) {
+      previousOwnedVariableNames.add(name);
+    }
+  }
 
   const nextHeaders: Record<string, string> = {
     ...(server.defaultHeaders ?? {}),
   };
-  for (const key of previousOwned.headerKeys) {
-    delete nextHeaders[key];
-  }
-  Object.assign(nextHeaders, mapping.defaultHeadersPatch);
-
   const nextQuery: Record<string, string> = {
     ...(server.defaultQuery ?? {}),
   };
-  for (const key of previousOwned.queryKeys) {
-    delete nextQuery[key];
-  }
-  Object.assign(nextQuery, mapping.defaultQueryPatch);
+  for (const key of previousHeaderKeys) delete nextHeaders[key];
+  for (const key of previousQueryKeys) delete nextQuery[key];
+
+  let authConfiguration: McpAuthConfigurationRow | null = null;
+  let ownedRowId: string | undefined;
 
   if (mapping.variableName && mapping.plaintext !== null) {
-    await upsertSecretVariable(
+    const previousId = previousAuthConfig?.bindings[0]?.serverValueId;
+    const legacyPreviousName = !previousAuthConfig
+      ? (legacyOwnedKeys?.variableName ?? null)
+      : null;
+
+    let previousRow: McpServerVariable | undefined;
+    if (previousId) {
+      previousRow = await db
+        .select()
+        .from(mcpServerVariable)
+        .where(eq(mcpServerVariable.id, previousId))
+        .limit(1)
+        .then((rows) => rows[0]);
+    } else if (legacyPreviousName) {
+      previousRow = await findVariableByName(db, server.id, legacyPreviousName);
+    }
+
+    // Rotate the same row only when it is still auth-owned *and* the recipe
+    // did not change the target name (e.g. bearer -> bearer with a new
+    // token). Any other case — including a recipe-type switch — resolves a
+    // fresh, possibly renamed, auth-owned slot so a leftover row from the
+    // previous recipe never gets silently repurposed under the wrong name.
+    const canReuse =
+      !!previousRow &&
+      previousRow.owner !== "manual" &&
+      previousRow.name === mapping.variableName;
+
+    let variableName = mapping.variableName;
+    let targetRow = previousRow;
+    if (!canReuse) {
+      const resolved = await pickAuthOwnedVariableName(
+        db,
+        server.id,
+        mapping.variableName,
+      );
+      variableName = resolved.name;
+      targetRow = resolved.existing;
+    }
+
+    const ownedRow = await upsertAuthSecretVariable(
       db,
       server.id,
-      mapping.variableName,
+      variableName,
       mapping.plaintext,
       credentialSecret,
+      targetRow?.id,
     );
+    ownedRowId = ownedRow.id;
+
+    // Rebuild the injected value against the *final* resolved name — a
+    // collision-driven rename (manual value protection) must not leave the
+    // header/query template pointing at the originally desired name.
+    const authValueTemplate =
+      recipe.type === "bearer"
+        ? `Bearer {{${variableName}}}`
+        : recipe.type === "basic"
+          ? `Basic {{${variableName}}}`
+          : `{{${variableName}}}`;
+    for (const headerKey of mapping.headerKeys) {
+      nextHeaders[headerKey] = authValueTemplate;
+    }
+    for (const queryKey of mapping.queryKeys) {
+      nextQuery[queryKey] = authValueTemplate;
+    }
+
+    authConfiguration = {
+      kind: recipe.type,
+      bindings: [
+        ...mapping.headerKeys.map((key) => ({
+          location: "header" as const,
+          key,
+          serverValueId: ownedRow.id,
+        })),
+        ...mapping.queryKeys.map((key) => ({
+          location: "query" as const,
+          key,
+          serverValueId: ownedRow.id,
+        })),
+      ],
+      ...(recipe.type === "query" ? { queryExposureAcknowledged: true } : {}),
+    };
   }
 
   const [updated] = await db
@@ -540,33 +859,40 @@ export async function applyAuthRecipe(
     .set({
       defaultHeaders: Object.keys(nextHeaders).length > 0 ? nextHeaders : null,
       defaultQuery: Object.keys(nextQuery).length > 0 ? nextQuery : null,
+      authConfiguration,
       updatedAt: new Date(),
     })
     .where(eq(mcpServer.id, server.id))
     .returning();
 
-  const tools = await db
-    .select({
-      pathTemplate: mcpTool.pathTemplate,
-      requestTemplate: mcpTool.requestTemplate,
-    })
-    .from(mcpTool)
-    .where(eq(mcpTool.serverId, server.id));
+  const cleanupCandidates: Array<() => Promise<McpServerVariable | undefined>> =
+    previousOwnedValueIds.size > 0
+      ? [...previousOwnedValueIds]
+          .filter((id) => id !== ownedRowId)
+          .map((id) => async () => {
+            const [row] = await db
+              .select()
+              .from(mcpServerVariable)
+              .where(eq(mcpServerVariable.id, id))
+              .limit(1);
+            return row;
+          })
+      : [...previousOwnedVariableNames].map((name) => async () => {
+          const row = await findVariableByName(db, server.id, name);
+          return row?.id === ownedRowId ? undefined : row;
+        });
 
-  const remainingTemplates = collectServerTemplateStrings(updated, tools);
-  for (const priorVariable of previousOwned.variableNames) {
-    if (priorVariable === mapping.variableName) continue;
-    if (templatesReferenceVariable(priorVariable, remainingTemplates)) {
-      continue;
-    }
-    await db
-      .delete(mcpServerVariable)
-      .where(
-        and(
-          eq(mcpServerVariable.serverId, server.id),
-          eq(mcpServerVariable.name, priorVariable),
-        ),
-      );
+  for (const loadCandidate of cleanupCandidates) {
+    const row = await loadCandidate();
+    if (!row || row.owner === "manual") continue;
+    const references = await findServerValueReferences(
+      db,
+      updated,
+      row.id,
+      row.name,
+    );
+    if (references.length > 0) continue;
+    await db.delete(mcpServerVariable).where(eq(mcpServerVariable.id, row.id));
   }
 
   return updated;
@@ -585,9 +911,63 @@ export async function setServerAuth(
     const [withMeta] = await attachTrafficLight(tx, [updated]);
     return {
       ...withMeta,
-      auth: inferServerAuth(updated.defaultHeaders, updated.defaultQuery),
+      auth: describeServerAuth(updated),
     };
   });
+}
+
+/**
+ * Auth summary derived from the explicit configuration (name/key only, never
+ * the secret value). `protectedKeys` lists header/query keys owned by
+ * authentication so Studio editors can mark them read-only elsewhere.
+ */
+export function describeServerAuth(server: McpServer): {
+  type: McpAuthConfigurationRow["kind"];
+  protectedKeys: { headers: string[]; query: string[] };
+} {
+  const authConfig = server.authConfiguration as McpAuthConfigurationRow | null;
+  const headers: string[] = [];
+  const query: string[] = [];
+  for (const binding of authConfig?.bindings ?? []) {
+    if (binding.location === "header") headers.push(binding.key);
+    else query.push(binding.key);
+  }
+  return {
+    type: authConfig?.kind ?? "none",
+    protectedKeys: { headers, query },
+  };
+}
+
+/** Lightweight name lookups used to verify destructive-op confirmation strings. */
+export async function getServerName(
+  db: DB,
+  userId: string,
+  serverId: string,
+): Promise<string> {
+  const server = await requireOwnedServer(db, userId, serverId);
+  return server.name;
+}
+
+export async function getToolName(
+  db: DB,
+  userId: string,
+  serverId: string,
+  toolId: string,
+): Promise<string> {
+  await requireOwnedServer(db, userId, serverId);
+  const [tool] = await db
+    .select({ name: mcpTool.name })
+    .from(mcpTool)
+    .where(and(eq(mcpTool.id, toolId), eq(mcpTool.serverId, serverId)))
+    .limit(1);
+  if (!tool) {
+    throw appError({
+      appCode: APP_ERROR_CODES.MCP_TOOL_NOT_FOUND,
+      message: "MCP tool not found.",
+      status: 404,
+    });
+  }
+  return tool.name;
 }
 
 export async function getServer(db: DB, userId: string, serverId: string) {
@@ -604,7 +984,7 @@ export async function getServer(db: DB, userId: string, serverId: string) {
     ...withMeta,
     tools,
     variables,
-    auth: inferServerAuth(server.defaultHeaders, server.defaultQuery),
+    auth: describeServerAuth(server),
     recipe: toRecipeTemplate({
       name: server.name,
       description: server.description,
@@ -652,6 +1032,13 @@ export async function updateServer(
 
   if (input.defaultHeaders) {
     assertNoPlaintextSecretHeaders(input.defaultHeaders);
+  }
+  if (input.defaultHeaders !== undefined || input.defaultQuery !== undefined) {
+    assertNoProtectedAuthOverride(
+      server,
+      input.defaultHeaders,
+      input.defaultQuery,
+    );
   }
 
   let nextIconImage = server.iconImage ?? null;
@@ -825,6 +1212,90 @@ function validateToolTemplates(input: {
   assertNoPlaintextSecretHeaders(input.requestTemplate.headers ?? {});
 }
 
+type CompiledToolPersistence = {
+  requestDefinition: Record<string, unknown> | null;
+  compiledPlan: Record<string, unknown> | null;
+  compileStatus: "valid" | "invalid" | "legacy";
+  compileIssues: Array<{
+    path: string;
+    code: string;
+    message: string;
+    severity: "error" | "warning";
+  }>;
+  annotations: Record<string, unknown> | null;
+  enabled: boolean;
+};
+
+async function compileLegacyToolForPersistence(
+  db: DB,
+  server: McpServer,
+  input: {
+    method: string;
+    pathTemplate: string;
+    requestTemplate: McpRequestTemplate;
+    params: McpToolParam[];
+    allowMutation: boolean;
+    enabled: boolean;
+  },
+): Promise<CompiledToolPersistence> {
+  const serverValues = await loadCompileServerValueRefs(db, server.id);
+  const analysis = analyzeLegacyTool({
+    method: input.method,
+    pathTemplate: input.pathTemplate,
+    requestTemplate: input.requestTemplate,
+    params: input.params,
+    serverValues,
+  });
+
+  if (!analysis.unambiguous || !analysis.definition) {
+    return {
+      requestDefinition: null,
+      compiledPlan: null,
+      compileStatus: "invalid",
+      compileIssues: analysis.issues,
+      annotations: null,
+      enabled: false,
+    };
+  }
+
+  const commonEntries = resolveCommonEntriesForCompile(server, serverValues);
+  const authConfiguration =
+    (server.authConfiguration as unknown as McpAuthConfiguration | null) ??
+    null;
+  const compileResult = compileToolDefinition({
+    method: input.method,
+    definition: analysis.definition,
+    common: commonEntries,
+    auth: authConfiguration,
+    serverValues,
+    basePath: (() => {
+      try {
+        return new URL(server.baseUrl).pathname || "/";
+      } catch {
+        return "/";
+      }
+    })(),
+    allowMutation: input.allowMutation,
+  });
+
+  const issues = [...analysis.issues, ...compileResult.issues];
+  const ok = compileResult.ok;
+  return {
+    requestDefinition: analysis.definition as unknown as Record<
+      string,
+      unknown
+    >,
+    compiledPlan:
+      (compileResult.plan as Record<string, unknown> | null) ?? null,
+    compileStatus: ok ? "valid" : "invalid",
+    compileIssues: issues,
+    annotations:
+      (compileResult.plan?.annotations as
+        Record<string, unknown> | undefined) ?? null,
+    enabled: ok ? input.enabled : false,
+  };
+}
+
 export async function createTool(
   db: DB,
   userId: string,
@@ -856,6 +1327,14 @@ export async function createTool(
     params,
     variableNames: await listVariableNames(db, server.id),
   });
+  const compiled = await compileLegacyToolForPersistence(db, server, {
+    method,
+    pathTemplate,
+    requestTemplate,
+    params,
+    allowMutation: flags.allowMutation,
+    enabled: flags.enabled,
+  });
 
   try {
     const [created] = await db
@@ -868,13 +1347,18 @@ export async function createTool(
         pathTemplate,
         requestTemplate,
         params,
+        requestDefinition: compiled.requestDefinition,
+        compiledPlan: compiled.compiledPlan,
+        compileStatus: compiled.compileStatus,
+        compileIssues: compiled.compileIssues,
+        annotations: compiled.annotations,
         allowMutation: flags.allowMutation,
-        enabled: flags.enabled,
+        enabled: compiled.enabled,
         source,
       })
       .returning();
     await promoteServerIfReady(db, server.id, server.status);
-    return { ...created, warnings };
+    return { ...created, warnings, compileIssues: compiled.compileIssues };
   } catch (error) {
     if (isUniqueViolation(error)) {
       throw appError({
@@ -887,456 +1371,250 @@ export async function createTool(
   }
 }
 
-export function toolPathFromCurl(
-  serverBaseUrl: string,
-  curlUrl: string,
-): {
-  pathTemplate: string;
-  query: Record<string, string>;
-} {
-  const target = new URL(curlUrl);
-  const base = new URL(serverBaseUrl);
-  let pathTemplate = target.pathname || "/";
-  if (
-    target.origin === base.origin &&
-    pathTemplate.startsWith(base.pathname) &&
-    base.pathname !== "/"
-  ) {
-    pathTemplate = pathTemplate.slice(base.pathname.length) || "/";
-    if (!pathTemplate.startsWith("/")) pathTemplate = `/${pathTemplate}`;
-  }
-  const query: Record<string, string> = {};
-  target.searchParams.forEach((value, key) => {
-    query[key] = value;
-  });
-  return { pathTemplate, query };
-}
-
-function inferBodyType(
-  headers: Record<string, string>,
-  body: string | null,
-): "json" | "form" | "raw" | undefined {
-  if (body === null) return undefined;
-  const contentType = Object.entries(headers).find(
-    ([name]) => name.toLowerCase() === "content-type",
-  )?.[1];
-  if (contentType?.includes("application/x-www-form-urlencoded")) return "form";
-  if (contentType?.toLowerCase().includes("json")) return "json";
-  return "raw";
-}
-
-/** Deterministic variable name for a credential captured from curl. */
-export function capturedVariableName(
-  scheme: "bearer" | "api_key" | "header",
-  headerName: string,
-): string {
-  if (scheme === "bearer") return "api_token";
-  if (scheme === "api_key") return "api_key";
-  const slug = headerName
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-  return VARIABLE_NAME_PATTERN.test(slug) ? slug : "auth_secret";
-}
-
-async function upsertCapturedVariable(
+async function loadCompileServerValueRefs(
   db: DB,
   serverId: string,
-  name: string,
-  plaintext: string,
-  isSecret: boolean,
-  credentialSecret: string,
-): Promise<void> {
-  const stored = isSecret
-    ? {
-        isSecret: true,
-        value: null,
-        ciphertext: encryptCredential(plaintext, credentialSecret),
-      }
-    : { isSecret: false, value: plaintext, ciphertext: null };
-  const [existing] = await db
-    .select({ id: mcpServerVariable.id })
+): Promise<CompileServerValueRef[]> {
+  const rows = await db
+    .select()
     .from(mcpServerVariable)
-    .where(
-      and(
-        eq(mcpServerVariable.serverId, serverId),
-        eq(mcpServerVariable.name, name),
-      ),
-    )
-    .limit(1);
-
-  if (existing) {
-    await db
-      .update(mcpServerVariable)
-      .set(stored)
-      .where(eq(mcpServerVariable.id, existing.id));
-    return;
-  }
-  await db.insert(mcpServerVariable).values({ serverId, name, ...stored });
+    .where(eq(mcpServerVariable.serverId, serverId));
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    kind:
+      (row.kind as "config" | "secret" | null) ??
+      (row.isSecret ? "secret" : "config"),
+    owner: (row.owner as "manual" | "auth" | null) ?? "manual",
+  }));
 }
 
-export type CurlMarkableValue = {
-  value: string;
-  location: "path" | "query" | "header" | "body";
-  /** Query key, header name, or JSON path for body values; null otherwise. */
-  key: string | null;
-};
-
-export type CurlPreview = {
-  method: McpHttpMethod;
-  pathTemplate: string;
-  query: Record<string, string>;
-  headers: Record<string, string>;
-  body: string | null;
-  bodyType: "json" | "form" | "raw" | undefined;
-  auth: {
-    scheme: "bearer" | "api_key" | "header";
-    headerName: string;
-    value: string;
-    variableName: string;
-  } | null;
-  values: CurlMarkableValue[];
-};
-
-function collectJsonLeafValues(
-  value: unknown,
-  path: string,
-  out: CurlMarkableValue[],
-  seen: Set<string>,
-): void {
-  if (
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    const text = String(value);
-    if (text.length === 0) return;
-    const dedupeKey = `${path} ${text}`;
-    if (seen.has(dedupeKey)) return;
-    seen.add(dedupeKey);
-    out.push({ value: text, location: "body", key: path });
-    return;
+/**
+ * Prefer explicit commonEntries; otherwise compile unambiguous legacy
+ * defaultHeaders/defaultQuery so unmigrated servers keep server-wide defaults
+ * in the cached compiled plan.
+ */
+function resolveCommonEntriesForCompile(
+  server: McpServer,
+  serverValues: CompileServerValueRef[],
+): McpCommonEntries {
+  if (server.commonEntries) {
+    return server.commonEntries as McpCommonEntries;
   }
-  if (Array.isArray(value)) {
-    value.forEach((item, index) =>
-      collectJsonLeafValues(item, `${path}[${index}]`, out, seen),
-    );
-    return;
+  const analysis = analyzeLegacyCommonEntries({
+    defaultHeaders: server.defaultHeaders,
+    defaultQuery: server.defaultQuery,
+    serverValues,
+  });
+  if (analysis.unambiguous && analysis.commonEntries) {
+    return analysis.commonEntries;
   }
-  if (value && typeof value === "object") {
-    for (const [key, item] of Object.entries(value)) {
-      collectJsonLeafValues(item, path ? `${path}.${key}` : key, out, seen);
-    }
-  }
+  return { headers: [], query: [] };
 }
 
-function collectBodyValues(
-  body: string,
-  bodyType: "json" | "form" | "raw" | undefined,
-): CurlMarkableValue[] {
-  if (bodyType === "json") {
-    try {
-      const parsed: unknown = JSON.parse(body);
-      const out: CurlMarkableValue[] = [];
-      collectJsonLeafValues(parsed, "", out, new Set());
-      return out;
-    } catch {
-      return [{ value: body, location: "body", key: null }];
-    }
-  }
-  if (bodyType === "form") {
-    const out: CurlMarkableValue[] = [];
-    for (const [key, value] of new URLSearchParams(body)) {
-      if (value) out.push({ value, location: "body", key });
-    }
-    return out;
-  }
-  return [{ value: body, location: "body", key: null }];
-}
-
-function collectPathValues(pathTemplate: string): CurlMarkableValue[] {
-  const seen = new Set<string>();
-  const out: CurlMarkableValue[] = [];
-  for (const segment of pathTemplate.split("/")) {
-    if (!segment || seen.has(segment)) continue;
-    seen.add(segment);
-    out.push({ value: segment, location: "path", key: null });
-  }
-  return out;
-}
-
-/** Pure dry-run parse: the would-be tool shape plus every markable literal. */
-export function parseCurlPreview(
-  serverBaseUrl: string,
-  curl: string,
-): CurlPreview {
-  const parsed = parseCurlCommand(curl);
-  const { pathTemplate, query } = toolPathFromCurl(serverBaseUrl, parsed.url);
-  const bodyType = inferBodyType(parsed.headers, parsed.body);
-  const suggestion = parsed.credentialSuggestion;
-
-  const values: CurlMarkableValue[] = [
-    ...collectPathValues(pathTemplate),
-    ...Object.entries(query)
-      .filter(([, value]) => value.length > 0)
-      .map(([key, value]) => ({ value, location: "query" as const, key })),
-    ...Object.entries(parsed.headers)
-      .filter(([, value]) => value.length > 0)
-      .map(([key, value]) => ({ value, location: "header" as const, key })),
-    ...(parsed.body !== null ? collectBodyValues(parsed.body, bodyType) : []),
-  ];
-
-  return {
-    method: parsed.method.toUpperCase() as McpHttpMethod,
-    pathTemplate,
-    query,
-    headers: parsed.headers,
-    body: parsed.body,
-    bodyType,
-    auth: suggestion
-      ? {
-          scheme: suggestion.scheme,
-          headerName: suggestion.headerName,
-          value: suggestion.value,
-          variableName: capturedVariableName(
-            suggestion.scheme,
-            suggestion.headerName,
-          ),
-        }
-      : null,
-    values,
-  };
-}
-
-/** Owner-scoped dry-run; writes nothing. */
+/** Owner-scoped dry-run; writes nothing and never returns a credential value. */
 export async function previewCurlImport(
   db: DB,
   userId: string,
   serverId: string,
   curl: string,
-): Promise<CurlPreview> {
+): Promise<CurlImportPreview> {
   const server = await requireOwnedServer(db, userId, serverId);
-  return parseCurlPreview(server.baseUrl, curl);
+  return buildCurlImportPreview(server.baseUrl, curl);
 }
 
-export type CurlValueMarking = {
-  value: string;
-  as: "param" | "variable";
-  name: string;
-  isSecret?: boolean;
-};
-
-export type CreateToolFromCurlInput = {
+export type ConfirmCurlImportInput = {
   curl: string;
   name?: string;
   description?: string | null;
-  markings?: CurlValueMarking[];
+  markings?: CurlImportMarking[];
 };
 
-const PARAM_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]*$/;
+export type ConfirmCurlImportOptions = {
+  /** Platform MCP must reject secret-bearing curl entirely instead of excluding it. */
+  rejectCredentials?: boolean;
+};
 
-function assertMarkingName(marking: CurlValueMarking): void {
-  const pattern =
-    marking.as === "variable" ? VARIABLE_NAME_PATTERN : PARAM_NAME_PATTERN;
-  if (!pattern.test(marking.name)) {
-    throw appError({
-      appCode: APP_ERROR_CODES.INVALID_INPUT,
-      message: `Marking name "${marking.name}" is not a valid ${marking.as} name.`,
-      status: 400,
-    });
-  }
-}
-
-export async function createToolFromCurl(
+/**
+ * Imports one endpoint from curl as a single disabled draft tool, created in
+ * one transaction. Never creates, rotates, or overwrites server values,
+ * authentication, or defaults — detected credentials are excluded and
+ * reported by kind/header name only, never by value.
+ */
+export async function confirmCurlImport(
   db: DB,
   userId: string,
   serverId: string,
-  input: CreateToolFromCurlInput,
-  credentialSecret: string,
+  input: ConfirmCurlImportInput,
+  options: ConfirmCurlImportOptions = {},
 ) {
   const server = await requireOwnedServer(db, userId, serverId);
-  const parsed = parseCurlCommand(input.curl);
-  const curlTarget = toolPathFromCurl(server.baseUrl, parsed.url);
-  const query = curlTarget.query;
-  let pathTemplate = curlTarget.pathTemplate;
-  const method = parsed.method.toUpperCase() as McpHttpMethod;
-  const inferredName =
-    input.name ??
-    `${method.toLowerCase()}_${
-      pathTemplate
-        .replace(/^\//, "")
-        .replace(/[^a-zA-Z0-9]+/g, "_")
-        .replace(/^_+|_+$/g, "") || "request"
-    }`;
 
-  const bodyType = inferBodyType(parsed.headers, parsed.body);
-  const headers: Record<string, string> = { ...parsed.headers };
-  let body = parsed.body;
-  const suggestion = parsed.credentialSuggestion;
-
-  // Longest values first so short values cannot partially rewrite long ones.
-  const markings = [...(input.markings ?? [])].sort(
-    (a, b) => b.value.length - a.value.length,
-  );
-  for (const marking of markings) assertMarkingName(marking);
-
-  // Same markable inventory the preview surfaced, so each marked literal is
-  // rewritten only where it was found — a short value like "1" must not
-  // rewrite unrelated path segments, query keys, headers, or body text.
-  const markables: CurlMarkableValue[] = [
-    ...collectPathValues(pathTemplate),
-    ...Object.entries(query)
-      .filter(([, value]) => value.length > 0)
-      .map(([key, value]) => ({ value, location: "query" as const, key })),
-    ...Object.entries(headers)
-      .filter(([, value]) => value.length > 0)
-      .map(([key, value]) => ({ value, location: "header" as const, key })),
-    ...(body !== null ? collectBodyValues(body, bodyType) : []),
-  ];
-
-  const substituteAt = (markable: CurlMarkableValue, name: string) => {
-    const placeholder = `{{${name}}}`;
-    if (markable.location === "path") {
-      // Path markables are whole segments; never rewrite inside one.
-      pathTemplate = pathTemplate
-        .split("/")
-        .map((segment) => (segment === markable.value ? placeholder : segment))
-        .join("/");
-      return;
-    }
-    if (markable.location === "query" && markable.key !== null) {
-      const current = query[markable.key];
-      if (current !== undefined) {
-        query[markable.key] = current.split(markable.value).join(placeholder);
-      }
-      return;
-    }
-    if (markable.location === "header" && markable.key !== null) {
-      const current = headers[markable.key];
-      if (current !== undefined) {
-        headers[markable.key] = current.split(markable.value).join(placeholder);
-      }
-      return;
-    }
-    if (body !== null) body = body.split(markable.value).join(placeholder);
-  };
-
-  const substitute = (value: string, name: string) => {
-    if (!value) return;
-    const markable = markables.find((entry) => entry.value === value);
-    if (markable) substituteAt(markable, name);
-  };
-
-  // The peeled credential is a substring of its own header value, so it
-  // never matches a whole markable; rewrite it inside that header only.
-  const substituteAuth = (value: string, name: string) => {
-    if (!suggestion) return;
-    const current = headers[suggestion.headerName];
-    if (!current) return;
-    headers[suggestion.headerName] = current.split(value).join(`{{${name}}}`);
-  };
-
-  const params: McpToolParam[] = [];
-  const capturedParams: string[] = [];
-  const capturedVariables: string[] = [];
-  let capturedVariable: string | null = null;
-  let capturedHeader: string | null = null;
-  let existingAuthKept = false;
-
-  if (suggestion) {
-    const authMarking = markings.find(
-      (marking) => marking.value === suggestion.value,
-    );
-    capturedHeader = suggestion.headerName;
-    const renderHeaderValue = (name: string) =>
-      suggestion.scheme === "bearer" ? `Bearer {{${name}}}` : `{{${name}}}`;
-    const keepExistingAuth = serverHasMappedAuth(
-      server.defaultHeaders,
-      server.defaultQuery,
-    );
-
-    if (authMarking?.as === "param") {
-      // Agent-param credentials stay on the tool request only — never on
-      // server defaults. Auth was peeled from parsed headers, so put the
-      // templated header back onto the tool template.
-      headers[suggestion.headerName] = renderHeaderValue(authMarking.name);
-      params.push({ name: authMarking.name, required: true, type: "string" });
-      capturedParams.push(authMarking.name);
-    } else if (keepExistingAuth) {
-      existingAuthKept = true;
-    } else {
-      const variableName =
-        authMarking?.name ??
-        capturedVariableName(suggestion.scheme, suggestion.headerName);
-      await upsertCapturedVariable(
-        db,
-        server.id,
-        variableName,
-        suggestion.value,
-        authMarking?.isSecret ?? true,
-        credentialSecret,
-      );
-      substituteAuth(suggestion.value, variableName);
-      capturedVariable = variableName;
-      capturedVariables.push(variableName);
-      const defaultHeaders = {
-        ...(server.defaultHeaders ?? {}),
-        [suggestion.headerName]: renderHeaderValue(variableName),
-      };
-      await db
-        .update(mcpServer)
-        .set({ defaultHeaders })
-        .where(eq(mcpServer.id, server.id));
-    }
+  if (
+    options.rejectCredentials &&
+    detectCurlCredentials(input.curl).length > 0
+  ) {
+    throw appError({
+      appCode: APP_ERROR_CODES.MCP_PLAINTEXT_SECRET,
+      message:
+        "Curl commands containing credentials are not accepted here; configure authentication in Studio.",
+      status: 400,
+    });
   }
 
-  for (const marking of markings) {
-    if (suggestion && marking.value === suggestion.value) continue;
-    substitute(marking.value, marking.name);
-    if (marking.as === "param") {
-      params.push({ name: marking.name, required: true, type: "string" });
-      capturedParams.push(marking.name);
-    } else {
-      await upsertCapturedVariable(
-        db,
-        server.id,
-        marking.name,
-        marking.value,
-        marking.isSecret ?? false,
-        credentialSecret,
-      );
-      capturedVariables.push(marking.name);
+  const serverValues = await loadCompileServerValueRefs(db, server.id);
+  const draft = buildCurlImportDraft({
+    serverBaseUrl: server.baseUrl,
+    curl: input.curl,
+    markings: input.markings ?? [],
+    serverValues: serverValues.map(({ id, name }) => ({ id, name })),
+  });
+
+  await assertToolCapacity(db, server.id);
+  const name = toMcpToolName(input.name ?? draft.suggestedName);
+  const basePath = new URL(server.baseUrl).pathname;
+  const commonEntries: McpCommonEntries =
+    (server.commonEntries as McpCommonEntries | null) ?? {
+      headers: [],
+      query: [],
+    };
+  const authConfiguration =
+    (server.authConfiguration as unknown as McpAuthConfiguration | null) ??
+    null;
+
+  const compileResult = compileToolDefinition({
+    method: draft.method,
+    definition: draft.requestDefinition,
+    common: commonEntries,
+    auth: authConfiguration,
+    serverValues,
+    basePath,
+    allowMutation: false,
+  });
+
+  const serverValueNamesById = Object.fromEntries(
+    serverValues.map((value) => [value.id, value.name]),
+  );
+  const legacy = legacyTemplateFromDefinition(
+    draft.requestDefinition,
+    draft.method,
+    serverValueNamesById,
+  );
+
+  try {
+    const created = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(mcpTool)
+        .values({
+          serverId: server.id,
+          name,
+          description: input.description?.trim() || null,
+          method: draft.method,
+          pathTemplate: legacy.pathTemplate,
+          requestTemplate: legacy.requestTemplate,
+          params: legacy.params,
+          requestDefinition: draft.requestDefinition as unknown as Record<
+            string,
+            unknown
+          >,
+          compiledPlan: compileResult.ok
+            ? (compileResult.plan as unknown as Record<string, unknown>)
+            : null,
+          compileStatus: compileResult.ok ? "valid" : "invalid",
+          compileIssues: compileResult.issues,
+          annotations: compileResult.ok
+            ? (compileResult.plan?.annotations ?? null)
+            : null,
+          allowMutation: false,
+          enabled: false,
+          source: "curl",
+        })
+        .returning();
+      return row;
+    });
+
+    return {
+      ...created,
+      compileOk: compileResult.ok,
+      issues: compileResult.issues,
+      excludedCredentials: draft.credentials,
+    };
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw appError({
+        appCode: APP_ERROR_CODES.MCP_TOOL_NAME_CONFLICT,
+        message: "A tool with this name already exists on the server.",
+        status: 409,
+      });
     }
+    throw error;
+  }
+}
+
+/** Backward-compatible name for {@link confirmCurlImport}. */
+export const createToolFromCurl = confirmCurlImport;
+
+export type PreviewToolCompileInput = {
+  method: McpHttpMethod;
+  pathTemplate: string;
+  requestTemplate?: McpRequestTemplate;
+  params?: McpToolParam[];
+  allowMutation?: boolean;
+};
+
+/**
+ * Dry-run compile preview for the Studio tool form's effective-request
+ * panel. Analyzes the same legacy `{{name}}` shape the form already builds,
+ * then runs the publish-time compiler against the server's current values,
+ * common entries, and auth configuration. Never persists anything.
+ */
+export async function previewToolCompile(
+  db: DB,
+  userId: string,
+  serverId: string,
+  input: PreviewToolCompileInput,
+) {
+  const server = await requireOwnedServer(db, userId, serverId);
+  const serverValues = await loadCompileServerValueRefs(db, server.id);
+  const method = input.method.toUpperCase() as McpHttpMethod;
+  const pathTemplate = input.pathTemplate.startsWith("/")
+    ? input.pathTemplate
+    : `/${input.pathTemplate}`;
+  const requestTemplate = input.requestTemplate ?? {};
+  const params = input.params ?? [];
+
+  const analysis = analyzeLegacyTool({
+    method,
+    pathTemplate,
+    requestTemplate,
+    params,
+    serverValues,
+  });
+
+  if (!analysis.unambiguous || !analysis.definition) {
+    return { ok: false, issues: analysis.issues, plan: null };
   }
 
-  const requestTemplate: McpRequestTemplate = {
-    ...(Object.keys(query).length > 0 ? { query } : {}),
-    ...(Object.keys(headers).length > 0 ? { headers } : {}),
-    ...(body !== null ? { body, bodyType } : {}),
-  };
+  const commonEntries = resolveCommonEntriesForCompile(server, serverValues);
+  const authConfiguration =
+    (server.authConfiguration as unknown as McpAuthConfiguration | null) ??
+    null;
+  const basePath = new URL(server.baseUrl).pathname;
 
-  const tool = await createTool(
-    db,
-    userId,
-    serverId,
-    {
-      name: inferredName,
-      description: input.description ?? null,
-      method,
-      pathTemplate,
-      requestTemplate,
-      params,
-    },
-    "curl",
-  );
+  const compileResult = compileToolDefinition({
+    method,
+    definition: analysis.definition,
+    common: commonEntries,
+    auth: authConfiguration,
+    serverValues,
+    basePath,
+    allowMutation: input.allowMutation ?? false,
+  });
 
   return {
-    ...tool,
-    capturedVariable,
-    capturedHeader,
-    capturedVariables,
-    capturedParams,
-    existingAuthKept,
+    ok: compileResult.ok,
+    issues: [...analysis.issues, ...compileResult.issues],
+    plan: compileResult.plan as Record<string, unknown> | null,
   };
 }
 
@@ -1436,7 +1714,7 @@ export async function updateTool(
   toolId: string,
   input: UpdateToolInput,
 ) {
-  await requireOwnedServer(db, userId, serverId);
+  const server = await requireOwnedServer(db, userId, serverId);
   const [existing] = await db
     .select()
     .from(mcpTool)
@@ -1469,6 +1747,14 @@ export async function updateTool(
     params,
     variableNames: await listVariableNames(db, serverId),
   });
+  const compiled = await compileLegacyToolForPersistence(db, server, {
+    method,
+    pathTemplate,
+    requestTemplate,
+    params,
+    allowMutation: flags.allowMutation,
+    enabled: flags.enabled,
+  });
 
   try {
     const [updated] = await db
@@ -1483,12 +1769,17 @@ export async function updateTool(
         pathTemplate,
         requestTemplate,
         params,
+        requestDefinition: compiled.requestDefinition,
+        compiledPlan: compiled.compiledPlan,
+        compileStatus: compiled.compileStatus,
+        compileIssues: compiled.compileIssues,
+        annotations: compiled.annotations,
         allowMutation: flags.allowMutation,
-        enabled: flags.enabled,
+        enabled: compiled.enabled,
       })
       .where(eq(mcpTool.id, existing.id))
       .returning();
-    return { ...updated, warnings };
+    return { ...updated, warnings, compileIssues: compiled.compileIssues };
   } catch (error) {
     if (isUniqueViolation(error)) {
       throw appError({
@@ -1534,6 +1825,13 @@ export async function listVariables(db: DB, userId: string, serverId: string) {
     id: row.id,
     name: row.name,
     isSecret: row.isSecret,
+    /** "config" | "secret" — falls back to the legacy `isSecret` flag. */
+    kind:
+      (row.kind as "config" | "secret" | null) ??
+      (row.isSecret ? "secret" : "config"),
+    /** "manual" | "auth" — auth-owned values are protected in Studio editors. */
+    owner: (row.owner as "manual" | "auth" | null) ?? "manual",
+    description: row.description ?? null,
     hasValue: row.isSecret ? Boolean(row.ciphertext) : row.value !== null,
     ...(row.isSecret ? {} : { value: row.value }),
   }));
@@ -1687,15 +1985,43 @@ export async function deleteVariable(
   serverId: string,
   name: string,
 ) {
-  await requireOwnedServer(db, userId, serverId);
-  const [deleted] = await db
-    .delete(mcpServerVariable)
+  const server = await requireOwnedServer(db, userId, serverId);
+  const [variable] = await db
+    .select()
+    .from(mcpServerVariable)
     .where(
       and(
         eq(mcpServerVariable.serverId, serverId),
         eq(mcpServerVariable.name, name),
       ),
     )
+    .limit(1);
+  if (!variable) {
+    throw appError({
+      appCode: APP_ERROR_CODES.INVALID_INPUT,
+      message: "Variable not found on this server.",
+      status: 404,
+    });
+  }
+
+  const references = await findServerValueReferences(
+    db,
+    server,
+    variable.id,
+    variable.name,
+  );
+  if (references.length > 0) {
+    throw appError({
+      appCode: APP_ERROR_CODES.MCP_VALUE_IN_USE,
+      message: `"${name}" is still referenced and cannot be deleted.`,
+      status: 409,
+      details: { references },
+    });
+  }
+
+  const [deleted] = await db
+    .delete(mcpServerVariable)
+    .where(eq(mcpServerVariable.id, variable.id))
     .returning({ id: mcpServerVariable.id });
   if (!deleted) {
     throw appError({
@@ -1813,42 +2139,90 @@ export async function revokeServerToken(
   return { id: updated.id, revoked: true };
 }
 
+export type CreatePlatformTokenInput = {
+  name?: string;
+  scopes?: McpPlatformScopeRow[];
+  expiresInDays?: number;
+};
+
+/**
+ * Atomic replace: revoke + insert run in one transaction, so a failed insert
+ * leaves the previous active token untouched instead of revoking it first.
+ */
 export async function createPlatformToken(
   db: DB,
   userId: string,
-  name?: string,
+  input: CreatePlatformTokenInput | string = {},
 ) {
-  await db
-    .update(mcpAgentToken)
-    .set({ revokedAt: new Date() })
-    .where(
-      and(
-        eq(mcpAgentToken.userId, userId),
-        eq(mcpAgentToken.kind, "platform"),
-        isNull(mcpAgentToken.revokedAt),
-      ),
-    );
+  const normalized: CreatePlatformTokenInput =
+    typeof input === "string" ? { name: input } : input;
+  const scopes = normalized.scopes ?? [...MCP_DEFAULT_PLATFORM_SCOPES];
+  const expiresAt = new Date(
+    Date.now() +
+      (normalized.expiresInDays
+        ? normalized.expiresInDays * 24 * 60 * 60 * 1000
+        : MCP_PLATFORM_TOKEN_TTL_MS),
+  );
 
   const generated = generateAgentToken();
-  const [created] = await db
-    .insert(mcpAgentToken)
-    .values({
-      userId,
-      serverId: null,
-      kind: "platform",
-      name: name?.trim() || "Platform token",
-      tokenHash: generated.hash,
-      prefix: generated.prefix,
-    })
-    .returning();
+  const created = await db.transaction(async (tx) => {
+    await tx
+      .update(mcpAgentToken)
+      .set({ revokedAt: new Date() })
+      .where(
+        and(
+          eq(mcpAgentToken.userId, userId),
+          eq(mcpAgentToken.kind, "platform"),
+          isNull(mcpAgentToken.revokedAt),
+        ),
+      );
+
+    const [row] = await tx
+      .insert(mcpAgentToken)
+      .values({
+        userId,
+        serverId: null,
+        kind: "platform",
+        name: normalized.name?.trim() || "Platform token",
+        tokenHash: generated.hash,
+        prefix: generated.prefix,
+        scopes,
+        expiresAt,
+      })
+      .returning();
+    return row;
+  });
 
   return {
     id: created.id,
     name: created.name,
     prefix: created.prefix,
+    scopes,
+    expiresAt: created.expiresAt,
     token: generated.raw,
     createdAt: created.createdAt,
   };
+}
+
+/**
+ * Migration helper: legacy platform tokens issued before scoping existed
+ * (`scopes IS NULL`) are treated as invalid and revoked here. Call this once
+ * from a migration/seed step; owners must recreate a scoped token afterward.
+ * Server-scoped agent tokens are never touched.
+ */
+export async function revokeUnscopedPlatformTokens(db: DB): Promise<number> {
+  const revoked = await db
+    .update(mcpAgentToken)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(
+        eq(mcpAgentToken.kind, "platform"),
+        isNull(mcpAgentToken.scopes),
+        isNull(mcpAgentToken.revokedAt),
+      ),
+    )
+    .returning({ id: mcpAgentToken.id });
+  return revoked.length;
 }
 
 export async function getPlatformTokenMeta(db: DB, userId: string) {
@@ -1860,6 +2234,8 @@ export async function getPlatformTokenMeta(db: DB, userId: string) {
       createdAt: mcpAgentToken.createdAt,
       lastUsedAt: mcpAgentToken.lastUsedAt,
       revokedAt: mcpAgentToken.revokedAt,
+      scopes: mcpAgentToken.scopes,
+      expiresAt: mcpAgentToken.expiresAt,
     })
     .from(mcpAgentToken)
     .where(
@@ -1955,6 +2331,9 @@ export async function authenticateAgentToken(
   if (expected.kind === "server" && token.serverId !== expected.serverId) {
     reject();
   }
+  // Legacy platform tokens issued before scoping are treated as invalid;
+  // owners must recreate a scoped token.
+  if (expected.kind === "platform" && !token.scopes) reject();
   if (await isUserBanned(db, token.userId)) {
     throw appError({
       appCode: APP_ERROR_CODES.ACCOUNT_SUSPENDED,

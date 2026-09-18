@@ -40,6 +40,8 @@ export const serverAuthRecipeSchema = z.discriminatedUnion("type", [
     type: z.literal("query"),
     paramName: z.string().trim().min(1).max(200),
     value: z.string(),
+    /** Required: query-string credentials are visible in logs and history. */
+    queryExposureAcknowledged: z.boolean().optional(),
   }),
   z.object({
     type: z.literal("basic"),
