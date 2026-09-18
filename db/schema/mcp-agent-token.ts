@@ -1,7 +1,11 @@
-import { index, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { index, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { generateId } from "./id";
 import { mcpServer } from "./mcp-server";
 import { user } from "./user";
+
+/** "read" | "author" | "invoke" | "secret_reference" | "destructive" */
+export type McpPlatformScopeRow =
+  "read" | "author" | "invoke" | "secret_reference" | "destructive";
 
 export const mcpAgentToken = pgTable(
   "mcp_agent_token",
@@ -18,6 +22,8 @@ export const mcpAgentToken = pgTable(
     name: text().notNull(),
     tokenHash: text().notNull(),
     prefix: text().notNull(),
+    /** Platform-token scopes; nullable for legacy tokens issued before scoping. */
+    scopes: jsonb().$type<McpPlatformScopeRow[]>(),
     expiresAt: timestamp({ withTimezone: true, mode: "date" }),
     revokedAt: timestamp({ withTimezone: true, mode: "date" }),
     lastUsedAt: timestamp({ withTimezone: true, mode: "date" }),

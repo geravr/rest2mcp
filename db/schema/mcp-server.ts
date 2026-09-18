@@ -9,6 +9,27 @@ import {
 import { generateId } from "./id";
 import { user } from "./user";
 
+export type McpNamedEntryRow = {
+  id: string;
+  name: string;
+  value: Record<string, unknown>;
+  omitWhenAbsent?: boolean;
+};
+
+export type McpAuthConfigurationRow = {
+  kind: "none" | "bearer" | "header" | "query" | "basic" | "custom";
+  bindings: Array<{
+    location: "header" | "query";
+    key: string;
+    serverValueId: string;
+    prefix?: string;
+    suffix?: string;
+  }>;
+  queryExposureAcknowledged?: boolean;
+  basicUsernameValueId?: string;
+  basicPasswordValueId?: string;
+};
+
 export const mcpServer = pgTable(
   "mcp_server",
   {
@@ -26,10 +47,17 @@ export const mcpServer = pgTable(
     baseUrl: text().notNull(),
     /** Hostnames allowed for upstream fetch. Default: host derived from baseUrl. */
     allowedHosts: jsonb().$type<string[]>().notNull(),
-    /** Template-aware headers applied to every tool call; tool headers win on conflict. */
+    /** Legacy template-aware headers; dual-written during migration. */
     defaultHeaders: jsonb().$type<Record<string, string>>(),
-    /** Template-aware query params applied to every tool call; tool query wins on conflict. */
+    /** Legacy template-aware query params; dual-written during migration. */
     defaultQuery: jsonb().$type<Record<string, string>>(),
+    /** Explicit common header/query bindings (literal or server-value). */
+    commonEntries: jsonb().$type<{
+      headers: McpNamedEntryRow[];
+      query: McpNamedEntryRow[];
+    }>(),
+    /** Explicit auth configuration referencing auth-owned secret value ids. */
+    authConfiguration: jsonb().$type<McpAuthConfigurationRow>(),
     /** "draft" | "live" | "paused" */
     status: text().default("draft").notNull(),
     createdAt: timestamp({ withTimezone: true, mode: "date" })

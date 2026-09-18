@@ -20,10 +20,16 @@ export const mcpServerVariable = pgTable(
       .references(() => mcpServer.id, { onDelete: "cascade" }),
     /** [a-z][a-z0-9_]*, unique per server. */
     name: text().notNull(),
+    /** Legacy boolean; prefer `kind`. Kept for rollback readers. */
     isSecret: boolean().notNull().default(false),
-    /** Plaintext value when isSecret is false. */
+    /** "config" | "secret" — nullable during compatibility backfill. */
+    kind: text(),
+    /** "manual" | "auth" — nullable during compatibility backfill. */
+    owner: text(),
+    description: text(),
+    /** Plaintext value when kind/config (or legacy isSecret=false). */
     value: text(),
-    /** AES-256-GCM envelope when isSecret is true. */
+    /** AES-256-GCM envelope when kind/secret (or legacy isSecret=true). */
     ciphertext: text(),
     createdAt: timestamp({ withTimezone: true, mode: "date" })
       .defaultNow()
