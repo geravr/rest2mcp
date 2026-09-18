@@ -5,6 +5,7 @@ import {
   AppError,
   appError,
   extractAppCodeFromTrpcCause,
+  extractDetailsFromTrpcCause,
   toTrpcError,
 } from "./app-error.js";
 import type { TRPCContext } from "./context.js";
@@ -21,11 +22,13 @@ function unwrapAppError(error: unknown): AppError | undefined {
 const t = initTRPC.context<TRPCContext>().create({
   errorFormatter({ shape, error }) {
     const appCode = extractAppCodeFromTrpcCause(error.cause);
+    const details = extractDetailsFromTrpcCause(error.cause);
     return {
       ...shape,
       data: {
         ...shape.data,
         appCode,
+        ...(details ? { details } : {}),
         zodError:
           error.cause instanceof ZodError ? flattenError(error.cause) : null,
       },

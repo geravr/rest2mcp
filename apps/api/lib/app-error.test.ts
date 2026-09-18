@@ -7,6 +7,7 @@ import {
   appJsonError,
   appTrpcError,
   extractAppCodeFromTrpcCause,
+  extractDetailsFromTrpcCause,
   resolveRequestLocale,
   toTrpcError,
   trpcCodeFromHttpStatus,
@@ -28,6 +29,18 @@ describe("AppError", () => {
     expect(error.status).toBe(404);
     expect(error.message).toBe("User not found.");
     expect(error.cause).toBe(cause);
+  });
+
+  it("stores optional details", () => {
+    const error = appError({
+      appCode: APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED,
+      message:
+        'Template placeholder "limit" has no matching argument or server variable.',
+      status: 400,
+      details: { placeholder: "limit" },
+    });
+
+    expect(error.details).toEqual({ placeholder: "limit" });
   });
 });
 
@@ -59,6 +72,20 @@ describe("appTrpcError", () => {
     );
     expect((error.cause as unknown as { error: unknown }).error).toBe(cause);
   });
+
+  it("embeds details in cause", () => {
+    const error = appTrpcError({
+      code: "BAD_REQUEST",
+      message:
+        'Template placeholder "limit" has no matching argument or server variable.',
+      appCode: APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED,
+      details: { placeholder: "limit" },
+    });
+
+    expect(extractDetailsFromTrpcCause(error.cause)).toEqual({
+      placeholder: "limit",
+    });
+  });
 });
 
 describe("toTrpcError", () => {
@@ -76,6 +103,22 @@ describe("toTrpcError", () => {
     expect(extractAppCodeFromTrpcCause(error.cause)).toBe(
       APP_ERROR_CODES.ACCOUNT_SUSPENDED,
     );
+  });
+
+  it("forwards details onto the tRPC cause", () => {
+    const error = toTrpcError(
+      appError({
+        appCode: APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED,
+        message:
+          'Template placeholder "email" has no matching argument or server variable.',
+        status: 400,
+        details: { placeholder: "email" },
+      }),
+    );
+
+    expect(extractDetailsFromTrpcCause(error.cause)).toEqual({
+      placeholder: "email",
+    });
   });
 });
 

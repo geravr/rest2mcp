@@ -1,22 +1,35 @@
-import { APP_ERROR_CODES, type AppErrorCode, isAppErrorCode } from "@repo/core";
+import {
+  APP_ERROR_CODES,
+  type AppErrorCode,
+  type AppErrorDetails,
+  isAppErrorCode,
+} from "@repo/core";
 import { TRPCError, type TRPC_ERROR_CODE_KEY } from "@trpc/server";
 
-export { APP_ERROR_CODES, isAppErrorCode, type AppErrorCode };
+export {
+  APP_ERROR_CODES,
+  isAppErrorCode,
+  type AppErrorCode,
+  type AppErrorDetails,
+};
 
 export class AppError extends Error {
   readonly appCode: AppErrorCode;
   readonly status: number;
+  readonly details?: AppErrorDetails;
 
   constructor(input: {
     appCode: AppErrorCode;
     message: string;
     status: number;
     cause?: unknown;
+    details?: AppErrorDetails;
   }) {
     super(input.message, { cause: input.cause });
     this.name = "AppError";
     this.appCode = input.appCode;
     this.status = input.status;
+    this.details = input.details;
   }
 }
 
@@ -25,6 +38,7 @@ export function appError(input: {
   message: string;
   status: number;
   cause?: unknown;
+  details?: AppErrorDetails;
 }): AppError {
   return new AppError(input);
 }
@@ -45,14 +59,19 @@ export function appTrpcError(input: {
   message: string;
   appCode: AppErrorCode;
   cause?: unknown;
+  details?: AppErrorDetails;
 }): TRPCError {
+  const causePayload: {
+    appCode: AppErrorCode;
+    error?: unknown;
+    details?: AppErrorDetails;
+  } = { appCode: input.appCode };
+  if (input.cause !== undefined) causePayload.error = input.cause;
+  if (input.details !== undefined) causePayload.details = input.details;
   return new TRPCError({
     code: input.code,
     message: input.message,
-    cause:
-      input.cause !== undefined
-        ? { appCode: input.appCode, error: input.cause }
-        : { appCode: input.appCode },
+    cause: causePayload,
   });
 }
 
@@ -62,6 +81,7 @@ export function toTrpcError(error: AppError): TRPCError {
     message: error.message,
     appCode: error.appCode,
     cause: error.cause,
+    details: error.details,
   });
 }
 
@@ -71,6 +91,19 @@ export function extractAppCodeFromTrpcCause(
   if (!cause || typeof cause !== "object") return undefined;
   const appCode = (cause as { appCode?: unknown }).appCode;
   return isAppErrorCode(appCode) ? appCode : undefined;
+}
+
+export function extractDetailsFromTrpcCause(
+  cause: unknown,
+): AppErrorDetails | undefined {
+  if (!cause || typeof cause !== "object") return undefined;
+  const details = (cause as { details?: unknown }).details;
+  if (!details || typeof details !== "object") return undefined;
+  const placeholder = (details as { placeholder?: unknown }).placeholder;
+  if (typeof placeholder === "string") {
+    return { placeholder };
+  }
+  return undefined;
 }
 
 export const SAAS_LANG_COOKIE = "saas-lang";
