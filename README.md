@@ -6,6 +6,8 @@ Maintained by [Charro Digital](https://charrodigital.com). Questions: [hola@char
 
 > Historically derived from open-source starter work; heavily rewritten for Charro Digital's stack.
 
+> **Development status: pre-production.** Internal contracts and disposable development data may change without backward compatibility until the repository owner explicitly declares production status. The authoritative lifecycle policy is in [AGENTS.md](AGENTS.md#product-lifecycle-status).
+
 ## Workspaces
 
 - **`apps/api`** — Hono + tRPC backend, Better Auth, Drizzle, direct PostgreSQL access.

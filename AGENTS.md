@@ -17,6 +17,25 @@ Guidance for AI coding agents working in the **rest2mcp** monorepo. This root fi
 - Current stack: Bun runtime, Hono, tRPC v11, Better Auth (with Email OTP plugin), Drizzle ORM, PostgreSQL.
 - Current frontend/marketing stack: React 19, Astro 5, Vite 7, TypeScript, Tailwind CSS v4, shadcn/ui (Radix UI + class-variance-authority), TanStack Router, TanStack Query, Zustand, React Hook Form, Zod.
 
+## Product Lifecycle Status
+
+**Current status: `PRE_PRODUCTION`.**
+
+This declaration is the repository's authoritative lifecycle status. Only the repository owner may change it explicitly. Deployment configuration, production entrypoints, public URLs, CI configuration, hosted development environments, or existing migrations do not imply that the product is in production. A lifecycle transition must update this section, the OpenSpec project context, and the root README in the same change.
+
+While the status is `PRE_PRODUCTION`:
+
+- Treat application records as disposable development data unless the owner explicitly identifies data that must be preserved.
+- Prefer a clean replacement over backward-compatible transitions for unreleased internal contracts.
+- Remove superseded code, schemas, columns, endpoints, types, adapters, feature flags, fallbacks, tests, and documentation as part of the change that replaces them.
+- Do not introduce dual reads, dual writes, legacy parsing, compatibility projections, deprecation windows, staged rollouts, runtime backfills, or rollback paths for superseded internal behavior unless the owner explicitly requests them.
+- Breaking changes to unreleased internal APIs and persisted shapes are allowed when every first-party caller, fixture, seed, and test is updated atomically.
+- Prefer resetting or reseeding development data over shipping compatibility code. If selected development data must be retained, use an explicit one-off migration that does not leave a permanent runtime compatibility path.
+- Generated database migrations remain required. Destructive schema changes are acceptable when intentional, but agents must not delete databases, credentials, Git history, user work, or external resources without the authorization otherwise required by this repository.
+- Security, tenant isolation, secret handling, transactional correctness, validation, and external protocol compatibility remain mandatory. `PRE_PRODUCTION` is not permission to weaken safety or correctness.
+
+When the owner explicitly changes the status to `PRODUCTION`, changes must instead account for deployed data, external consumers, backward compatibility, staged rollout, observability, and rollback safety as appropriate.
+
 ## Documentation Contract
 
 This repository maintains a clear separation between agent-facing contracts and human-facing onboarding:
@@ -98,14 +117,14 @@ bun db:studio            # Launches Drizzle Studio
 
 ## New Code Direction
 
-- Apply modern standards to new code, but do not refactor unrelated legacy code just to force a new pattern.
+- Apply modern standards to new code. While `PRE_PRODUCTION`, completely remove superseded behavior inside the touched slice, but do not expand into unrelated cleanup merely to force a new pattern.
 - When touching an existing area, prefer local modernization and cleanup even when it goes slightly beyond the minimum fix, as long as the refactor stays inside the touched slice and is validated.
 - Prefer explicit, typed, reusable patterns over local ad hoc implementations.
 - Prefer code that is self-explanatory through naming, structure, and small composable units rather than through comments.
 
 ## Review Priorities
 
-- Reviews and self-reviews should prioritize behavior regressions and production bugs first.
+- Reviews and self-reviews should prioritize correctness regressions, release-blocking bugs, and security boundaries first. While `PRE_PRODUCTION`, preserving obsolete internal behavior is not a valid reason to retain a legacy path.
 - Security boundaries: authentication state, session validation, and data leaks.
 - Validation correctness: use Zod schema validation for request payloads and service boundaries.
 - Correctness, safety, clean architecture, clearer layering, and low duplication.

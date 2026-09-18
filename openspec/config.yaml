@@ -4,6 +4,10 @@ context: |
   Tech stack: TypeScript, Bun, React 19, Hono, tRPC, Drizzle ORM, PostgreSQL, Tailwind CSS v4, shadcn/ui
   Monorepo structure: apps/api (backend), apps/app (React SPA), apps/web (Astro marketing), apps/email (React Email), db (Drizzle), packages/ui (shadcn components), packages/core (guards, APP_ERROR_CODES, pagination, telemetry), packages/typescript-config, scripts
   Key conventions:
+  - Product lifecycle authority is the root AGENTS.md; the current status is PRE_PRODUCTION
+  - While PRE_PRODUCTION, assume development records are disposable unless the owner says otherwise and prefer clean replacement of unreleased internal contracts
+  - Do not propose dual reads/writes, legacy parsers, compatibility projections, runtime backfills, deprecation windows, or staged rollouts for superseded internal behavior unless explicitly requested
+  - Remove replaced internal schemas, columns, APIs, adapters, flags, fallbacks, tests, and documentation in the same change; keep external protocol compatibility, security, validation, and transactional correctness
   - AGENTS.md = agent contracts (rules, invariants, anti-patterns)
   - README.md = human onboarding (what, how to run, usage)
   - package.json scripts are the single source of truth for commands
