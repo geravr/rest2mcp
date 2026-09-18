@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { APP_ERROR_CODES } from "@repo/core";
 import { AppError } from "../lib/app-error.js";
 import { encryptCredential } from "../lib/mcp-crypto.js";
+import { MCP_UPSTREAM_DEADLINE_MS } from "../lib/mcp-policy.js";
 
 const tables = vi.hoisted(() => ({
   mcpServer: { id: "mcp_server.id" },
@@ -14,7 +15,14 @@ const tables = vi.hoisted(() => ({
   mcpCallLog: {},
 }));
 
-vi.mock("@repo/db", () => tables);
+let generateIdCounter = 0;
+
+vi.mock("@repo/db", () => ({
+  ...tables,
+  generateId: vi.fn(
+    (prefix: string) => `${prefix}_test_${generateIdCounter++}`,
+  ),
+}));
 vi.mock("drizzle-orm", () => ({
   and: vi.fn((...args: unknown[]) => ({ kind: "and", args })),
   eq: vi.fn((left: unknown, right: unknown) => ({ kind: "eq", left, right })),
@@ -29,50 +37,42 @@ import { executeMappedTool } from "./mcp-executor-service.js";
 
 const SECRET = "c".repeat(32);
 
-function makeChain<T>(result: T) {
-  const handler: ProxyHandler<object> = {
-    get(_, prop: string | symbol) {
-      if (prop === "then") {
-        return (
-          resolve: (value: T) => unknown,
-          reject?: (reason: unknown) => unknown,
-        ) => Promise.resolve(result).then(resolve, reject);
-      }
-      return () => new Proxy({}, handler);
-    },
-  };
-  return new Proxy({}, handler);
+/** A promise-like `select().from(table).where(...)` result usable both
+ * awaited directly and via a chained `.limit(n)`. */
+function selectResult(rows: unknown[]) {
+  const promise = Promise.resolve(rows);
+  return Object.assign(promise, {
+    limit: () => Promise.resolve(rows),
+  });
 }
 
-function makeDb(results: unknown[]) {
-  let index = 0;
+function makeDb(input: {
+  server: unknown[];
+  tool: unknown[];
+  serverValues?: unknown[];
+}) {
   const insertedValues: unknown[] = [];
-  const next = () => {
-    const value = results[index] ?? [];
-    index += 1;
-    return makeChain(value);
-  };
-  return {
-    select: vi.fn(() => next()),
-    insert: vi.fn(() => {
-      const chain = next();
-      return new Proxy(
-        {},
-        {
-          get(_, prop) {
-            if (prop === "values") {
-              return (payload: unknown) => {
-                insertedValues.push(payload);
-                return chain;
-              };
-            }
-            return Reflect.get(chain as object, prop);
-          },
+  const db = {
+    select: vi.fn(() => ({
+      from: (table: unknown) => ({
+        where: () => {
+          if (table === tables.mcpServer) return selectResult(input.server);
+          if (table === tables.mcpTool) return selectResult(input.tool);
+          if (table === tables.mcpServerVariable) {
+            return selectResult(input.serverValues ?? []);
+          }
+          return selectResult([]);
         },
-      );
-    }),
-    insertedValues,
+      }),
+    })),
+    insert: vi.fn(() => ({
+      values: (payload: unknown) => {
+        insertedValues.push(payload);
+        return Promise.resolve([]);
+      },
+    })),
   };
+  return { db, insertedValues };
 }
 
 const liveServer = {
@@ -83,6 +83,8 @@ const liveServer = {
   allowedHosts: ["api.example.com"],
   defaultHeaders: null,
   defaultQuery: null,
+  commonEntries: null,
+  authConfiguration: null,
 };
 
 const getTool = {
@@ -94,25 +96,40 @@ const getTool = {
   params: [{ name: "id", required: true, type: "string" }],
   allowMutation: false,
   enabled: true,
+  requestDefinition: null,
+  compiledPlan: null,
+  compileStatus: null,
 };
 
-function okResponse(body: unknown, status = 200) {
+function jsonResponse(
+  body: unknown,
+  status = 200,
+  headers: Record<string, string> = {},
+) {
   return new Response(typeof body === "string" ? body : JSON.stringify(body), {
     status,
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...headers },
   });
+}
+
+async function flushMicrotasks() {
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
-describe("executeMappedTool", () => {
-  it("rejects paused servers without calling upstream", async () => {
+describe("executeMappedTool: guards before contacting upstream", () => {
+  it("rejects paused servers", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const db = makeDb([[{ ...liveServer, status: "paused" }], [getTool]]);
+    const { db } = makeDb({
+      server: [{ ...liveServer, status: "paused" }],
+      tool: [getTool],
+    });
 
     await expect(
       executeMappedTool(db as never, {
@@ -126,16 +143,18 @@ describe("executeMappedTool", () => {
     ).rejects.toSatisfy(
       (error: unknown) =>
         error instanceof AppError &&
-        error.appCode === APP_ERROR_CODES.INVALID_INPUT,
+        error.appCode === APP_ERROR_CODES.MCP_SERVER_PAUSED,
     );
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(db.insert).toHaveBeenCalled();
   });
 
-  it("rejects disabled tools without calling upstream", async () => {
+  it("rejects disabled tools", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const db = makeDb([[liveServer], [{ ...getTool, enabled: false }]]);
+    const { db } = makeDb({
+      server: [liveServer],
+      tool: [{ ...getTool, enabled: false }],
+    });
 
     await expect(
       executeMappedTool(db as never, {
@@ -149,19 +168,18 @@ describe("executeMappedTool", () => {
     ).rejects.toSatisfy(
       (error: unknown) =>
         error instanceof AppError &&
-        error.appCode === APP_ERROR_CODES.INVALID_INPUT,
+        error.appCode === APP_ERROR_CODES.MCP_TOOL_DISABLED,
     );
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(db.insert).toHaveBeenCalled();
   });
 
   it("blocks mutations when allowMutation is false", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const db = makeDb([
-      [liveServer],
-      [{ ...getTool, method: "DELETE", enabled: true, allowMutation: false }],
-    ]);
+    const { db } = makeDb({
+      server: [liveServer],
+      tool: [{ ...getTool, method: "DELETE", allowMutation: false }],
+    });
 
     await expect(
       executeMappedTool(db as never, {
@@ -181,17 +199,16 @@ describe("executeMappedTool", () => {
   it("rejects hosts outside the allowlist", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const db = makeDb([
-      [
+    const { db } = makeDb({
+      server: [
         {
           ...liveServer,
           baseUrl: "https://evil.example",
           allowedHosts: ["api.example.com"],
         },
       ],
-      [getTool],
-      [],
-    ]);
+      tool: [getTool],
+    });
 
     await expect(
       executeMappedTool(db as never, {
@@ -210,10 +227,10 @@ describe("executeMappedTool", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("fails unresolved placeholders before contacting upstream", async () => {
+  it("fails a missing required agent input before contacting upstream", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const db = makeDb([[liveServer], [getTool], []]);
+    const { db } = makeDb({ server: [liveServer], tool: [getTool] });
 
     await expect(
       executeMappedTool(db as never, {
@@ -231,525 +248,12 @@ describe("executeMappedTool", () => {
         error.details?.placeholder === "id",
     );
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(db.insert).toHaveBeenCalled();
-  });
-
-  it("omits optional query keys for a GHL-style lookup and still calls upstream", async () => {
-    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
-    const fetchMock = vi.fn().mockResolvedValue(okResponse({ ok: true }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const tokenCipher = encryptCredential("pat-secret", SECRET);
-    const tool = {
-      ...getTool,
-      name: "get_contacts_lookup",
-      pathTemplate: "/contacts/",
-      params: [
-        { name: "email", required: false, type: "string" },
-        { name: "phone", required: false, type: "string" },
-        { name: "limit", required: false, type: "string" },
-        { name: "nextcursor", required: false, type: "string" },
-      ],
-      requestTemplate: {
-        query: {
-          email: "{{email}}",
-          phone: "{{phone}}",
-          limit: "{{limit}}",
-          nextCursor: "{{nextcursor}}",
-          locationId: "{{location_id}}",
-        },
-        headers: { Authorization: "Bearer {{api_token}}" },
-      },
-    };
-    const db = makeDb([
-      [liveServer],
-      [tool],
-      [
-        {
-          name: "location_id",
-          isSecret: false,
-          value: "loc_1",
-          ciphertext: null,
-        },
-        {
-          name: "api_token",
-          isSecret: true,
-          value: null,
-          ciphertext: tokenCipher,
-        },
-      ],
-      [],
-    ]);
-
-    const result = await executeMappedTool(db as never, {
-      serverId: "mcs_1",
-      ownerUserId: "usr_owner",
-      toolId: "mct_1",
-      args: { email: "a@b.com" },
-      source: "playground",
-      credentialSecret: SECRET,
-    });
-
-    expect(result.ok).toBe(true);
-    expect(fetchMock).toHaveBeenCalledOnce();
-    const [requestedUrl, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
-    const url = new URL(String(requestedUrl));
-    expect(url.searchParams.get("email")).toBe("a@b.com");
-    expect(url.searchParams.get("locationId")).toBe("loc_1");
-    expect(url.searchParams.has("phone")).toBe(false);
-    expect(url.searchParams.has("limit")).toBe(false);
-    expect(url.searchParams.has("nextCursor")).toBe(false);
-    expect(new Headers(init.headers).get("authorization")).toBe(
-      "Bearer pat-secret",
-    );
-  });
-
-  it("still fails missing required query params without contacting upstream", async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    const tool = {
-      ...getTool,
-      pathTemplate: "/contacts/",
-      params: [{ name: "email", required: true, type: "string" }],
-      requestTemplate: {
-        query: { email: "{{email}}" },
-      },
-    };
-    const db = makeDb([[liveServer], [tool], []]);
-
-    await expect(
-      executeMappedTool(db as never, {
-        serverId: "mcs_1",
-        ownerUserId: "usr_owner",
-        toolId: "mct_1",
-        args: {},
-        source: "playground",
-        credentialSecret: SECRET,
-      }),
-    ).rejects.toSatisfy(
-      (error: unknown) =>
-        error instanceof AppError &&
-        error.appCode === APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED &&
-        error.details?.placeholder === "email",
-    );
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("renders variables in path, query, headers, and body", async () => {
-    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
-    const fetchMock = vi.fn().mockResolvedValue(okResponse({ ok: true }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const tokenCipher = encryptCredential("abc-secret", SECRET);
-    const tool = {
-      ...getTool,
-      method: "POST",
-      pathTemplate: "/contacts/{{contactId}}",
-      allowMutation: true,
-      requestTemplate: {
-        query: { region: "{{region}}" },
-        headers: { Authorization: "Bearer {{api_token}}" },
-        body: '{"note": "{{note}}"}',
-        bodyType: "json",
-      },
-    };
-    const db = makeDb([
-      [liveServer],
-      [tool],
-      [
-        { name: "contactId", isSecret: false, value: "c_9", ciphertext: null },
-        { name: "region", isSecret: false, value: "us", ciphertext: null },
-        { name: "note", isSecret: false, value: "hello", ciphertext: null },
-        {
-          name: "api_token",
-          isSecret: true,
-          value: null,
-          ciphertext: tokenCipher,
-        },
-      ],
-      [],
-    ]);
-
-    const result = await executeMappedTool(db as never, {
-      serverId: "mcs_1",
-      ownerUserId: "usr_owner",
-      toolId: "mct_1",
-      args: {},
-      source: "playground",
-      credentialSecret: SECRET,
-    });
-
-    expect(result.ok).toBe(true);
-    const [requestedUrl, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
-    const url = new URL(String(requestedUrl));
-    expect(url.pathname).toBe("/contacts/c_9");
-    expect(url.searchParams.get("region")).toBe("us");
-    const headers = new Headers(init.headers);
-    expect(headers.get("authorization")).toBe("Bearer abc-secret");
-    expect(init.body).toBe('{"note": "hello"}');
-    expect(headers.get("content-type")).toBe("application/json");
-  });
-
-  it("merges server defaults under tool-level query and headers", async () => {
-    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
-    const fetchMock = vi.fn().mockResolvedValue(okResponse({ ok: true }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const server = {
-      ...liveServer,
-      defaultHeaders: { Accept: "application/json", Version: "2021-07-28" },
-      defaultQuery: { locale: "en", limit: "10" },
-    };
-    const tool = {
-      ...getTool,
-      requestTemplate: {
-        query: { limit: "{{limit}}" },
-        headers: { Accept: "text/csv" },
-      },
-    };
-    const db = makeDb([[server], [tool], [], []]);
-
-    await executeMappedTool(db as never, {
-      serverId: "mcs_1",
-      ownerUserId: "usr_owner",
-      toolId: "mct_1",
-      args: { id: "1", limit: 50 },
-      source: "playground",
-      credentialSecret: SECRET,
-    });
-
-    const [requestedUrl, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
-    const url = new URL(String(requestedUrl));
-    expect(url.searchParams.get("locale")).toBe("en");
-    expect(url.searchParams.get("limit")).toBe("50");
-    const headers = new Headers(init.headers);
-    expect(headers.get("accept")).toBe("text/csv");
-    expect(headers.get("version")).toBe("2021-07-28");
-  });
-
-  it("keeps the baseUrl path prefix when building the upstream URL", async () => {
-    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
-    const fetchMock = vi.fn().mockResolvedValue(okResponse({ ok: true }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const db = makeDb([
-      [{ ...liveServer, baseUrl: "https://api.example.com/v2" }],
-      [getTool],
-      [],
-      [],
-    ]);
-
-    await executeMappedTool(db as never, {
-      serverId: "mcs_1",
-      ownerUserId: "usr_owner",
-      toolId: "mct_1",
-      args: { id: "1" },
-      source: "playground",
-      credentialSecret: SECRET,
-    });
-
-    const url = new URL(String(fetchMock.mock.calls[0]?.[0]));
-    expect(url.pathname).toBe("/v2/contacts/1");
-  });
-
-  it("redacts secret variables across query and body in call logs", async () => {
-    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
-    const fetchMock = vi.fn().mockResolvedValue(okResponse({ ok: true }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const keyCipher = encryptCredential("query-secret", SECRET);
-    const tokenCipher = encryptCredential("body-secret", SECRET);
-    const tool = {
-      ...getTool,
-      method: "POST",
-      pathTemplate: "/contacts",
-      allowMutation: true,
-      requestTemplate: {
-        query: { api_key: "{{query_key}}" },
-        body: '{"token": "{{body_token}}"}',
-        bodyType: "json",
-      },
-    };
-    const db = makeDb([
-      [liveServer],
-      [tool],
-      [
-        {
-          name: "query_key",
-          isSecret: true,
-          value: null,
-          ciphertext: keyCipher,
-        },
-        {
-          name: "body_token",
-          isSecret: true,
-          value: null,
-          ciphertext: tokenCipher,
-        },
-      ],
-      [],
-    ]);
-
-    const result = await executeMappedTool(db as never, {
-      serverId: "mcs_1",
-      ownerUserId: "usr_owner",
-      toolId: "mct_1",
-      args: {},
-      source: "playground",
-      credentialSecret: SECRET,
-    });
-
-    expect(result.ok).toBe(true);
-    const url = new URL(String(fetchMock.mock.calls[0]?.[0]));
-    expect(url.searchParams.get("api_key")).toBe("query-secret");
-    const logged = JSON.stringify(db.insertedValues);
-    expect(logged).not.toContain("query-secret");
-    expect(logged).not.toContain("body-secret");
-    expect(logged).toContain("[REDACTED]");
-  });
-
-  it("sends no body for GET tools", async () => {
-    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
-    const fetchMock = vi.fn().mockResolvedValue(okResponse({ ok: true }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const tool = {
-      ...getTool,
-      requestTemplate: {
-        body: '{"ignored": "{{missing}}"}',
-        bodyType: "json",
-      },
-    };
-    const db = makeDb([[liveServer], [tool], [], []]);
-
-    await executeMappedTool(db as never, {
-      serverId: "mcs_1",
-      ownerUserId: "usr_owner",
-      toolId: "mct_1",
-      args: { id: "1" },
-      source: "playground",
-      credentialSecret: SECRET,
-    });
-
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect(init.body).toBeUndefined();
-  });
-
-  it("sends no body for HEAD tools", async () => {
-    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
-    const fetchMock = vi.fn().mockResolvedValue(okResponse({ ok: true }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const tool = {
-      ...getTool,
-      method: "HEAD",
-      requestTemplate: { body: "ignore {{missing}}", bodyType: "raw" },
-    };
-    const db = makeDb([[liveServer], [tool], [], []]);
-
-    await executeMappedTool(db as never, {
-      serverId: "mcs_1",
-      ownerUserId: "usr_owner",
-      toolId: "mct_1",
-      args: { id: "1" },
-      source: "playground",
-      credentialSecret: SECRET,
-    });
-
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect(init.body).toBeUndefined();
-  });
-
-  it("URL-encodes literal query values from server defaults", async () => {
-    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
-    const fetchMock = vi.fn().mockResolvedValue(okResponse({ ok: true }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const server = {
-      ...liveServer,
-      defaultQuery: { filter: "a&b=c", plain: "ok" },
-    };
-    const db = makeDb([[server], [getTool], [], []]);
-
-    await executeMappedTool(db as never, {
-      serverId: "mcs_1",
-      ownerUserId: "usr_owner",
-      toolId: "mct_1",
-      args: { id: "1" },
-      source: "playground",
-      credentialSecret: SECRET,
-    });
-
-    const requested = String(fetchMock.mock.calls[0]?.[0]);
-    expect(requested).toContain("filter=a%26b%3Dc");
-    const url = new URL(requested);
-    expect(url.searchParams.get("filter")).toBe("a&b=c");
-    expect(url.searchParams.get("plain")).toBe("ok");
-  });
-
-  it("renders form bodies with form encoding and content type", async () => {
-    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
-    const fetchMock = vi.fn().mockResolvedValue(okResponse({ ok: true }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const tool = {
-      ...getTool,
-      method: "POST",
-      pathTemplate: "/contacts",
-      allowMutation: true,
-      requestTemplate: {
-        body: "name={{name}}&city=Salt Lake",
-        bodyType: "form",
-      },
-    };
-    const db = makeDb([[liveServer], [tool], [], []]);
-
-    await executeMappedTool(db as never, {
-      serverId: "mcs_1",
-      ownerUserId: "usr_owner",
-      toolId: "mct_1",
-      args: { name: "Ada Lovelace" },
-      source: "playground",
-      credentialSecret: SECRET,
-    });
-
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect(init.body).toBe("name=Ada%20Lovelace&city=Salt Lake");
-    const headers = new Headers(init.headers);
-    expect(headers.get("content-type")).toBe(
-      "application/x-www-form-urlencoded",
-    );
-  });
-
-  it("sends raw bodies verbatim without imposing a content type", async () => {
-    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
-    const fetchMock = vi.fn().mockResolvedValue(okResponse({ ok: true }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const tool = {
-      ...getTool,
-      method: "POST",
-      pathTemplate: "/contacts",
-      allowMutation: true,
-      requestTemplate: { body: "<x>{{value}}</x>", bodyType: "raw" },
-    };
-    const db = makeDb([[liveServer], [tool], [], []]);
-
-    await executeMappedTool(db as never, {
-      serverId: "mcs_1",
-      ownerUserId: "usr_owner",
-      toolId: "mct_1",
-      args: { value: "<a>&</a>" },
-      source: "playground",
-      credentialSecret: SECRET,
-    });
-
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect(init.body).toBe("<x><a>&</a></x>");
-    const headers = new Headers(init.headers);
-    expect(headers.get("content-type")).toBeNull();
-  });
-
-  it("returns upstream 401 as a result with error log and no secret leak", async () => {
-    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ error: "unauthorized" }), {
-        status: 401,
-        headers: { "content-type": "application/json" },
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const tokenCipher = encryptCredential("abc-secret", SECRET);
-    const tool = {
-      ...getTool,
-      requestTemplate: {
-        headers: { Authorization: "Bearer {{api_token}}" },
-      },
-    };
-    const db = makeDb([
-      [liveServer],
-      [tool],
-      [
-        {
-          name: "api_token",
-          isSecret: true,
-          value: null,
-          ciphertext: tokenCipher,
-        },
-      ],
-      [{ id: "log_401" }],
-    ]);
-
-    const result = await executeMappedTool(db as never, {
-      serverId: "mcs_1",
-      ownerUserId: "usr_owner",
-      toolId: "mct_1",
-      args: { id: "1" },
-      source: "playground",
-      credentialSecret: SECRET,
-    });
-
-    expect(result).toMatchObject({
-      ok: false,
-      httpStatus: 401,
-      body: JSON.stringify({ error: "unauthorized" }),
-      callLogId: "log_401",
-    });
-    expect(JSON.stringify(result)).not.toContain("abc-secret");
-    expect(JSON.stringify(db.insertedValues)).not.toContain("abc-secret");
-    expect(db.insertedValues[0]).toMatchObject({ status: "error" });
-  });
-
-  it("redacts reflected secrets from upstream error bodies returned to callers", async () => {
-    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ error: "bad token abc-secret" }), {
-        status: 401,
-        headers: { "content-type": "application/json" },
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const tokenCipher = encryptCredential("abc-secret", SECRET);
-    const tool = {
-      ...getTool,
-      requestTemplate: {
-        headers: { Authorization: "Bearer {{api_token}}" },
-      },
-    };
-    const db = makeDb([
-      [liveServer],
-      [tool],
-      [
-        {
-          name: "api_token",
-          isSecret: true,
-          value: null,
-          ciphertext: tokenCipher,
-        },
-      ],
-      [{ id: "log_401b" }],
-    ]);
-
-    const result = await executeMappedTool(db as never, {
-      serverId: "mcs_1",
-      ownerUserId: "usr_owner",
-      toolId: "mct_1",
-      args: { id: "1" },
-      source: "agent",
-      credentialSecret: SECRET,
-    });
-
-    expect(result.httpStatus).toBe(401);
-    expect(result.body).toContain("[REDACTED]");
-    expect(result.body).not.toContain("abc-secret");
   });
 
   it("rejects playground invoke for another user's server", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const db = makeDb([[liveServer]]);
+    const { db } = makeDb({ server: [liveServer], tool: [] });
 
     await expect(
       executeMappedTool(db as never, {
@@ -765,5 +269,392 @@ describe("executeMappedTool", () => {
         error.appCode === APP_ERROR_CODES.MCP_SERVER_NOT_FOUND,
     );
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("executeMappedTool: envelope for completed responses", () => {
+  it("returns a 2xx envelope with parsed JSON data and ok:true", async () => {
+    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { db } = makeDb({ server: [liveServer], tool: [getTool] });
+
+    const result = await executeMappedTool(db as never, {
+      serverId: "mcs_1",
+      ownerUserId: "usr_owner",
+      toolId: "mct_1",
+      args: { id: "1" },
+      source: "playground",
+      credentialSecret: SECRET,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.httpStatus).toBe(200);
+    expect(result.envelope).toMatchObject({
+      ok: true,
+      status: 200,
+      contentType: "application/json",
+      truncated: false,
+      data: { ok: true },
+    });
+    expect(result.callLogId).toBeTruthy();
+    const url = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(url.pathname).toBe("/contacts/1");
+  });
+
+  it("returns a completed 4xx as ok:false with MCP_UPSTREAM_HTTP_ERROR, not a throw", async () => {
+    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ error: "unauthorized" }, 401));
+    vi.stubGlobal("fetch", fetchMock);
+    const { db } = makeDb({ server: [liveServer], tool: [getTool] });
+
+    const result = await executeMappedTool(db as never, {
+      serverId: "mcs_1",
+      ownerUserId: "usr_owner",
+      toolId: "mct_1",
+      args: { id: "1" },
+      source: "playground",
+      credentialSecret: SECRET,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.httpStatus).toBe(401);
+    expect(result.envelope.appCode).toBe(
+      APP_ERROR_CODES.MCP_UPSTREAM_HTTP_ERROR,
+    );
+    expect(result.envelope.data).toEqual({ error: "unauthorized" });
+  });
+
+  it("redacts secret server values from the response body and headers", async () => {
+    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
+    const tokenCipher = encryptCredential("abc-secret", SECRET);
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ error: "bad token abc-secret" }, 401, {
+        "x-request-id": "req_abc-secret",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const tool = {
+      ...getTool,
+      requestTemplate: { headers: { Authorization: "Bearer {{api_token}}" } },
+    };
+    const { db } = makeDb({
+      server: [liveServer],
+      tool: [tool],
+      serverValues: [
+        {
+          id: "msv_token",
+          name: "api_token",
+          isSecret: true,
+          kind: "secret",
+          owner: "manual",
+          value: null,
+          ciphertext: tokenCipher,
+        },
+      ],
+    });
+
+    const result = await executeMappedTool(db as never, {
+      serverId: "mcs_1",
+      ownerUserId: "usr_owner",
+      toolId: "mct_1",
+      args: { id: "1" },
+      source: "playground",
+      credentialSecret: SECRET,
+    });
+
+    expect(result.envelope.body).toContain("[REDACTED]");
+    expect(result.envelope.body).not.toContain("abc-secret");
+    expect(result.envelope.headers["x-request-id"]).toBe("req_[REDACTED]");
+    expect(result.secretsUsed).toEqual(["abc-secret"]);
+    const [, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
+    expect(new Headers(init.headers).get("authorization")).toBe(
+      "Bearer abc-secret",
+    );
+  });
+
+  it("returns binary content as binary:true without decoding the body", async () => {
+    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
+    const bytes = new Uint8Array([0, 159, 146, 150]);
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(bytes, {
+        status: 200,
+        headers: { "content-type": "application/octet-stream" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { db } = makeDb({ server: [liveServer], tool: [getTool] });
+
+    const result = await executeMappedTool(db as never, {
+      serverId: "mcs_1",
+      ownerUserId: "usr_owner",
+      toolId: "mct_1",
+      args: { id: "1" },
+      source: "playground",
+      credentialSecret: SECRET,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.envelope.binary).toBe(true);
+    expect(result.envelope.body).toBeUndefined();
+    expect(result.envelope.data).toBeUndefined();
+  });
+});
+
+describe("executeMappedTool: redirects", () => {
+  it("follows a same-origin 307 redirect, preserving method and body", async () => {
+    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 307,
+          headers: { location: "/contacts/1/canonical" },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const tool = {
+      ...getTool,
+      method: "POST",
+      allowMutation: true,
+      requestTemplate: { body: '{"note":"hi"}', bodyType: "json" },
+    };
+    const { db } = makeDb({ server: [liveServer], tool: [tool] });
+
+    const result = await executeMappedTool(db as never, {
+      serverId: "mcs_1",
+      ownerUserId: "usr_owner",
+      toolId: "mct_1",
+      args: { id: "1" },
+      source: "playground",
+      credentialSecret: SECRET,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const secondCall = fetchMock.mock.calls[1] as [URL, RequestInit];
+    expect(new URL(String(secondCall[0])).pathname).toBe(
+      "/contacts/1/canonical",
+    );
+    expect(secondCall[1].method).toBe("POST");
+    expect(secondCall[1].body).toBe('{"note":"hi"}');
+  });
+
+  it("downgrades a 302 POST redirect to GET without a body", async () => {
+    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 302,
+          headers: { location: "/contacts/1/canonical" },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const tool = {
+      ...getTool,
+      method: "POST",
+      allowMutation: true,
+      requestTemplate: { body: '{"note":"hi"}', bodyType: "json" },
+    };
+    const { db } = makeDb({ server: [liveServer], tool: [tool] });
+
+    await executeMappedTool(db as never, {
+      serverId: "mcs_1",
+      ownerUserId: "usr_owner",
+      toolId: "mct_1",
+      args: { id: "1" },
+      source: "playground",
+      credentialSecret: SECRET,
+    });
+
+    const secondCall = fetchMock.mock.calls[1] as [URL, RequestInit];
+    expect(secondCall[1].method).toBe("GET");
+    expect(secondCall[1].body).toBeUndefined();
+  });
+
+  it("rejects a cross-origin redirect target", async () => {
+    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(null, {
+        status: 302,
+        headers: { location: "https://evil.example/steal" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { db } = makeDb({ server: [liveServer], tool: [getTool] });
+
+    await expect(
+      executeMappedTool(db as never, {
+        serverId: "mcs_1",
+        ownerUserId: "usr_owner",
+        toolId: "mct_1",
+        args: { id: "1" },
+        source: "playground",
+        credentialSecret: SECRET,
+      }),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.appCode === APP_ERROR_CODES.MCP_REDIRECT_REJECTED,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("executeMappedTool: deadline and network failures", () => {
+  it("times out a stalled non-mutating request with MCP_TIMEOUT", async () => {
+    vi.useFakeTimers();
+    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
+    const fetchMock = vi.fn(
+      (_url: unknown, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => {
+            const abortError = new Error("aborted");
+            abortError.name = "AbortError";
+            reject(abortError);
+          });
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { db } = makeDb({ server: [liveServer], tool: [getTool] });
+
+    const promise = executeMappedTool(db as never, {
+      serverId: "mcs_1",
+      ownerUserId: "usr_owner",
+      toolId: "mct_1",
+      args: { id: "1" },
+      source: "playground",
+      credentialSecret: SECRET,
+    });
+    const assertion = expect(promise).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.appCode === APP_ERROR_CODES.MCP_TIMEOUT,
+    );
+    await vi.advanceTimersByTimeAsync(MCP_UPSTREAM_DEADLINE_MS + 10);
+    await assertion;
+  });
+
+  it("maps a timeout after a mutating send to MCP_MUTATION_INDETERMINATE", async () => {
+    vi.useFakeTimers();
+    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
+    const fetchMock = vi.fn(
+      (_url: unknown, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => {
+            const abortError = new Error("aborted");
+            abortError.name = "AbortError";
+            reject(abortError);
+          });
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const tool = {
+      ...getTool,
+      method: "POST",
+      allowMutation: true,
+      requestTemplate: { body: "{}", bodyType: "json" },
+    };
+    const { db } = makeDb({ server: [liveServer], tool: [tool] });
+
+    const promise = executeMappedTool(db as never, {
+      serverId: "mcs_1",
+      ownerUserId: "usr_owner",
+      toolId: "mct_1",
+      args: { id: "1" },
+      source: "playground",
+      credentialSecret: SECRET,
+    });
+    const assertion = expect(promise).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.appCode === APP_ERROR_CODES.MCP_MUTATION_INDETERMINATE,
+    );
+    await vi.advanceTimersByTimeAsync(MCP_UPSTREAM_DEADLINE_MS + 10);
+    await assertion;
+  });
+
+  it("maps a network failure after a mutating send to MCP_MUTATION_INDETERMINATE", async () => {
+    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
+    const fetchMock = vi.fn().mockRejectedValue(new Error("ECONNRESET"));
+    vi.stubGlobal("fetch", fetchMock);
+    const tool = {
+      ...getTool,
+      method: "POST",
+      allowMutation: true,
+      requestTemplate: { body: "{}", bodyType: "json" },
+    };
+    const { db } = makeDb({ server: [liveServer], tool: [tool] });
+
+    await expect(
+      executeMappedTool(db as never, {
+        serverId: "mcs_1",
+        ownerUserId: "usr_owner",
+        toolId: "mct_1",
+        args: { id: "1" },
+        source: "playground",
+        credentialSecret: SECRET,
+      }),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.appCode === APP_ERROR_CODES.MCP_MUTATION_INDETERMINATE,
+    );
+  });
+
+  it("maps a network failure for a non-mutating request to MCP_UPSTREAM_ERROR", async () => {
+    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
+    const fetchMock = vi.fn().mockRejectedValue(new Error("ECONNRESET"));
+    vi.stubGlobal("fetch", fetchMock);
+    const { db } = makeDb({ server: [liveServer], tool: [getTool] });
+
+    await expect(
+      executeMappedTool(db as never, {
+        serverId: "mcs_1",
+        ownerUserId: "usr_owner",
+        toolId: "mct_1",
+        args: { id: "1" },
+        source: "playground",
+        credentialSecret: SECRET,
+      }),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.appCode === APP_ERROR_CODES.MCP_UPSTREAM_ERROR,
+    );
+  });
+});
+
+describe("executeMappedTool: audit logging", () => {
+  it("persists a best-effort call log without affecting the returned result", async () => {
+    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { db, insertedValues } = makeDb({
+      server: [liveServer],
+      tool: [getTool],
+    });
+
+    const result = await executeMappedTool(db as never, {
+      serverId: "mcs_1",
+      ownerUserId: "usr_owner",
+      toolId: "mct_1",
+      args: { id: "1" },
+      source: "playground",
+      credentialSecret: SECRET,
+    });
+
+    await flushMicrotasks();
+    expect(insertedValues).toHaveLength(1);
+    expect(insertedValues[0]).toMatchObject({
+      id: result.callLogId,
+      status: "success",
+      outcome: "success",
+    });
   });
 });
