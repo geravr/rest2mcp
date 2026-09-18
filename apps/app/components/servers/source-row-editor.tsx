@@ -381,6 +381,7 @@ export function SourceRowEditor({
   mode = "tool",
   disabled,
   emptyLabel,
+  issuesByNodeId,
 }: {
   rows: SourceRow[];
   onChange: (rows: SourceRow[]) => void;
@@ -389,6 +390,10 @@ export function SourceRowEditor({
   mode?: SourceOriginMode;
   disabled?: boolean;
   emptyLabel?: string;
+  issuesByNodeId?: Record<
+    string,
+    { message: string; severity: "error" | "warning" }
+  >;
 }) {
   const { t } = useTranslations();
   const origins =
@@ -522,7 +527,7 @@ export function SourceRowEditor({
               }
               type={row.type}
               onTypeChange={(nextType) =>
-                update(index, { ...row, type: nextType })
+                update(index, { ...row, type: nextType, inputType: undefined })
               }
               required={row.required}
               onRequiredChange={(nextRequired) =>
@@ -538,6 +543,11 @@ export function SourceRowEditor({
               }
               disabled={disabled}
             />
+          ) : null}
+          {row.nodeId && issuesByNodeId?.[row.nodeId] ? (
+            <p className="text-xs text-destructive">
+              {issuesByNodeId[row.nodeId].message}
+            </p>
           ) : null}
         </div>
       ))}

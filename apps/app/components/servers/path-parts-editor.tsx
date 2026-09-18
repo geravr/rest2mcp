@@ -117,7 +117,7 @@ export function PathPartsEditor({
                       ? undefined
                       : `${t.servers.pathTemplate} ${index + 1}`
                   }
-                  onChange={(value) => update(index, { kind: "text", value })}
+                  onChange={(value) => update(index, { ...part, value })}
                 />
               );
             }
@@ -134,9 +134,7 @@ export function PathPartsEditor({
                     variableKinds={variableKinds}
                     disabled={disabled}
                     compact
-                    onChange={(name) =>
-                      update(index, { kind: "variable", name })
-                    }
+                    onChange={(name) => update(index, { ...part, name })}
                   />
                   <Button
                     type="button"
@@ -203,7 +201,9 @@ export function PathPartsEditor({
                   update(index, { ...part, description })
                 }
                 type={part.type}
-                onTypeChange={(type) => update(index, { ...part, type })}
+                onTypeChange={(type) =>
+                  update(index, { ...part, type, inputType: undefined })
+                }
                 required={part.required}
                 onRequiredChange={(required) =>
                   update(index, { ...part, required })

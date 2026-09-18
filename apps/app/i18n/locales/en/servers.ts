@@ -327,6 +327,13 @@ export const enServers = {
     previewAgentInput: "agent input",
     previewSavedIssues:
       "This tool has {count} unresolved compile issue(s) from the last save. Run Preview to see details.",
+    loadingToolDefinition: "Loading tool definition…",
+    conversionLoadFailed:
+      "Could not load this tool's conversion draft. Close the dialog and try again.",
+    advancedJsonInvalid:
+      "The advanced JSON body is not valid JSON. Fix it before previewing or saving.",
+    conversionBlocked:
+      "This legacy tool has {count} ambiguous binding(s). Resolve each source before enabling it; the proposed typed draft is shown so you can adjust it.",
     compileInvalidShort: "Fix compile issues to enable",
     annotationReadOnly: "Read-only",
     annotationDestructive: "Destructive",

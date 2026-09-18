@@ -333,6 +333,13 @@ export const esServers = {
     previewAgentInput: "entrada del agente",
     previewSavedIssues:
       "Esta herramienta tiene {count} problema(s) de compilación sin resolver desde el último guardado. Ejecuta la vista previa para ver los detalles.",
+    loadingToolDefinition: "Cargando la definición de la herramienta…",
+    conversionLoadFailed:
+      "No se pudo cargar el borrador de conversión de esta herramienta. Cierra el diálogo e inténtalo de nuevo.",
+    advancedJsonInvalid:
+      "El cuerpo JSON avanzado no es JSON válido. Corrígelo antes de previsualizar o guardar.",
+    conversionBlocked:
+      "Esta herramienta heredada tiene {count} enlace(s) ambiguo(s). Resuelve cada origen antes de habilitarla; se muestra el borrador tipado propuesto para que lo ajustes.",
     compileInvalidShort: "Corrige la compilación para habilitar",
     annotationReadOnly: "Solo lectura",
     annotationDestructive: "Destructiva",

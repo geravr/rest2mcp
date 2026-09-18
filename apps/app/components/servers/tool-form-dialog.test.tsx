@@ -7,7 +7,13 @@ import { ToolFormDialog, type ToolFormTool } from "./tool-form-dialog";
 type SaveOptions = {
   onSuccess?: (result: {
     id: string;
-    warnings?: Array<{ type: string; name: string }>;
+    compileIssues?: Array<{
+      path: string;
+      id?: string;
+      code: string;
+      message: string;
+      severity: "error" | "warning";
+    }>;
   }) => void;
 };
 
@@ -27,9 +33,27 @@ const updateMutate = vi.fn<(input: unknown, options?: SaveOptions) => void>();
 const previewMutate = vi.fn<(input: unknown) => void>();
 let previewResultQueue: PreviewResult[] = [];
 
+const editorStateRef = vi.hoisted(() => ({
+  value: undefined as
+    | {
+        data: unknown;
+        isLoading: boolean;
+        isError: boolean;
+        error: null;
+      }
+    | undefined,
+}));
+
 vi.mock("@/hooks/use-mcp", () => ({
   useCreateMcpTool: () => ({ mutate: createMutate, isPending: false }),
   useUpdateMcpTool: () => ({ mutate: updateMutate, isPending: false }),
+  useMcpToolEditorState: () =>
+    editorStateRef.value ?? {
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+    },
   // A real useState-backed mock so `.data` reactively drives re-renders,
   // mirroring the real TanStack Query mutation hook's behavior.
   usePreviewToolCompile: () => {
@@ -72,6 +96,7 @@ describe("ToolFormDialog", () => {
     updateMutate.mockReset();
     previewMutate.mockReset();
     previewResultQueue = [];
+    editorStateRef.value = undefined;
   });
 
   it("blocks enabling a tool once the preview reports a compile error", async () => {
@@ -110,17 +135,25 @@ describe("ToolFormDialog", () => {
     expect(screen.getByLabelText(/^enabled$/i)).toBeDisabled();
   });
 
-  it("switches to editing the saved tool when the create returns warnings", async () => {
+  it("switches to editing the saved tool when the create returns compile errors", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     createMutate.mockImplementation((_input, options) => {
       options?.onSuccess?.({
         id: "mct_new",
-        warnings: [{ type: "placeholder_without_param", name: "acme" }],
+        compileIssues: [
+          {
+            path: "query[0]",
+            id: "entry_1",
+            code: "MCP_TEMPLATE_UNRESOLVED",
+            message: "Agent input is not declared.",
+            severity: "error",
+          },
+        ],
       });
     });
     updateMutate.mockImplementation((_input, options) => {
-      options?.onSuccess?.({ id: "mct_new" });
+      options?.onSuccess?.({ id: "mct_new", compileIssues: [] });
     });
 
     render(
@@ -139,7 +172,6 @@ describe("ToolFormDialog", () => {
     expect(
       screen.getByRole("heading", { name: /edit tool/i }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/\{\{acme\}\} is used/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /save tool/i }));
 
@@ -211,15 +243,20 @@ describe("ToolFormDialog", () => {
 
     expect(createMutate).toHaveBeenCalledWith(
       expect.objectContaining({
-        requestTemplate: expect.objectContaining({
-          query: { locationId: "{{location_id}}" },
+        requestDefinition: expect.objectContaining({
+          query: [
+            expect.objectContaining({
+              name: "locationId",
+              value: expect.objectContaining({ kind: "agentInput" }),
+            }),
+          ],
+          agentInputs: [
+            expect.objectContaining({
+              name: "location_id",
+              description: "Location to search",
+            }),
+          ],
         }),
-        params: [
-          expect.objectContaining({
-            name: "location_id",
-            description: "Location to search",
-          }),
-        ],
       }),
       expect.anything(),
     );
@@ -252,10 +289,18 @@ describe("ToolFormDialog", () => {
 
     expect(createMutate).toHaveBeenCalledWith(
       expect.objectContaining({
-        requestTemplate: expect.objectContaining({
-          headers: { Authorization: "Bearer {{api_token}}" },
+        requestDefinition: expect.objectContaining({
+          headers: [
+            expect.objectContaining({
+              name: "Authorization",
+              value: expect.objectContaining({
+                kind: "serverValue",
+                prefix: "Bearer ",
+              }),
+            }),
+          ],
+          agentInputs: [],
         }),
-        params: [],
       }),
       expect.anything(),
     );
@@ -466,5 +511,166 @@ describe("ToolFormDialog", () => {
     expect(
       screen.getByRole("button", { name: /save tool/i }),
     ).toBeInTheDocument();
+  });
+
+  it("loads a typed definition directly and preserves node ids on save", async () => {
+    const user = userEvent.setup();
+    const typedTool: ToolFormTool = {
+      ...toolFixture,
+      requestDefinition: {
+        version: 1,
+        pathSegments: [
+          { id: "path_1", value: { kind: "literal", value: "/contacts" } },
+          {
+            id: "path_2",
+            value: { kind: "agentInput", agentInputId: "ain_1" },
+          },
+        ],
+        query: [
+          {
+            id: "query_1",
+            name: "limit",
+            value: { kind: "serverValue", serverValueId: "msv_1" },
+          },
+        ],
+        headers: [],
+        body: { bodyType: "none" },
+        agentInputs: [
+          {
+            id: "ain_1",
+            name: "id",
+            required: true,
+            sensitive: false,
+            type: "string",
+          },
+        ],
+      },
+    };
+    updateMutate.mockImplementation((_input, options) => {
+      options?.onSuccess?.({ id: "mct_1", compileIssues: [] });
+    });
+
+    render(
+      <ToolFormDialog
+        serverId="mcs_1"
+        variableNames={["api_token"]}
+        variables={[{ id: "msv_1", name: "api_token", kind: "secret" }]}
+        tool={typedTool}
+        onClose={() => {}}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /save tool/i }));
+
+    expect(updateMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestDefinition: expect.objectContaining({
+          pathSegments: expect.arrayContaining([
+            expect.objectContaining({ id: "path_2" }),
+          ]),
+          query: [
+            expect.objectContaining({
+              id: "query_1",
+              value: { kind: "serverValue", serverValueId: "msv_1" },
+            }),
+          ],
+          agentInputs: [expect.objectContaining({ id: "ain_1", name: "id" })],
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("renders a backend conversion draft for a legacy-only tool", () => {
+    editorStateRef.value = {
+      data: {
+        toolId: "mct_1",
+        typed: false,
+        definition: null,
+        issues: [],
+        conversionDraft: {
+          version: 1,
+          pathSegments: [
+            { id: "path_1", value: { kind: "literal", value: "/legacy" } },
+          ],
+          query: [],
+          headers: [],
+          body: { bodyType: "none" },
+          agentInputs: [],
+        },
+        conversionIssues: [
+          {
+            path: "query[0]",
+            id: "query_1",
+            code: "MCP_TEMPLATE_UNRESOLVED",
+            message: "Ambiguous source.",
+            severity: "error",
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+    };
+
+    render(
+      <ToolFormDialog
+        serverId="mcs_1"
+        variableNames={[]}
+        tool={toolFixture}
+        onClose={() => {}}
+      />,
+    );
+
+    expect(screen.getByLabelText(/^path$/i)).toHaveValue("/legacy");
+    expect(screen.getByText(/ambiguous source/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^enabled$/i)).toBeDisabled();
+  });
+
+  it("redacts secret values in the effective-request preview", async () => {
+    const user = userEvent.setup();
+    previewResultQueue = [
+      {
+        ok: true,
+        issues: [],
+        plan: {
+          annotations: { readOnlyHint: true },
+          headers: [
+            {
+              name: "Authorization",
+              source: { kind: "serverValue", serverValueId: "msv_1" },
+            },
+          ],
+          query: [],
+          agentInputs: [],
+        },
+      },
+    ];
+
+    render(
+      <ToolFormDialog
+        serverId="mcs_1"
+        variableNames={["api_token"]}
+        variables={[{ id: "msv_1", name: "api_token", kind: "secret" }]}
+        onClose={() => {}}
+      />,
+    );
+
+    await user.type(screen.getByLabelText(/tool name/i), "auth");
+    await user.type(screen.getByLabelText(/^path$/i), "/me");
+    await user.click(screen.getByRole("tab", { name: /headers/i }));
+    await user.click(screen.getByRole("button", { name: /add row/i }));
+    await user.type(screen.getByLabelText(/^key$/i), "Authorization");
+    await selectOrigin(user, /^variable$/i);
+    await user.click(screen.getByRole("button", { name: /select variable/i }));
+    await user.click(screen.getByRole("menuitem", { name: "api_token" }));
+
+    await user.click(
+      screen.getByRole("button", { name: /effective request preview/i }),
+    );
+    await user.click(screen.getByRole("button", { name: /^preview$/i }));
+
+    expect(screen.getByText(/•••• \(secret value\)/i)).toBeInTheDocument();
+    expect(screen.queryByText(/super-secret/i)).not.toBeInTheDocument();
   });
 });

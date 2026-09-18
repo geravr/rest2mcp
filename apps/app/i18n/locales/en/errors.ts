@@ -115,6 +115,10 @@ export const enErrors = {
         "The mutation may have completed, but the final upstream outcome is unknown.",
       [APP_ERROR_CODES.MCP_BINARY_UNSUPPORTED]:
         "Binary upstream responses are not returned as text.",
+      [APP_ERROR_CODES.MCP_LEGACY_PROJECTION_UNAVAILABLE]:
+        "This definition uses typed semantics that cannot be represented with legacy templates; it stays typed and cannot be rolled back to template fields.",
+      [APP_ERROR_CODES.MCP_LEGACY_DOWNGRADE_REJECTED]:
+        "This tool or server already uses typed request bindings; legacy template updates are rejected.",
 
       [APP_ERROR_CODES.ROUTE_NOT_FOUND]: "This API route does not exist.",
       [APP_ERROR_CODES.INTERNAL_ERROR]:

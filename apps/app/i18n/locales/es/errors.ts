@@ -128,6 +128,10 @@ export const esErrors = {
         "La mutación pudo haberse completado, pero el resultado final del origen es desconocido.",
       [APP_ERROR_CODES.MCP_BINARY_UNSUPPORTED]:
         "Las respuestas binarias del origen no se devuelven como texto.",
+      [APP_ERROR_CODES.MCP_LEGACY_PROJECTION_UNAVAILABLE]:
+        "Esta definición usa semántica tipada que no puede representarse con plantillas heredadas; permanece tipada y no puede revertirse a campos de plantilla.",
+      [APP_ERROR_CODES.MCP_LEGACY_DOWNGRADE_REJECTED]:
+        "Esta herramienta o servidor ya usa enlaces tipados; se rechazan las actualizaciones con plantillas heredadas.",
 
       [APP_ERROR_CODES.ROUTE_NOT_FOUND]: "Esta ruta de API no existe.",
       [APP_ERROR_CODES.INTERNAL_ERROR]:

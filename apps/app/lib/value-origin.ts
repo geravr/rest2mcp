@@ -4,6 +4,8 @@ export type AgentMeta = {
   name: string;
   description?: string;
   type: AgentParamType;
+  /** Original agent-input type, preserved for `integer` round trips. */
+  inputType?: "string" | "number" | "boolean" | "integer" | "json";
   required: boolean;
   /** Never logged/previewed; masked as a password field in the playground. */
   sensitive?: boolean;
@@ -19,15 +21,36 @@ export type AgentMeta = {
 
 export type ValueOrigin =
   | { origin: "fixed"; value: string }
-  | { origin: "variable"; name: string; prefix: string }
-  | ({ origin: "agent" } & AgentMeta);
+  | {
+      origin: "variable";
+      name: string;
+      prefix: string;
+      suffix?: string;
+      /** Stable server-value id, when loaded from a typed definition. */
+      serverValueId?: string;
+    }
+  | ({ origin: "agent"; id?: string } & AgentMeta);
 
-export type SourceRow = { key: string } & ValueOrigin;
+export type SourceRow = {
+  key: string;
+  nodeId?: string;
+  /** Omit this entry when its bound agent input is absent. */
+  omitWhenAbsent?: boolean;
+  /** Declared JSON type for structured body rows. */
+  jsonType?: "string" | "number" | "boolean" | "null" | "any";
+} & ValueOrigin;
 
 export type PathPart =
-  | { kind: "text"; value: string }
-  | { kind: "variable"; name: string }
-  | ({ kind: "agent" } & AgentMeta);
+  | { kind: "text"; value: string; nodeId?: string }
+  | {
+      kind: "variable";
+      name: string;
+      prefix?: string;
+      suffix?: string;
+      serverValueId?: string;
+      nodeId?: string;
+    }
+  | ({ kind: "agent"; id?: string; nodeId?: string } & AgentMeta);
 
 export const PLACEHOLDER_PATTERN = /\{\{([A-Za-z][A-Za-z0-9_]*)\}\}/g;
 const EXACT_PLACEHOLDER = /^\{\{([A-Za-z][A-Za-z0-9_]*)\}\}$/;

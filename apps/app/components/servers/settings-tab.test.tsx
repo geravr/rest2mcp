@@ -5,12 +5,23 @@ import { ServerSettingsTab } from "./settings-tab";
 
 const createVariableMutate = vi.fn();
 const updateServerMutate = vi.fn();
+const updateCommonMutate = vi.fn();
 const setServerAuthMutate = vi.fn();
 const testConnectionMutate = vi.fn();
 
 vi.mock("@/hooks/use-mcp", () => ({
   useMcpVariables: () => ({
     data: [{ id: "msv_1", name: "api_version", isSecret: false, value: "v1" }],
+    isLoading: false,
+    isError: false,
+    error: null,
+  }),
+  useMcpServerCommon: () => ({
+    data: {
+      common: { headers: [], query: [] },
+      legacyProjectable: true,
+      projectionIssues: [],
+    },
     isLoading: false,
     isError: false,
     error: null,
@@ -35,6 +46,10 @@ vi.mock("@/hooks/use-mcp", () => ({
   }),
   useUpdateMcpServer: () => ({
     mutate: updateServerMutate,
+    isPending: false,
+  }),
+  useUpdateMcpServerCommon: () => ({
+    mutate: updateCommonMutate,
     isPending: false,
   }),
   useSetMcpServerAuth: () => ({
@@ -63,6 +78,7 @@ describe("ServerSettingsTab", () => {
   beforeEach(() => {
     createVariableMutate.mockClear();
     updateServerMutate.mockClear();
+    updateCommonMutate.mockClear();
     setServerAuthMutate.mockClear();
     testConnectionMutate.mockClear();
   });
@@ -165,12 +181,18 @@ describe("ServerSettingsTab", () => {
     await user.click(screen.getByRole("menuitem", { name: "api_version" }));
     await user.click(screen.getByRole("button", { name: /save defaults/i }));
 
-    expect(updateServerMutate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        serverId: "mcs_1",
-        defaultHeaders: { Version: "{{api_version}}" },
-      }),
-    );
+    expect(updateCommonMutate).toHaveBeenCalledWith({
+      serverId: "mcs_1",
+      common: {
+        headers: [
+          expect.objectContaining({
+            name: "Version",
+            value: { kind: "serverValue", serverValueId: "msv_1" },
+          }),
+        ],
+        query: [],
+      },
+    });
   });
 
   it("infers Bearer and does not display the stored token", () => {

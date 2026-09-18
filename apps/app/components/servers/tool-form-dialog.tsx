@@ -6,14 +6,25 @@ import {
 import { TemplateValueInput } from "@/components/servers/template-value-input";
 import {
   useCreateMcpTool,
+  useMcpToolEditorState,
   usePreviewToolCompile,
   useUpdateMcpTool,
 } from "@/hooks/use-mcp";
 import { useTranslations } from "@/i18n/use-translations";
 import {
-  collectAgentParams,
+  buildServerValueLookup,
+  createDefinitionId,
+  definitionAgentInputs,
+  definitionToBodyState,
+  definitionToPathParts,
+  definitionToSourceRows,
+  formStateToDefinition,
+  isClientRequestDefinition,
+  type ClientJsonNode,
+  type ClientRequestDefinition,
+} from "@/lib/request-definition";
+import {
   compileFormBody,
-  compileMap,
   compileStructuredJson,
   defaultAgentMeta,
   detectPlaceholderNames,
@@ -22,7 +33,6 @@ import {
   inferMapRows,
   isFlatJsonTemplate,
   joinPath,
-  originsFromPath,
   paramsByName,
   splitPath,
   type AgentMeta,
@@ -61,12 +71,34 @@ import { useMemo, useRef, useState } from "react";
 const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] as const;
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
+/** Keeps only agent metadata fields so propagation never clobbers row keys/ids. */
+function pickAgentMeta(source: AgentMeta): AgentMeta {
+  return {
+    name: source.name,
+    description: source.description,
+    type: source.type,
+    inputType: source.inputType,
+    required: source.required,
+    sensitive: source.sensitive,
+    minimum: source.minimum,
+    maximum: source.maximum,
+    minLength: source.minLength,
+    maxLength: source.maxLength,
+    pattern: source.pattern,
+    enum: source.enum,
+    examples: source.examples,
+    allowEmpty: source.allowEmpty,
+  };
+}
+
 type BodyType = "none" | "json" | "form" | "raw";
 
 export type ToolParamDraft = AgentMeta;
 
 export type ToolCompileIssue = {
   path: string;
+  /** Stable definition-local id of the affected node, when known. */
+  id?: string;
   code: string;
   message: string;
   severity: "error" | "warning";
@@ -85,6 +117,8 @@ export type ToolFormTool = {
     bodyType?: "json" | "form" | "raw";
   } | null;
   params: ToolParamDraft[] | null;
+  /** Canonical versioned definition; authoritative when present. */
+  requestDefinition?: Record<string, unknown> | null;
   allowMutation: boolean;
   enabled: boolean;
   compileStatus?: string | null;
@@ -95,11 +129,6 @@ export type ToolFormServerValue = {
   id: string;
   name: string;
   kind: "config" | "secret";
-};
-
-type TemplateWarning = {
-  type: "placeholder_without_param" | "param_without_placeholder";
-  name: string;
 };
 
 function initialBodyState(
@@ -222,14 +251,12 @@ function describeBinding(
  * stays open and switches to editing the just-saved tool, so a second submit
  * updates instead of duplicating.
  */
-export function ToolFormDialog({
-  serverId,
-  variableNames,
-  variables = [],
-  tool,
-  duplicate = false,
-  onClose,
-}: {
+/**
+ * Loads a legacy-only tool's backend conversion draft before rendering the
+ * form, so unmigrated tools open as typed definitions when the analysis is
+ * unambiguous and surface blocking diagnostics otherwise.
+ */
+export function ToolFormDialog(props: {
   serverId: string;
   variableNames: string[];
   variables?: ToolFormServerValue[];
@@ -238,11 +265,115 @@ export function ToolFormDialog({
   onClose: () => void;
 }) {
   const { t } = useTranslations();
+  const isTyped = isClientRequestDefinition(props.tool?.requestDefinition);
+  const needsConversion = Boolean(props.tool) && !isTyped && !props.duplicate;
+  const editorState = useMcpToolEditorState(
+    props.serverId,
+    props.tool?.id ?? "",
+    needsConversion,
+  );
+  const draft = editorState.data?.conversionDraft;
+  const resolvedTool =
+    props.tool && draft && isClientRequestDefinition(draft)
+      ? {
+          ...props.tool,
+          requestDefinition: draft as unknown as Record<string, unknown>,
+        }
+      : props.tool;
+
+  if (needsConversion && editorState.isLoading && !editorState.data) {
+    return (
+      <Dialog open onOpenChange={() => props.onClose()}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t.servers.editToolTitle}</DialogTitle>
+            <DialogDescription>
+              {t.servers.loadingToolDefinition}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center justify-center py-6">
+            <LoaderCircle className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  if (needsConversion && editorState.isError) {
+    return (
+      <Dialog open onOpenChange={() => props.onClose()}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t.servers.editToolTitle}</DialogTitle>
+            <DialogDescription>
+              {t.servers.conversionLoadFailed}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" onClick={() => props.onClose()}>
+              {t.servers.cancel}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  return (
+    <ToolFormDialogForm
+      key={`${props.tool?.id ?? "new"}-${isTyped ? "typed" : draft ? "converted" : "legacy"}`}
+      {...props}
+      tool={resolvedTool}
+      conversionIssues={editorState.data?.conversionIssues ?? []}
+    />
+  );
+}
+
+export function ToolFormDialogForm({
+  serverId,
+  variableNames,
+  variables = [],
+  tool,
+  duplicate = false,
+  onClose,
+  conversionIssues = [],
+}: {
+  serverId: string;
+  variableNames: string[];
+  variables?: ToolFormServerValue[];
+  tool?: ToolFormTool;
+  duplicate?: boolean;
+  onClose: () => void;
+  conversionIssues?: ToolCompileIssue[];
+}) {
+  const { t } = useTranslations();
   const createTool = useCreateMcpTool();
   const updateTool = useUpdateMcpTool();
   const previewCompile = usePreviewToolCompile();
   const isEdit = Boolean(tool) && !duplicate;
   const paramMap = paramsByName(tool?.params);
+  const definition = isClientRequestDefinition(tool?.requestDefinition)
+    ? tool.requestDefinition
+    : null;
+  const lookup = useMemo(
+    () =>
+      buildServerValueLookup(
+        variables.map((value) => ({ id: value.id, name: value.name })),
+      ),
+    [variables],
+  );
+  const definitionAgentInputById = useMemo(
+    () => (definition ? definitionAgentInputs(definition) : new Map()),
+    [definition],
+  );
+  const agentInputIdByNameRef = useRef<Map<string, string>>(
+    new Map(
+      (duplicate ? [] : (definition?.agentInputs ?? [])).map((input) => [
+        input.name,
+        input.id,
+      ]),
+    ),
+  );
   const variableKinds = useMemo(
     () =>
       Object.fromEntries(variables.map((value) => [value.name, value.kind])),
@@ -257,34 +388,45 @@ export function ToolFormDialog({
     [variables],
   );
 
+  const resolveAgentInputId = (agentName: string): string => {
+    const existing = agentInputIdByNameRef.current.get(agentName);
+    if (existing) return existing;
+    const id = createDefinitionId("ain");
+    agentInputIdByNameRef.current.set(agentName, id);
+    return id;
+  };
+
   const initialName = tool ? (duplicate ? `${tool.name}_copy` : tool.name) : "";
   const initialMethod = (METHODS as readonly string[]).includes(
     tool?.method ?? "",
   )
     ? (tool?.method as (typeof METHODS)[number])
     : "GET";
-  const initialPathParts = splitPath(
-    tool?.pathTemplate ?? "",
-    variableNames,
-    paramMap,
-  );
+  const initialPathParts = definition
+    ? definitionToPathParts(definition, lookup)
+    : splitPath(tool?.pathTemplate ?? "", variableNames, paramMap);
   const initialDescription = tool?.description ?? "";
-  const initialQuery = inferMapRows(
-    tool?.requestTemplate?.query,
-    variableNames,
-    paramMap,
-  );
-  const initialHeaders = inferMapRows(
-    tool?.requestTemplate?.headers,
-    variableNames,
-    paramMap,
-  );
-  const initialBody = initialBodyState(tool, variableNames, paramMap);
+  const initialQuery = definition
+    ? definitionToSourceRows(definition.query, lookup, definitionAgentInputById)
+    : inferMapRows(tool?.requestTemplate?.query, variableNames, paramMap);
+  const initialHeaders = definition
+    ? definitionToSourceRows(
+        definition.headers,
+        lookup,
+        definitionAgentInputById,
+      )
+    : inferMapRows(tool?.requestTemplate?.headers, variableNames, paramMap);
+  const initialBody = definition
+    ? definitionToBodyState(definition, lookup)
+    : initialBodyState(tool, variableNames, paramMap);
   const initialLeftoverDrafts = Object.fromEntries(
     (tool?.params ?? []).map((param) => [param.name, param]),
   );
   const initialAllowMutation = tool?.allowMutation ?? false;
-  const initialEnabled = tool?.enabled ?? true;
+  const conversionBlocks = conversionIssues.some(
+    (issue) => issue.severity === "error",
+  );
+  const initialEnabled = conversionBlocks ? false : (tool?.enabled ?? true);
 
   const [name, setName] = useState(initialName);
   const [method, setMethod] = useState<(typeof METHODS)[number]>(initialMethod);
@@ -302,15 +444,143 @@ export function ToolFormDialog({
   >(initialLeftoverDrafts);
   const [allowMutation, setAllowMutation] = useState(initialAllowMutation);
   const [enabled, setEnabled] = useState(initialEnabled);
-  const [warnings, setWarnings] = useState<TemplateWarning[]>([]);
   const [savedToolId, setSavedToolId] = useState<string | null>(
     isEdit && tool ? tool.id : null,
   );
+  const [saveIssues, setSaveIssues] = useState<ToolCompileIssue[]>([]);
   const [discardOpen, setDiscardOpen] = useState(false);
   const [mutationConfirmOpen, setMutationConfirmOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const preview = previewCompile.data ?? null;
   const savedRef = useRef(false);
+  const nodeIdRegistryRef = useRef(new Map<object, string>());
+  const resolveNodeId = (source: object, prefix: string): string => {
+    const registry = nodeIdRegistryRef.current;
+    const existing = registry.get(source);
+    if (existing) return existing;
+    const id = createDefinitionId(prefix);
+    registry.set(source, id);
+    return id;
+  };
+
+  const issuesByNodeId = useMemo(() => {
+    const map: Record<
+      string,
+      { message: string; severity: "error" | "warning" }
+    > = {};
+    const all = [
+      ...(preview?.issues ?? []),
+      ...(tool?.compileIssues ?? []),
+      ...saveIssues,
+      ...conversionIssues,
+    ];
+    for (const issue of all) {
+      if (issue.id && !map[issue.id]) {
+        map[issue.id] = { message: issue.message, severity: issue.severity };
+      }
+    }
+    return map;
+  }, [preview, tool?.compileIssues, saveIssues, conversionIssues]);
+
+  const applyAgentMetaToRow = (
+    row: SourceRow,
+    meta: AgentMeta,
+    identity: string,
+  ) =>
+    row.origin === "agent" &&
+    ((row.id ?? row.name) === identity || row.name === meta.name)
+      ? { ...row, ...meta }
+      : row;
+
+  const applyAgentMetaToPart = (
+    part: PathPart,
+    meta: AgentMeta,
+    identity: string,
+  ) =>
+    part.kind === "agent" &&
+    ((part.id ?? part.name) === identity || part.name === meta.name)
+      ? { ...part, ...meta }
+      : part;
+
+  /**
+   * Editing one registry entry updates every request location bound to the
+   * same stable agent-input id (or legacy name) so metadata is stored once.
+   */
+  const propagateAgentMeta = (meta: AgentMeta, identity: string) => {
+    setQuery((rows) =>
+      rows.map((row) => applyAgentMetaToRow(row, meta, identity)),
+    );
+    setHeaders((rows) =>
+      rows.map((row) => applyAgentMetaToRow(row, meta, identity)),
+    );
+    setFormRows((rows) =>
+      rows.map((row) => applyAgentMetaToRow(row, meta, identity)),
+    );
+    setJsonRows((rows) =>
+      rows.map((row) => applyAgentMetaToRow(row, meta, identity)),
+    );
+    setPathParts((parts) =>
+      parts.map((part) => applyAgentMetaToPart(part, meta, identity)),
+    );
+  };
+
+  const detectAgentMetaChange = (previous: SourceRow[], next: SourceRow[]) => {
+    const before = new Map(
+      previous
+        .filter((row) => row.origin === "agent")
+        .map((row) => [row.key, row]),
+    );
+    for (const [index, row] of next.entries()) {
+      if (row.origin !== "agent") continue;
+      const priorRow = previous[index];
+      const prior =
+        before.get(row.key) ??
+        (priorRow?.origin === "agent" ? priorRow : undefined);
+      if (!prior || prior.origin !== "agent") continue;
+      const priorComparable = JSON.stringify({ ...prior, key: "" });
+      const nextComparable = JSON.stringify({ ...row, key: "" });
+      if (priorComparable !== nextComparable) {
+        return { identity: prior.id ?? prior.name, meta: pickAgentMeta(row) };
+      }
+    }
+    return null;
+  };
+
+  const changeRows = (
+    setter: (rows: SourceRow[]) => void,
+    current: SourceRow[],
+  ) => {
+    return (next: SourceRow[]) => {
+      const change = detectAgentMetaChange(current, next);
+      setter(next);
+      if (change) propagateAgentMeta(change.meta, change.identity);
+    };
+  };
+
+  const changePathParts = (next: PathPart[]) => {
+    const previousByIdentity = new Map(
+      pathParts
+        .filter((part) => part.kind === "agent")
+        .map((part) => [(part as { id?: string }).id ?? part.name, part]),
+    );
+    setPathParts(next);
+    for (const [index, part] of next.entries()) {
+      if (part.kind !== "agent") continue;
+      const identity = (part as { id?: string }).id ?? part.name;
+      const priorRow = pathParts[index];
+      const prior =
+        previousByIdentity.get(identity) ??
+        (priorRow?.kind === "agent" ? priorRow : undefined);
+      if (!prior || prior.kind !== "agent") continue;
+      if (JSON.stringify(prior) !== JSON.stringify(part)) {
+        propagateAgentMeta(
+          pickAgentMeta(part),
+          (prior as { id?: string }).id ?? prior.name,
+        );
+        break;
+      }
+    }
+  };
 
   const isPending = createTool.isPending || updateTool.isPending;
   const effectiveEdit = isEdit || savedToolId !== null;
@@ -318,6 +588,21 @@ export function ToolFormDialog({
     bodyType === "raw" || (bodyType === "json" && jsonAdvanced);
   const isMutatingMethod = MUTATING_METHODS.has(method);
   const previewBlocksEnable = preview !== null && !preview.ok;
+  const saveBlocks = saveIssues.some((issue) => issue.severity === "error");
+  const advancedJsonInvalid = useMemo(() => {
+    if (!(bodyType === "json" && jsonAdvanced)) return false;
+    const text = advancedBody.trim();
+    if (text.length === 0) return false;
+    try {
+      JSON.parse(text);
+      return false;
+    } catch {
+      return true;
+    }
+  }, [bodyType, jsonAdvanced, advancedBody]);
+  // Last-save issues inform the author but must not permanently lock the
+  // dialog after they fix the definition; the backend re-validates on save.
+  const blockingIssues = conversionBlocks || advancedJsonInvalid;
 
   const isDirty = useMemo(() => {
     if (savedRef.current) return false;
@@ -368,14 +653,55 @@ export function ToolFormDialog({
     initialLeftoverDrafts,
   ]);
 
+  const rawBindingIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (definition?.body.bodyType === "raw") {
+      for (const binding of definition.body.bindings) {
+        ids.add(binding.id);
+      }
+    }
+    if (definition?.body.bodyType === "json") {
+      const walk = (node: ClientJsonNode) => {
+        if (node.kind === "binding") {
+          const token =
+            node.binding.kind === "serverValue"
+              ? node.binding.serverValueId
+              : node.binding.kind === "agentInput"
+                ? node.binding.agentInputId
+                : null;
+          if (token) ids.add(token);
+          return;
+        }
+        if (node.kind === "array") {
+          node.items.forEach(walk);
+          return;
+        }
+        if (node.kind === "object") {
+          node.fields.forEach((field) => walk(field.value));
+        }
+      };
+      walk(definition.body.root);
+    }
+    return ids;
+  }, [definition]);
+
   const leftoverParams = useMemo(() => {
     if (!showAdvanced) return [];
-    return detectPlaceholderNames([advancedBody], variableNames).map(
-      (paramName) =>
-        leftoverDrafts[paramName] ??
-        defaultAgentMeta(paramName, paramMap.get(paramName)),
-    );
-  }, [showAdvanced, advancedBody, variableNames, leftoverDrafts, paramMap]);
+    return detectPlaceholderNames([advancedBody], variableNames)
+      .filter((paramName) => !rawBindingIds.has(paramName))
+      .map(
+        (paramName) =>
+          leftoverDrafts[paramName] ??
+          defaultAgentMeta(paramName, paramMap.get(paramName)),
+      );
+  }, [
+    showAdvanced,
+    advancedBody,
+    variableNames,
+    leftoverDrafts,
+    paramMap,
+    rawBindingIds,
+  ]);
 
   const queryCount = query.length;
   const headersCount = headers.length;
@@ -395,71 +721,80 @@ export function ToolFormDialog({
     onClose();
   };
 
-  const buildRequestPayload = () => {
-    const pathTemplate = joinPath(pathParts);
-    let body: string | null = null;
-    if (bodyType === "form") {
-      body = compileFormBody(formRows);
-    } else if (bodyType === "json") {
-      body = jsonAdvanced ? advancedBody : compileStructuredJson(jsonRows);
-    } else if (bodyType === "raw") {
-      body = advancedBody;
-    }
-
-    const leftoverOrigins = leftoverParams.map((param) => ({
-      origin: "agent" as const,
-      ...param,
-    }));
-    const params = collectAgentParams([
-      ...originsFromPath(pathParts),
-      ...query,
-      ...headers,
-      ...(bodyType === "form" ? formRows : []),
-      ...(bodyType === "json" && !jsonAdvanced ? jsonRows : []),
-      ...leftoverOrigins,
-    ]);
-
-    const requestTemplate = {
-      query: compileMap(query),
-      headers: compileMap(headers),
-      body,
-      ...(bodyType === "none" ? {} : { bodyType }),
-    };
-    return { pathTemplate, requestTemplate, params };
-  };
+  const buildRequestDefinition = (): ClientRequestDefinition =>
+    formStateToDefinition({
+      pathParts,
+      query,
+      headers,
+      bodyType,
+      formRows,
+      jsonRows,
+      jsonAdvanced,
+      advancedBody,
+      serverValueIdByName: lookup.idByName,
+      agentInputId: resolveAgentInputId,
+      reuseNodeIds: !duplicate,
+      resolveNodeId,
+      ...(definition?.agentInputs
+        ? { existingAgentInputs: definition.agentInputs }
+        : {}),
+      agentNames: new Set(
+        (definition?.agentInputs ?? []).map((input) => input.name),
+      ),
+      ...(definition?.body.bodyType === "raw"
+        ? {
+            existingRawBindings: new Map(
+              definition.body.bindings.map((binding) => [
+                binding.id,
+                binding.binding,
+              ]),
+            ),
+            ...(definition.body.contentType
+              ? { existingRawContentType: definition.body.contentType }
+              : {}),
+          }
+        : {}),
+      ...(definition?.body.bodyType === "json"
+        ? { existingJsonRoot: definition.body.root }
+        : {}),
+      agentDrafts: leftoverDrafts,
+      ...(definition?.annotations
+        ? { annotations: definition.annotations }
+        : {}),
+    });
 
   const runPreview = () => {
-    const { pathTemplate, requestTemplate, params } = buildRequestPayload();
     setPreviewOpen(true);
+    setSaveIssues([]);
     previewCompile.mutate({
       serverId,
       method,
-      pathTemplate,
-      requestTemplate,
-      params,
+      requestDefinition: buildRequestDefinition(),
       allowMutation,
     });
   };
 
   const submit = () => {
-    const { pathTemplate, requestTemplate, params } = buildRequestPayload();
-    const payload = {
+    const requestDefinition = buildRequestDefinition();
+    setSaveIssues([]);
+    const base = {
       serverId,
       name,
       description: description.trim() ? description.trim() : null,
       method,
-      pathTemplate,
-      requestTemplate,
-      params,
+      requestDefinition,
       allowMutation,
-      enabled: previewBlocksEnable ? false : enabled,
+      enabled: previewBlocksEnable || blockingIssues ? false : enabled,
     };
     const onSuccess = (result: {
       id: string;
-      warnings?: TemplateWarning[];
+      compileIssues?: ToolCompileIssue[] | null;
     }) => {
-      if (result.warnings && result.warnings.length > 0) {
-        setWarnings(result.warnings);
+      const hasErrors = (result.compileIssues ?? []).some(
+        (issue) => issue.severity === "error",
+      );
+      setSaveIssues(result.compileIssues ?? []);
+      if (hasErrors) {
         setSavedToolId(result.id);
         return;
       }
@@ -467,9 +802,9 @@ export function ToolFormDialog({
       onClose();
     };
     if (savedToolId) {
-      updateTool.mutate({ ...payload, toolId: savedToolId }, { onSuccess });
+      updateTool.mutate({ ...base, toolId: savedToolId }, { onSuccess });
     } else {
-      createTool.mutate(payload, { onSuccess });
+      createTool.mutate(base, { onSuccess });
     }
   };
 
@@ -607,7 +942,7 @@ export function ToolFormDialog({
                 <Label htmlFor="tool-form-path">{t.servers.pathTemplate}</Label>
                 <PathPartsEditor
                   parts={pathParts}
-                  onChange={setPathParts}
+                  onChange={changePathParts}
                   variableNames={variableNames}
                   variableKinds={variableKinds}
                   pathInputId="tool-form-path"
@@ -630,7 +965,8 @@ export function ToolFormDialog({
               <TabsContent value="query">
                 <SourceRowEditor
                   rows={query}
-                  onChange={setQuery}
+                  onChange={changeRows(setQuery, query)}
+                  issuesByNodeId={issuesByNodeId}
                   variableNames={variableNames}
                   variableKinds={variableKinds}
                   emptyLabel={t.servers.emptyQueryRows}
@@ -639,7 +975,8 @@ export function ToolFormDialog({
               <TabsContent value="headers">
                 <SourceRowEditor
                   rows={headers}
-                  onChange={setHeaders}
+                  onChange={changeRows(setHeaders, headers)}
+                  issuesByNodeId={issuesByNodeId}
                   variableNames={variableNames}
                   variableKinds={variableKinds}
                   emptyLabel={t.servers.emptyHeaderRows}
@@ -701,7 +1038,8 @@ export function ToolFormDialog({
                 {bodyType === "form" ? (
                   <SourceRowEditor
                     rows={formRows}
-                    onChange={setFormRows}
+                    onChange={changeRows(setFormRows, formRows)}
+                    issuesByNodeId={issuesByNodeId}
                     variableNames={variableNames}
                     variableKinds={variableKinds}
                     emptyLabel={t.servers.emptyFormRows}
@@ -710,7 +1048,8 @@ export function ToolFormDialog({
                 {bodyType === "json" && !jsonAdvanced ? (
                   <SourceRowEditor
                     rows={jsonRows}
-                    onChange={setJsonRows}
+                    onChange={changeRows(setJsonRows, jsonRows)}
+                    issuesByNodeId={issuesByNodeId}
                     variableNames={variableNames}
                     variableKinds={variableKinds}
                     emptyLabel={t.servers.emptyFormRows}
@@ -755,20 +1094,44 @@ export function ToolFormDialog({
               </TabsContent>
             </Tabs>
 
-            {warnings.length > 0 ? (
+            {conversionIssues.length > 0 ? (
+              <Alert variant="destructive">
+                <AlertDescription className="space-y-1">
+                  <p>
+                    {t.servers.conversionBlocked.replace(
+                      "{count}",
+                      String(conversionIssues.length),
+                    )}
+                  </p>
+                  {conversionIssues.slice(0, 8).map((issue) => (
+                    <p
+                      key={`${issue.id ?? issue.path}-${issue.code}`}
+                      className="font-mono text-xs"
+                    >
+                      {issue.path}: {issue.message}
+                    </p>
+                  ))}
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            {advancedJsonInvalid ? (
               <Alert variant="destructive">
                 <AlertDescription>
-                  {warnings.map((warning) => (
-                    <p key={`${warning.type}-${warning.name}`}>
-                      {warning.type === "placeholder_without_param"
-                        ? t.servers.warningPlaceholderWithoutParam.replace(
-                            "{{name}}",
-                            `{{${warning.name}}}`,
-                          )
-                        : t.servers.warningParamWithoutPlaceholder.replace(
-                            "{name}",
-                            warning.name,
-                          )}
+                  {t.servers.advancedJsonInvalid}
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            {saveIssues.length > 0 ? (
+              <Alert variant={saveBlocks ? "destructive" : "default"}>
+                <AlertDescription className="space-y-1">
+                  {saveIssues.slice(0, 8).map((issue) => (
+                    <p
+                      key={`${issue.id ?? issue.path}-${issue.code}`}
+                      className="font-mono text-xs"
+                    >
+                      {issue.path}: {issue.message}
                     </p>
                   ))}
                 </AlertDescription>
@@ -984,15 +1347,15 @@ export function ToolFormDialog({
                   <span>
                     <span className="font-medium">{t.servers.enabled}</span>
                     <span className="mt-0.5 block text-xs text-muted-foreground">
-                      {previewBlocksEnable
+                      {previewBlocksEnable || blockingIssues
                         ? t.servers.enabledBlockedHelp
                         : t.servers.enabledHelp}
                     </span>
                   </span>
                   <Switch
                     aria-label={t.servers.enabled}
-                    checked={enabled && !previewBlocksEnable}
-                    disabled={previewBlocksEnable}
+                    checked={enabled && !previewBlocksEnable && !blockingIssues}
+                    disabled={previewBlocksEnable || blockingIssues}
                     onCheckedChange={setEnabled}
                   />
                 </label>

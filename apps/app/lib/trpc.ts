@@ -3,9 +3,13 @@ import {
   createTRPCClient,
   httpBatchLink,
   loggerLink,
+  type TRPCClient,
   type TRPCLink,
 } from "@trpc/client";
-import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
+import {
+  createTRPCOptionsProxy,
+  type TRPCOptionsProxy,
+} from "@trpc/tanstack-react-query";
 import { getTrpcUrl } from "./api-url";
 import { queryClient } from "./query";
 
@@ -43,9 +47,12 @@ links.push(
   }),
 );
 
-export const trpcClient = createTRPCClient<AppRouter>({ links });
-
-export const api = createTRPCOptionsProxy<AppRouter>({
-  client: trpcClient,
-  queryClient,
+export const trpcClient: TRPCClient<AppRouter> = createTRPCClient<AppRouter>({
+  links,
 });
+
+export const api: TRPCOptionsProxy<AppRouter> =
+  createTRPCOptionsProxy<AppRouter>({
+    client: trpcClient,
+    queryClient,
+  });

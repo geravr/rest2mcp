@@ -7,8 +7,26 @@ import {
   useMutation,
   useQuery,
   useQueryClient,
+  type UseQueryResult,
 } from "@tanstack/react-query";
 import { toast } from "sonner";
+
+export type McpToolEditorIssue = {
+  path: string;
+  id?: string;
+  code: string;
+  message: string;
+  severity: "error" | "warning";
+};
+
+export type McpToolEditorState = {
+  toolId: string;
+  typed: boolean;
+  definition: unknown;
+  issues: McpToolEditorIssue[];
+  conversionDraft: unknown;
+  conversionIssues: McpToolEditorIssue[];
+};
 
 export function useMcpServers(input: PaginationInput) {
   return useQuery({
@@ -57,6 +75,25 @@ export function useMcpVariables(serverId: string) {
   });
 }
 
+export function useMcpServerCommon(serverId: string) {
+  return useQuery({
+    ...api.mcp.serverCommon.queryOptions({ serverId }),
+    placeholderData: keepPreviousData,
+    enabled: serverId.length > 0,
+  });
+}
+
+export function useMcpToolEditorState(
+  serverId: string,
+  toolId: string,
+  enabled: boolean,
+): UseQueryResult<McpToolEditorState> {
+  return useQuery({
+    ...api.mcp.toolEditorState.queryOptions({ serverId, toolId }),
+    enabled: enabled && serverId.length > 0 && toolId.length > 0,
+  }) as unknown as UseQueryResult<McpToolEditorState>;
+}
+
 export function useMcpCallLogs(serverId: string, input: PaginationInput) {
   return useQuery({
     ...api.mcp.callLogs.queryOptions({ serverId, ...input }),
@@ -88,6 +125,8 @@ function useInvalidateMcp() {
       queryClient.invalidateQueries(api.mcp.tools.pathFilter()),
       queryClient.invalidateQueries(api.mcp.tokens.pathFilter()),
       queryClient.invalidateQueries(api.mcp.variables.pathFilter()),
+      queryClient.invalidateQueries(api.mcp.serverCommon.pathFilter()),
+      queryClient.invalidateQueries(api.mcp.toolEditorState.pathFilter()),
       queryClient.invalidateQueries(api.mcp.callLogs.pathFilter()),
       queryClient.invalidateQueries(api.mcp.platformToken.pathFilter()),
     ]);
@@ -134,6 +173,24 @@ export function useUpdateMcpServer() {
   const { t } = useTranslations();
   const invalidate = useInvalidateMcp();
   const baseOptions = api.mcp.updateServer.mutationOptions();
+  return useMutation({
+    ...baseOptions,
+    onSuccess: async (...args) => {
+      baseOptions.onSuccess?.(...args);
+      await invalidate();
+      toast.success(t.toasts.servers.updated);
+    },
+    onError: (error, ...rest) => {
+      baseOptions.onError?.(error, ...rest);
+      toast.error(resolveErrorMessage(error, t));
+    },
+  });
+}
+
+export function useUpdateMcpServerCommon() {
+  const { t } = useTranslations();
+  const invalidate = useInvalidateMcp();
+  const baseOptions = api.mcp.updateServerCommon.mutationOptions();
   return useMutation({
     ...baseOptions,
     onSuccess: async (...args) => {

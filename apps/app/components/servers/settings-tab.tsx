@@ -9,16 +9,20 @@ import {
 import { SourceRowEditor } from "@/components/servers/source-row-editor";
 import {
   useCreateMcpVariable,
+  useMcpServerCommon,
   useMcpTools,
   useMcpVariables,
   useUpdateMcpServer,
+  useUpdateMcpServerCommon,
 } from "@/hooks/use-mcp";
 import type { InferredAuth } from "@/lib/server-auth";
 import {
-  compileMap,
-  inferDefaultMapRows,
-  type SourceRow,
-} from "@/lib/value-origin";
+  buildServerValueLookup,
+  commonRowsToEntries,
+  definitionToSourceRows,
+  type ClientCommonEntries,
+} from "@/lib/request-definition";
+import { inferDefaultMapRows, type SourceRow } from "@/lib/value-origin";
 import { useTranslations } from "@/i18n/use-translations";
 import { resolveErrorMessage } from "@/lib/errors";
 import { ServerIcon } from "@/components/servers/server-icon";
@@ -42,19 +46,6 @@ import { toast } from "sonner";
 
 const VARIABLE_NAME_PATTERN = /^[a-z][a-z0-9_]*$/;
 
-function recordsEqual(
-  left: Record<string, string> | null,
-  right: Record<string, string> | null,
-): boolean {
-  const a = left ?? {};
-  const b = right ?? {};
-  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
-  for (const key of keys) {
-    if (a[key] !== b[key]) return false;
-  }
-  return true;
-}
-
 type ServerIdentity = {
   id: string;
   name: string;
@@ -64,39 +55,46 @@ type ServerIdentity = {
 };
 
 function ServerDefaultsCard({
-  serverId,
   variableNames,
   variableKinds,
+  serverValues,
+  common,
   defaultHeaders,
   defaultQuery,
   pending,
   onSave,
 }: {
-  serverId: string;
   variableNames: string[];
   variableKinds?: Record<string, "config" | "secret">;
+  serverValues: Array<{ id: string; name: string }>;
+  common: ClientCommonEntries;
   defaultHeaders: Record<string, string> | null;
   defaultQuery: Record<string, string> | null;
   pending: boolean;
-  onSave: (input: {
-    serverId: string;
-    defaultHeaders: Record<string, string> | null;
-    defaultQuery: Record<string, string> | null;
-  }) => void;
+  onSave: (common: ClientCommonEntries) => void;
 }) {
   const { t } = useTranslations();
+  const lookup = useMemo(
+    () => buildServerValueLookup(serverValues),
+    [serverValues],
+  );
+  const hasCommon = common.headers.length > 0 || common.query.length > 0;
   const [headersDraft, setHeadersDraft] = useState<SourceRow[]>(() =>
-    inferDefaultMapRows(defaultHeaders, variableNames),
+    hasCommon
+      ? definitionToSourceRows(common.headers, lookup, new Map())
+      : inferDefaultMapRows(defaultHeaders, variableNames),
   );
   const [queryDraft, setQueryDraft] = useState<SourceRow[]>(() =>
-    inferDefaultMapRows(defaultQuery, variableNames),
+    hasCommon
+      ? definitionToSourceRows(common.query, lookup, new Map())
+      : inferDefaultMapRows(defaultQuery, variableNames),
   );
-  const defaultsDirty = useMemo(
-    () =>
-      !recordsEqual(compileMap(headersDraft), defaultHeaders) ||
-      !recordsEqual(compileMap(queryDraft), defaultQuery),
-    [headersDraft, queryDraft, defaultHeaders, defaultQuery],
-  );
+  const initialDraftsRef = useRef({ headersDraft, queryDraft });
+  const defaultsDirty =
+    JSON.stringify(headersDraft) !==
+      JSON.stringify(initialDraftsRef.current.headersDraft) ||
+    JSON.stringify(queryDraft) !==
+      JSON.stringify(initialDraftsRef.current.queryDraft);
 
   return (
     <Card>
@@ -110,14 +108,9 @@ function ServerDefaultsCard({
           onSubmit={(event) => {
             event.preventDefault();
             if (!defaultsDirty) return;
-            const parsedHeaders = compileMap(headersDraft);
-            const parsedQuery = compileMap(queryDraft);
             onSave({
-              serverId,
-              defaultHeaders:
-                Object.keys(parsedHeaders).length > 0 ? parsedHeaders : null,
-              defaultQuery:
-                Object.keys(parsedQuery).length > 0 ? parsedQuery : null,
+              headers: commonRowsToEntries(headersDraft, lookup.idByName),
+              query: commonRowsToEntries(queryDraft, lookup.idByName),
             });
           }}
         >
@@ -178,9 +171,11 @@ export function ServerSettingsTab({
 }) {
   const { t } = useTranslations();
   const variables = useMcpVariables(server.id);
+  const serverCommon = useMcpServerCommon(server.id);
   const tools = useMcpTools(server.id, { page: 1, pageSize: 50 });
   const createVariable = useCreateMcpVariable();
   const updateServer = useUpdateMcpServer();
+  const updateServerCommon = useUpdateMcpServerCommon();
   const iconFileInputRef = useRef<HTMLInputElement>(null);
   const [iconUploadPending, setIconUploadPending] = useState(false);
   const [iconRemovePending, setIconRemovePending] = useState(false);
@@ -589,13 +584,20 @@ export function ServerSettingsTab({
       </Card>
 
       <ServerDefaultsCard
-        serverId={server.id}
+        key={JSON.stringify(serverCommon.data?.common ?? null)}
         variableNames={variableNames}
         variableKinds={variableKinds}
+        serverValues={(variables.data ?? []).map((variable) => ({
+          id: variable.id,
+          name: variable.name,
+        }))}
+        common={serverCommon.data?.common ?? { headers: [], query: [] }}
         defaultHeaders={defaultHeaders}
         defaultQuery={defaultQuery}
-        pending={updateServer.isPending}
-        onSave={(input) => updateServer.mutate(input)}
+        pending={updateServerCommon.isPending}
+        onSave={(common) =>
+          updateServerCommon.mutate({ serverId: server.id, common })
+        }
       />
 
       <Card className="border-destructive/40">
