@@ -50,6 +50,23 @@ export const APP_ERROR_CODES = {
   MCP_TEMPLATE_UNRESOLVED: "MCP_TEMPLATE_UNRESOLVED",
   MCP_VARIABLE_NAME_CONFLICT: "MCP_VARIABLE_NAME_CONFLICT",
   MCP_PLAINTEXT_SECRET: "MCP_PLAINTEXT_SECRET",
+  MCP_COMPILE_INVALID: "MCP_COMPILE_INVALID",
+  MCP_TOOL_DISABLED: "MCP_TOOL_DISABLED",
+  MCP_SERVER_PAUSED: "MCP_SERVER_PAUSED",
+  MCP_RATE_LIMITED: "MCP_RATE_LIMITED",
+  MCP_TIMEOUT: "MCP_TIMEOUT",
+  MCP_REDIRECT_REJECTED: "MCP_REDIRECT_REJECTED",
+  MCP_PATH_ESCAPE: "MCP_PATH_ESCAPE",
+  MCP_ORIGIN_INVALID: "MCP_ORIGIN_INVALID",
+  MCP_REQUEST_TOO_LARGE: "MCP_REQUEST_TOO_LARGE",
+  MCP_SCOPE_DENIED: "MCP_SCOPE_DENIED",
+  MCP_DESTRUCTIVE_CONFIRMATION_REQUIRED:
+    "MCP_DESTRUCTIVE_CONFIRMATION_REQUIRED",
+  MCP_VALUE_IN_USE: "MCP_VALUE_IN_USE",
+  MCP_AUTH_ACK_REQUIRED: "MCP_AUTH_ACK_REQUIRED",
+  MCP_UPSTREAM_HTTP_ERROR: "MCP_UPSTREAM_HTTP_ERROR",
+  MCP_MUTATION_INDETERMINATE: "MCP_MUTATION_INDETERMINATE",
+  MCP_BINARY_UNSUPPORTED: "MCP_BINARY_UNSUPPORTED",
 
   ROUTE_NOT_FOUND: "ROUTE_NOT_FOUND",
   INTERNAL_ERROR: "INTERNAL_ERROR",
@@ -58,9 +75,34 @@ export const APP_ERROR_CODES = {
 export type AppErrorCode =
   (typeof APP_ERROR_CODES)[keyof typeof APP_ERROR_CODES];
 
+/** Platform MCP token scopes (shared by API schemas and SPA types). */
+export const MCP_PLATFORM_SCOPES = [
+  "read",
+  "author",
+  "invoke",
+  "secret_reference",
+  "destructive",
+] as const;
+
+export type McpPlatformScope = (typeof MCP_PLATFORM_SCOPES)[number];
+
+export const MCP_DEFAULT_PLATFORM_SCOPES: readonly McpPlatformScope[] = [
+  "read",
+  "author",
+  "invoke",
+  "secret_reference",
+];
+
 /** Optional structured payload forwarded on AppError / tRPC `data.details`. */
 export type AppErrorDetails = {
   placeholder?: string;
+  /** Location-aware validation path (e.g. `query[0].value`, `headers.Authorization`). */
+  path?: string;
+  issueCode?: string;
+  httpStatus?: number;
+  retryAfterSeconds?: number;
+  references?: Array<{ kind: string; id: string; name?: string }>;
+  scopes?: string[];
 };
 
 const appErrorCodeValues = Object.values(APP_ERROR_CODES);

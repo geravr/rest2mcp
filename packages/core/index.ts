@@ -6,8 +6,14 @@ export {
   APP_ERROR_CODES,
   assertUniqueAppErrorCodes,
   isAppErrorCode,
+  MCP_DEFAULT_PLATFORM_SCOPES,
+  MCP_PLATFORM_SCOPES,
 } from "./src/error-codes.js";
-export type { AppErrorCode, AppErrorDetails } from "./src/error-codes.js";
+export type {
+  AppErrorCode,
+  AppErrorDetails,
+  McpPlatformScope,
+} from "./src/error-codes.js";
 
 // Pagination
 export {
