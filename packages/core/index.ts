@@ -7,7 +7,7 @@ export {
   assertUniqueAppErrorCodes,
   isAppErrorCode,
 } from "./src/error-codes.js";
-export type { AppErrorCode } from "./src/error-codes.js";
+export type { AppErrorCode, AppErrorDetails } from "./src/error-codes.js";
 
 // Pagination
 export {

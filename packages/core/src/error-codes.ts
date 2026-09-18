@@ -58,6 +58,11 @@ export const APP_ERROR_CODES = {
 export type AppErrorCode =
   (typeof APP_ERROR_CODES)[keyof typeof APP_ERROR_CODES];
 
+/** Optional structured payload forwarded on AppError / tRPC `data.details`. */
+export type AppErrorDetails = {
+  placeholder?: string;
+};
+
 const appErrorCodeValues = Object.values(APP_ERROR_CODES);
 
 export function isAppErrorCode(value: unknown): value is AppErrorCode {
