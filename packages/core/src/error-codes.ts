@@ -74,30 +74,27 @@ export const APP_ERROR_CODES = {
   /** A known fully-rolled-back transient database failure after retries were exhausted. */
   MCP_TRANSIENT_WRITE_FAILURE: "MCP_TRANSIENT_WRITE_FAILURE",
 
+  /** Requested Platform PAT scopes are unknown, duplicated, or dependency-invalid. */
+  MCP_PAT_SCOPE_INVALID: "MCP_PAT_SCOPE_INVALID",
+  /** A high-risk Platform grant requires a fresh, matching step-up approval. */
+  MCP_STEP_UP_REQUIRED: "MCP_STEP_UP_REQUIRED",
+  /** The supplied step-up approval is expired or was already consumed. */
+  MCP_STEP_UP_EXPIRED: "MCP_STEP_UP_EXPIRED",
+  /** The owner already holds the maximum number of active Platform PATs. */
+  MCP_PAT_LIMIT_REACHED: "MCP_PAT_LIMIT_REACHED",
+  /** Persisted grant state conflicts with its policy/resource invariants. */
+  MCP_POLICY_CONFLICT: "MCP_POLICY_CONFLICT",
+  /** A resource is outside the principal's immutable grant. */
+  MCP_RESOURCE_DENIED: "MCP_RESOURCE_DENIED",
+  /** A PAT stores a policy version this build cannot evaluate. */
+  MCP_POLICY_VERSION_UNSUPPORTED: "MCP_POLICY_VERSION_UNSUPPORTED",
+
   ROUTE_NOT_FOUND: "ROUTE_NOT_FOUND",
   INTERNAL_ERROR: "INTERNAL_ERROR",
 } as const;
 
 export type AppErrorCode =
   (typeof APP_ERROR_CODES)[keyof typeof APP_ERROR_CODES];
-
-/** Platform MCP token scopes (shared by API schemas and SPA types). */
-export const MCP_PLATFORM_SCOPES = [
-  "read",
-  "author",
-  "invoke",
-  "secret_reference",
-  "destructive",
-] as const;
-
-export type McpPlatformScope = (typeof MCP_PLATFORM_SCOPES)[number];
-
-export const MCP_DEFAULT_PLATFORM_SCOPES: readonly McpPlatformScope[] = [
-  "read",
-  "author",
-  "invoke",
-  "secret_reference",
-];
 
 /** Optional structured payload forwarded on AppError / tRPC `data.details`. */
 export type AppErrorDetails = {
@@ -117,6 +114,10 @@ export type AppErrorDetails = {
   serverId?: string;
   /** Whether a fully-rolled-back infrastructure failure may be retried safely. */
   retryable?: boolean;
+  /** Platform policy version involved in a grant validation failure. */
+  policyVersion?: number;
+  /** Platform resource mode involved in a grant validation failure. */
+  resourceMode?: string;
 };
 
 const appErrorCodeValues = Object.values(APP_ERROR_CODES);
