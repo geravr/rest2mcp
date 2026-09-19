@@ -8,12 +8,23 @@ Playground invoke, traffic-light health, and paginated call logs for MCP servers
 
 ### Requirement: Owner can invoke a tool from the playground
 
-The authenticated playground SHALL use the same compiled plan, input schema, policy checks, deadline, and response envelope as the gateway. It SHALL display successful and non-2xx upstream responses with their status, safe headers, parsed/text data, truncation state, and call-log link when available. Failure to persist a call log SHALL NOT replace a completed upstream result. Optional booleans and other optional inputs SHALL support an explicit absent state distinct from false, null, or empty string.
+The authenticated playground SHALL require an explicit published or draft mode. Published mode SHALL use the exact active revision snapshot, input schema, policy checks, deadline, and response envelope as the gateway. Draft mode SHALL compile/materialize the observed owner draft for testing without publishing it and SHALL label results with the draft revision. Both modes SHALL display successful and non-2xx upstream responses with safe bounded details, and audit persistence failure SHALL NOT replace a completed result. Optional inputs SHALL preserve an explicit absent state.
 
-#### Scenario: Playground matches gateway rendering
+#### Scenario: Published playground matches gateway
 
-- **WHEN** the owner invokes a tool with the same inputs as an MCP client
-- **THEN** both construct the same upstream request and normalize the same response
+- **WHEN** the owner invokes a published tool with the same inputs as an MCP client
+- **THEN** both use the same published revision plan and normalize the same response
+
+#### Scenario: Draft playground tests unpublished change
+
+- **WHEN** the owner explicitly selects draft mode for a valid unpublished tool
+- **THEN** the request uses the observed draft candidate and reports its draft revision
+- **AND** no published revision or gateway pointer changes
+
+#### Scenario: Draft changes during test preparation
+
+- **WHEN** the draft revision changes before draft execution materializes its candidate
+- **THEN** the test rejects the stale request rather than combining draft states
 
 #### Scenario: Optional boolean can be absent
 
@@ -23,50 +34,70 @@ The authenticated playground SHALL use the same compiled plan, input schema, pol
 #### Scenario: Upstream error remains inspectable
 
 - **WHEN** upstream returns 401 or 429
-- **THEN** the playground shows the error status and sanitized details while the agent-facing gateway uses `isError: true`
+- **THEN** the playground shows sanitized status/details while the agent-facing gateway uses `isError: true`
 
 #### Scenario: Log failure does not change result
 
 - **WHEN** upstream completes a POST successfully and audit persistence fails
-- **THEN** the playground receives the successful upstream result and telemetry records the audit failure
+- **THEN** the playground receives the successful result and telemetry records the audit failure
 
 ### Requirement: Traffic light reflects recent health
 
-The system SHALL expose a derived traffic light for each server: `paused` when status is paused; `draft` when there are no enabled tools; otherwise `red` if the last five product or playground calls all failed, `yellow` if any of those failed, and `green` if none failed or the server has never been called.
+The system SHALL expose a derived traffic light for the active published revision: `paused` when runtime status is paused; `draft` when no published revision exists; otherwise `red` if the last five product or published-playground calls attributed to the active revision all failed, `yellow` if any failed, and `green` if none failed or the active revision has never been called. Draft-playground and superseded-revision calls SHALL NOT affect current runtime health.
 
-#### Scenario: Green when unused but ready
+#### Scenario: New publication starts green
 
-- **WHEN** a live server has at least one enabled tool and zero call logs
-- **THEN** the traffic light is `green`
+- **WHEN** a new live revision has no attributed product or published-playground calls
+- **THEN** its traffic light is `green` regardless of failures on the superseded revision
 
-#### Scenario: Red after consecutive failures
+#### Scenario: Red after active-revision failures
 
-- **WHEN** the last five playground or agent calls for a server failed
+- **WHEN** the last five qualifying calls for the active revision all failed
 - **THEN** the traffic light is `red`
+
+#### Scenario: Draft tests do not affect health
+
+- **WHEN** draft-playground calls fail while active-revision calls succeed
+- **THEN** the active traffic light remains based only on qualifying active-revision calls
 
 #### Scenario: Paused overrides
 
 - **WHEN** the owner pauses a server that was green
-- **THEN** the traffic light is `paused`
+- **THEN** the traffic light is `paused` while preserving its active revision history
 
 ### Requirement: Paginated call log without secrets
 
-The system SHALL list owner-scoped call logs with the shared pagination envelope. Audit persistence SHALL be best-effort through a bounded queue and SHALL never control the invocation result. Stored request/response summaries SHALL use byte caps, configurable body policy, configured retention, and redaction for secret bindings, sensitive agent inputs, auth values, cookies, agent tokens, and encoded variants. Account and server deletion SHALL remove associated logs rather than leave orphaned summaries.
+The system SHALL list owner-scoped call logs with the shared pagination envelope and identify each call's published revision id/number, aggregate and tool fingerprints, or draft revision/mode where applicable. Audit persistence SHALL remain best-effort and SHALL never control invocation results. Stored summaries SHALL use byte caps, retention, and redaction for secret bindings, sensitive inputs, auth values, cookies, tokens, and encoded variants. Revision cleanup SHALL preserve denormalized attribution, and account/server deletion SHALL remove associated logs.
+
+#### Scenario: Published call is attributable
+
+- **WHEN** a gateway or published-playground call is logged
+- **THEN** the row records safe published revision and tool-contract identity without copying revision definitions or secret references
+
+#### Scenario: Draft call is visibly isolated
+
+- **WHEN** a draft-playground call is logged
+- **THEN** its source and observed draft revision distinguish it from published runtime traffic
 
 #### Scenario: Secret and sensitive input are redacted
 
 - **WHEN** a call uses an auth secret and a sensitive agent input
-- **THEN** neither value appears in the stored request or response summary
+- **THEN** neither value appears in the stored request/response summary or revision metadata
 
 #### Scenario: Queue failure is observable but non-blocking
 
 - **WHEN** the audit queue is full or PostgreSQL rejects a log write
 - **THEN** the call result is unchanged and a telemetry counter/error is emitted
 
+#### Scenario: Revision cleanup preserves attribution
+
+- **WHEN** retention removes a superseded revision referenced by an older call log
+- **THEN** the log retains its denormalized revision number/fingerprints without retaining configuration content
+
 #### Scenario: Retention removes old logs
 
-- **WHEN** a log is older than the configured retention period
-- **THEN** cleanup removes it without affecting current server data
+- **WHEN** a log is older than the configured call-log retention period
+- **THEN** cleanup removes it without affecting current server or revision data
 
 #### Scenario: Account deletion removes logs
 
