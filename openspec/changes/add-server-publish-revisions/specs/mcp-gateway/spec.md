@@ -22,7 +22,7 @@ The gateway SHALL advertise only enabled, successfully compiled tools from the s
 ## ADDED Requirements
 
 ### Requirement: Gateway executes one published revision snapshot
-The gateway SHALL materialize server settings, one published tool plan, revision config values, and current referenced secret slots from a single committed active revision before upstream execution. A concurrent publication SHALL not change an invocation after materialization, and no gateway path SHALL read mutable draft plans or config after revision cutover.
+The gateway SHALL materialize server settings, one published tool plan, revision config values, and current referenced secret slots from a single committed active revision before upstream execution. A concurrent publication SHALL not change an invocation after materialization, and no gateway path SHALL read mutable draft plans or config.
 
 #### Scenario: Publish races with invocation preparation
 - **WHEN** a publication commits while an invocation loads its execution snapshot
@@ -47,4 +47,3 @@ The gateway SHALL NOT fall back to a superseded revision when a client calls a r
 #### Scenario: Cached input schema is stale
 - **WHEN** an agent submits input valid for a previous tool fingerprint but invalid for the active revision
 - **THEN** validation fails against the active contract and includes current revision identity without exposing draft or historical definitions
-

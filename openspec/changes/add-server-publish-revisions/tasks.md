@@ -15,7 +15,7 @@
 - [ ] 2.5 Add publication request identity storage or an equivalent uniqueness constraint that makes a repeated `publishRequestId` idempotent per server.
 - [ ] 2.6 Add published revision identity and contract fingerprint fields to MCP call-log storage.
 - [ ] 2.7 Add uniqueness, ownership, and lookup indexes for revision numbers, active pointers, request identities, tool snapshots, and revision-attributed logs.
-- [ ] 2.8 Generate and review the Drizzle migration, including safe defaults for existing rows and rollback-safe constraint ordering.
+- [ ] 2.8 Generate and review the Drizzle migration so retained development servers have no active revision, with intentional constraint ordering and no automatic publication/backfill.
 - [ ] 2.9 Add database tests for ownership constraints, immutable revision relations, monotonic numbering, request idempotency, and active-pointer integrity.
 
 ## 3. Build canonical publication candidates
@@ -108,21 +108,22 @@
 - [ ] 11.5 Calculate server and tool health from the currently active revision while retaining historical revision filters for diagnosis.
 - [ ] 11.6 Add observability tests for revision attribution, draft-preview isolation, active-revision health, and secret-safe log details.
 
-## 12. Backfill existing live servers and cut over safely
+## 12. Perform the clean pre-production cutover
 
-- [ ] 12.1 Implement an idempotent backfill that locks each existing server, materializes its current effective aggregate, creates revision 1, and sets the active pointer.
-- [ ] 12.2 Record actionable blockers for servers that cannot be compiled or safely snapshotted instead of silently publishing partial state.
-- [ ] 12.3 Add a compatibility read path used only during migration and instrument every fallback by server and reason.
-- [ ] 12.4 Shadow-compare mutable-row and revision-based discovery/execution inputs before enabling revision reads for a server.
-- [ ] 12.5 Cut each successfully backfilled server to revision reads and remove its runtime fallback once parity is established.
-- [ ] 12.6 Add migration tests for empty servers, partially configured servers, disabled invalid tools, concurrent writes, retries, and already-backfilled servers.
+- [ ] 12.1 Update canonical seeds and fixtures so servers start as unpublished drafts and required end-to-end fixtures publish revision 1 explicitly.
+- [ ] 12.2 Document reset/reseed for disposable development databases and the optional manual review/publish path for retained drafts.
+- [ ] 12.3 Delete mutable-row gateway loaders, executor fallbacks, dual-write/shadow branches, compatibility metrics, and their tests.
+- [ ] 12.4 Switch Studio, Platform authoring, publication, gateway discovery, and execution to the draft/revision boundary in one implementation slice.
+- [ ] 12.5 Add architecture checks proving gateway and executor production paths cannot import draft repositories or mutable compiled-plan loaders.
+- [ ] 12.6 Add clean-migration tests for empty databases, retained unpublished drafts, invalid drafts, reset/reseed, and explicitly published fixtures.
 
 ## 13. Document, instrument, and verify the boundary
 
 - [ ] 13.1 Update the relevant `AGENTS.md` contracts with draft-versus-published ownership, revision immutability, runtime pinning, and secret-slot invariants.
-- [ ] 13.2 Add structured telemetry for preview failures, publish conflicts, publication latency, revision load failures, stale agent calls, and migration fallbacks without logging secret material.
+- [ ] 13.2 Add structured telemetry for preview failures, publish conflicts, publication latency, revision load failures, and stale agent calls without logging secret material.
 - [ ] 13.3 Add end-to-end coverage proving an unpublished edit cannot affect discovery or execution and publication switches the full aggregate atomically.
 - [ ] 13.4 Add end-to-end coverage proving pause, token revocation, and secret rotation remain immediate operational controls.
 - [ ] 13.5 Run focused API, gateway, Platform MCP, database, and Studio tests for the affected slices.
 - [ ] 13.6 Run `bun typecheck`, `bun lint`, and `bun test` from the repository root.
 - [ ] 13.7 Run `bunx prettier --write .`, inspect the scoped diff, and re-run any checks affected by formatting.
+- [ ] 13.8 Search source, schemas, tests, fixtures, and documentation for mutable-runtime reads, automatic revision backfills, dual-read/write branches, shadow cutover code, or compatibility flags and remove every remaining occurrence.

@@ -116,15 +116,14 @@ The system SHALL always retain the active revision and at least the 20 most rece
 - **WHEN** a superseded revision is older than 90 days and outside the 20 most recent
 - **THEN** cleanup removes its revision children without deleting draft resources, secret slots, or call-log attribution
 
-### Requirement: Existing live behavior is backfilled before cutover
-The system SHALL create and verify an initial immutable revision for every existing live or paused server before that server's gateway switches to revision-only reads. Draft servers SHALL remain unpublished. A server that cannot be compiled or proven equivalent SHALL remain on the compatibility read path and SHALL surface a remediation blocker rather than losing its existing runtime silently.
+### Requirement: Published runtime has no compatibility path
+The system SHALL serve product MCP discovery and execution only from an active immutable revision from the first deployment of this capability. Existing development records SHALL remain unpublished drafts or be removed by reset/reseed; the system SHALL NOT backfill them automatically, dual-read mutable rows, shadow a legacy runtime, or fall back when no valid active revision exists.
 
-#### Scenario: Valid live server becomes revision 1
-- **WHEN** a current live server compiles to the same canonical contracts and plans during backfill
-- **THEN** an initial revision is attached without changing its agent-visible behavior
+#### Scenario: Existing development server starts unpublished
+- **WHEN** a retained development server has draft tools but no active published revision after migration
+- **THEN** its gateway advertises no tools until the owner explicitly reviews and publishes a valid candidate
 
-#### Scenario: Invalid legacy server does not cut over
-- **WHEN** backfill cannot produce or verify an equivalent initial revision
-- **THEN** the server remains on the temporary compatibility path and is reported for remediation
-- **AND** the migration does not publish a partial or empty replacement
-
+#### Scenario: Invalid draft has no runtime fallback
+- **WHEN** a retained draft cannot compile into a valid revision
+- **THEN** publication reports blocking issues and the gateway remains unavailable
+- **AND** no mutable tool plan is advertised or executed

@@ -21,7 +21,7 @@ Only versioned structure participates in publication. Operational security actio
 - Give the gateway an unambiguous revision for discovery, invocation, errors, call logs, and health.
 - Preserve immediate pause, credential revocation, and secret-material rotation.
 - Provide linear, auditable history and safe restore-to-draft without resurrecting secrets.
-- Preserve current live behavior during migration rather than requiring every owner to republish.
+- Establish the published-revision boundary cleanly without preserving mutable-row runtime behavior.
 
 **Non-Goals:**
 
@@ -104,7 +104,7 @@ Publication does not clear or rewrite the draft. Because the revision source fin
 
 Gateway discovery and execution preparation read `publishedRevisionId`, server operational status, the revision row, its enabled tool rows, the revision's config snapshot, and current referenced secret slots in one repeatable-read snapshot. The database transaction ends before upstream HTTP. The resulting immutable execution object carries revision id/number, aggregate fingerprint, tool fingerprint, and logical tool id.
 
-An in-flight call continues using the revision it materialized when a new pointer commits. A later `tools/list` or call uses the new pointer. The gateway never falls back to mutable draft rows after cutover. If an agent calls a removed tool or sends input valid only for an older contract, the safe error includes the current published revision/fingerprint and explicit refresh guidance; the server does not silently execute the old plan.
+An in-flight call continues using the revision it materialized when a new pointer commits. A later `tools/list` or call uses the new pointer. The gateway never reads or falls back to mutable draft rows. If an agent calls a removed tool or sends input valid only for an older contract, the safe error includes the current published revision/fingerprint and explicit refresh guidance; the server does not silently execute the old plan.
 
 Contract metadata defined by `improve-agent-tool-contracts` derives its version/fingerprint from the published revision. Publishing the same canonical candidate is prevented as a no-op unless an explicit note-only audit operation is later introduced. Stateless MCP cannot push reliable list-change notifications to every client, so revision metadata and bounded list cache semantics are the consistency mechanism.
 
@@ -138,28 +138,27 @@ Retention runs through the existing operational cleanup mechanism or a documente
 ## Risks / Trade-offs
 
 - **[Revision storage grows quickly]** -> Normalize tool rows, cap tool count, retain the active plus a bounded recent history, and instrument size/cleanup.
-- **[Users may expect Save to be live]** -> Use explicit “Save draft” and “Publish changes” language, persistent dirty badges, revision identity, and migration guidance in both locales.
+- **[Users may expect Save to be live]** -> Use explicit “Save draft” and “Publish changes” language, persistent dirty badges, and revision identity in both locales.
 - **[Draft and runtime can be confused in code]** -> Use distinct types/repositories (`DraftAggregate`, `PublishedExecutionSnapshot`), prohibit gateway imports from draft loaders, and add architecture tests.
 - **[Publishing under a server lock recompiles many tools]** -> Keep the 50-tool bound, perform no network I/O, measure compile/lock duration, and reject stale previews rather than publishing precomputed unchecked plans.
 - **[Operational secret rotation reduces historical reproducibility]** -> Audit rotation separately, never claim byte-for-byte replay, and keep structural revision fingerprints independent of secret material.
 - **[Deleting an active secret becomes more restrictive]** -> Block deletion with explicit active-revision references and provide rotate/pause/republish guidance.
 - **[Old agents call stale contracts after publish]** -> Return current revision/fingerprint and refresh guidance; never execute an old revision implicitly.
-- **[Backfill could fail on legacy or invalid tools]** -> Dual-read during migration, report per-server blockers, preserve the mutable runtime until a valid initial revision exists, and never cut over partially.
+- **[Existing development servers become unavailable until published]** -> Treat records as disposable drafts, show unpublished status clearly, update seeds, and document reset/reseed or explicit review/publish without adding a runtime fallback.
 - **[Active changes define overlapping revisions]** -> Treat atomic `configRevision` as concurrency, `draftRevision` as publishable change sequence, and published revision number as runtime history; document this vocabulary before implementation.
 
 ## Migration Plan
 
-1. Complete or reconcile atomic write and contract fingerprint foundations; add explicit draft/published terminology to backend agent guidance.
-2. Add revision, revision-tool, revision-config, published pointer, draft revision, and call-log identity columns/tables through generated Drizzle migrations.
-3. Deploy dual-write-capable authoring and publication services while the gateway still reads current mutable rows. Backfill canonical initial revisions for live/paused servers under the server lock; draft servers remain unpublished.
-4. Shadow-load published snapshots and compare advertised contracts/request plans with the current gateway for servers that backfilled successfully. Surface blockers without changing runtime.
-5. Update Studio and Platform APIs/clients for draft saves, preview, publish, history, restore, and explicit playground modes.
-6. Cut each eligible server to revision reads only after parity succeeds; then remove the mutable gateway fallback globally when coverage is complete. Existing live behavior becomes revision 1 without owner action.
-7. Enable history retention cleanup after a rollback window and monitor publish conflict/failure rates, stale-agent errors, snapshot load latency, and storage growth.
+1. Complete or reconcile atomic-write and contract-fingerprint foundations; add explicit draft/published terminology to backend agent guidance.
+2. Add revision, revision-tool, revision-config, published pointer, draft revision, and call-log identity columns/tables through one generated Drizzle migration. Existing development servers receive no published pointer.
+3. Update canonical seeds and fixtures to create unpublished drafts and document reset/reseed for disposable development databases.
+4. Switch authoring services, Studio, Platform APIs, gateway discovery, and execution together: writes target drafts, publication creates revisions, and runtime reads only active revision tables.
+5. Delete mutable-runtime loaders, fallback branches, dual-write/shadow comparison code, obsolete tests, metrics, and documentation in the same change.
+6. Verify empty-database and reset-development-database flows, then explicitly publish fixture servers needed for end-to-end tests.
+7. Enable history retention cleanup and monitor publish conflicts/failures, stale-agent errors, snapshot load latency, and storage growth.
 
-Rollback before gateway cutover ignores the new pointer and preserves mutable runtime behavior. After cutover, rollback may temporarily restore the verified mutable fallback only if draft rows still match the active revision; it must never copy historical secret material or automatically repoint to an unvalidated revision.
+If development rollback is required before the migration is shared, revert code and regenerate/reset the database. Once shared, use a forward generated migration. The mutable gateway runtime is never restored as a rollback mechanism.
 
 ## Open Questions
 
 - Should a future change support a deliberate “publish empty contract” operation, or should pause remain the only supported way to take a published server offline? This design chooses pause to keep availability intent explicit.
-

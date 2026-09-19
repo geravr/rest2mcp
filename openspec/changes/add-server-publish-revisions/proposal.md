@@ -12,7 +12,7 @@ Studio currently persists editable configuration and the gateway's executable `c
 - Separate versioned configuration from operational controls: pause/resume, token revocation, and secret-material rotation remain immediate; structural authentication changes and non-secret config edits require publication.
 - Add paginated revision history, safe change summaries, actor/source metadata, and “restore to draft” rather than moving the runtime pointer backward.
 - Record published revision identity on call logs and calculate runtime health from the active revision while allowing explicit draft testing in Studio.
-- **BREAKING**: after migration, saving an edit no longer changes agent behavior until the owner publishes; existing live behavior is preserved as an initial backfilled revision.
+- **BREAKING**: after the clean cutover, saving an edit no longer changes agent behavior until the owner publishes. Existing development servers have no active revision and must be explicitly reviewed/published or recreated from seeds; no mutable-row runtime fallback or automatic backfill is retained.
 
 Non-goals: branching or merging drafts, per-tool independent publication, storing historical plaintext/ciphertext secrets, automatic publication, multi-user approval workflows, or direct rollback that bypasses validation.
 
@@ -32,7 +32,7 @@ Non-goals: branching or merging drafts, per-tool independent publication, storin
 
 ## Impact
 
-- New Drizzle revision/tool/config snapshot tables, server published pointer, call-log revision identity, generated migration, backfill, and retention cleanup.
+- New Drizzle revision/tool/config snapshot tables, server published pointer, call-log revision identity, clean generated migration, development reset/reseed guidance, and retention cleanup.
 - Studio services, compiler orchestration, gateway/executor snapshot loading, tRPC/Platform command schemas, stable error codes, and telemetry.
 - SPA server detail, navigation status, publish review/diff/history UI, playground mode, and en/es copy.
 - This builds on `make-studio-writes-atomic` for draft concurrency and on `improve-agent-tool-contracts` for deterministic fingerprints; `secure-platform-mcp-and-token-scopes` supplies the author/publish permission split.
