@@ -12,6 +12,7 @@ export * from "./mcp-server-revision";
 export * from "./mcp-server-variable";
 export * from "./mcp-storage-asset";
 export * from "./mcp-tool";
+export * from "./mcp-tool-group";
 export * from "./platform-invitation";
 export * from "./platform-settings";
 export * from "./user";

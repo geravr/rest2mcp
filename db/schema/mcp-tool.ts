@@ -1,5 +1,6 @@
 import {
   boolean,
+  foreignKey,
   index,
   jsonb,
   pgTable,
@@ -9,6 +10,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { generateId } from "./id";
 import { mcpServer } from "./mcp-server";
+import { mcpToolGroup } from "./mcp-tool-group";
 
 export type McpCompileIssueRow = {
   path: string;
@@ -50,8 +52,20 @@ export const mcpTool = pgTable(
     annotations: jsonb().$type<McpBehaviorAnnotationsRow>(),
     allowMutation: boolean().notNull().default(false),
     enabled: boolean().notNull().default(true),
-    /** "manual" | "curl" */
+    /** "manual" | "curl" | "openapi" */
     source: text().default("manual").notNull(),
+    /**
+     * Versioned, secret-safe OpenAPI provenance (`McpOpenApiSourceProvenance`).
+     * Present only for `source: "openapi"` tools. Never enters agent contracts,
+     * runtime fingerprints, or execution snapshots. Services validate the shape
+     * before writing; the column is deliberately untyped JSON.
+     */
+    sourceProvenance: jsonb().$type<Record<string, unknown>>(),
+    /**
+     * Optional Studio-only group placement. Presentation metadata: never copied
+     * into revision rows, publication candidates, or agent contracts.
+     */
+    groupId: text(),
     createdAt: timestamp({ withTimezone: true, mode: "date" })
       .defaultNow()
       .notNull(),
@@ -64,6 +78,21 @@ export const mcpTool = pgTable(
     unique("mcp_tool_server_name_unique").on(table.serverId, table.name),
     index("mcp_tool_server_id_idx").on(table.serverId),
     index("mcp_tool_compile_status_idx").on(table.compileStatus),
+    index("mcp_tool_group_id_idx").on(table.groupId),
+    foreignKey({
+      columns: [table.groupId],
+      foreignColumns: [mcpToolGroup.id],
+      name: "mcp_tool_group_id_mcp_tool_group_id_fk",
+    }).onDelete("set null"),
+    /**
+     * Composite membership key: a tool may only reference a group of its own
+     * server. A null `groupId` satisfies the constraint under `MATCH SIMPLE`.
+     */
+    foreignKey({
+      columns: [table.serverId, table.groupId],
+      foreignColumns: [mcpToolGroup.serverId, mcpToolGroup.id],
+      name: "mcp_tool_group_same_server_fk",
+    }),
   ],
 );
 

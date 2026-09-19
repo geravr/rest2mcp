@@ -64,6 +64,13 @@
       "when": 1789805157142,
       "tag": "0008_minor_colonel_america",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789831570318,
+      "tag": "0009_legal_tusk",
+      "breakpoints": true
     }
   ]
 }

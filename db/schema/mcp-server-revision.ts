@@ -143,6 +143,12 @@ export const mcpServerRevisionTool = pgTable(
     allowMutation: boolean().notNull(),
     enabled: boolean().notNull(),
     source: text().notNull(),
+    /**
+     * Versioned, secret-safe OpenAPI provenance copied from the draft tool at
+     * publication so a restore can reproduce the imported operation's identity.
+     * Excluded from candidate, contract, and runtime fingerprints.
+     */
+    sourceProvenance: jsonb().$type<Record<string, unknown>>(),
     /** Deterministic agent-contract fingerprint; null when not contract-ready. */
     contractFingerprint: text(),
     definitionHash: text(),

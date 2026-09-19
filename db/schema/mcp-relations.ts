@@ -14,6 +14,7 @@ import {
 import { mcpServerVariable } from "./mcp-server-variable";
 import { mcpStorageAsset } from "./mcp-storage-asset";
 import { mcpTool } from "./mcp-tool";
+import { mcpToolGroup } from "./mcp-tool-group";
 import { user } from "./user";
 
 export const mcpServerRelations = relations(mcpServer, ({ one, many }) => ({
@@ -26,6 +27,7 @@ export const mcpServerRelations = relations(mcpServer, ({ one, many }) => ({
     references: [mcpStorageAsset.id],
   }),
   tools: many(mcpTool),
+  toolGroups: many(mcpToolGroup),
   variables: many(mcpServerVariable),
   agentTokens: many(mcpAgentToken),
   callLogs: many(mcpCallLog),
@@ -84,8 +86,23 @@ export const mcpToolRelations = relations(mcpTool, ({ one, many }) => ({
     fields: [mcpTool.serverId],
     references: [mcpServer.id],
   }),
+  group: one(mcpToolGroup, {
+    fields: [mcpTool.groupId],
+    references: [mcpToolGroup.id],
+  }),
   callLogs: many(mcpCallLog),
 }));
+
+export const mcpToolGroupRelations = relations(
+  mcpToolGroup,
+  ({ one, many }) => ({
+    server: one(mcpServer, {
+      fields: [mcpToolGroup.serverId],
+      references: [mcpServer.id],
+    }),
+    tools: many(mcpTool),
+  }),
+);
 
 export const mcpServerVariableRelations = relations(
   mcpServerVariable,
