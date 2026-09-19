@@ -170,7 +170,11 @@ describe("DeleteVariableDialog", () => {
     await user.click(screen.getByRole("button", { name: /delete/i }));
 
     expect(deleteMutate).toHaveBeenCalledWith(
-      { serverId: "mcs_1", name: "api_token" },
+      {
+        serverId: "mcs_1",
+        name: "api_token",
+        expectedRevision: 1,
+      },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
     expect(onClose).toHaveBeenCalled();

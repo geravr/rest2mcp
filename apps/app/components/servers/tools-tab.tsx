@@ -43,12 +43,14 @@ type FormState =
 
 export function ServerToolsTab({
   serverId,
+  configRevision,
   page,
   pageSize,
   onPageChange,
   onPageSizeChange,
 }: {
   serverId: string;
+  configRevision: number;
   page: number;
   pageSize: PageSize;
   onPageChange: (page: number) => void;
@@ -141,6 +143,7 @@ export function ServerToolsTab({
                         updateTool.mutate({
                           serverId,
                           toolId: tool.id,
+                          expectedRevision: configRevision,
                           enabled,
                           allowMutation: tool.allowMutation,
                         })
@@ -169,6 +172,7 @@ export function ServerToolsTab({
                       updateTool.mutate({
                         serverId,
                         toolId: tool.id,
+                        expectedRevision: configRevision,
                         allowMutation,
                         enabled: allowMutation ? tool.enabled : false,
                       });
@@ -233,6 +237,7 @@ export function ServerToolsTab({
       {formState ? (
         <ToolFormDialog
           serverId={serverId}
+          configRevision={configRevision}
           variableNames={variableNames}
           variables={variableRefs}
           tool={formState.kind === "create" ? undefined : formState.tool}
@@ -243,6 +248,7 @@ export function ServerToolsTab({
       {deleteTarget ? (
         <DeleteToolDialog
           serverId={serverId}
+          configRevision={configRevision}
           tool={deleteTarget}
           onClose={() => setDeleteTarget(null)}
         />
@@ -250,6 +256,7 @@ export function ServerToolsTab({
       {curlOpen ? (
         <CurlImportDialog
           serverId={serverId}
+          configRevision={configRevision}
           onClose={() => setCurlOpen(false)}
         />
       ) : null}

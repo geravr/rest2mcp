@@ -69,6 +69,8 @@ export const esServers = {
     iconPhotoDescription: "Sube una imagen JPG, PNG o WebP de hasta 5 MB.",
     invalidIconType: "Sube una imagen JPG, PNG o WebP.",
     iconTooLarge: "El icono debe pesar 5 MB o menos.",
+    iconUploadFailed:
+      "No se pudo finalizar la subida del icono. Inténtalo de nuevo.",
     variables: "Valores del servidor",
     variablesDescription:
       "Configuración y secretos que las herramientas referencian por nombre. Los valores secretos se cifran y no se vuelven a mostrar.",

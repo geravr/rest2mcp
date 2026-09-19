@@ -7,17 +7,17 @@ const SIZES = {
   lg: "h-12 w-12",
 } as const;
 
-/** Server icon from custom upload or DiceBear rings fallback. */
+/** Server icon from the attached asset or DiceBear rings fallback. */
 export function ServerIcon({
   serverId,
-  iconImage,
+  iconUrl,
   size = "md",
 }: {
   serverId: string;
-  iconImage?: string | null;
+  iconUrl?: string | null;
   size?: keyof typeof SIZES;
 }) {
-  const src = getServerIconSrc({ id: serverId, iconImage });
+  const src = getServerIconSrc({ id: serverId, iconUrl });
 
   return (
     <img

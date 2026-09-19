@@ -459,6 +459,7 @@ function describeBinding(
  */
 export function ToolFormDialog(props: {
   serverId: string;
+  configRevision?: number;
   variableNames: string[];
   variables?: ToolFormServerValue[];
   tool?: ToolFormTool;
@@ -532,6 +533,7 @@ export function ToolFormDialog(props: {
 
 export function ToolFormDialogForm({
   serverId,
+  configRevision = 1,
   variableNames,
   variables = [],
   tool,
@@ -540,6 +542,7 @@ export function ToolFormDialogForm({
   conversionIssues = [],
 }: {
   serverId: string;
+  configRevision?: number;
   variableNames: string[];
   variables?: ToolFormServerValue[];
   tool?: ToolFormTool;
@@ -1017,6 +1020,7 @@ export function ToolFormDialogForm({
     setSaveIssues([]);
     const base = {
       serverId,
+      expectedRevision: configRevision,
       name,
       title: title.trim() ? title.trim() : null,
       description: description.trim() ? description.trim() : null,

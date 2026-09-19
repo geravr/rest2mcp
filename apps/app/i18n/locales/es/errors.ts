@@ -132,6 +132,10 @@ export const esErrors = {
         "Esta definición usa semántica tipada que no puede representarse con plantillas heredadas; permanece tipada y no puede revertirse a campos de plantilla.",
       [APP_ERROR_CODES.MCP_LEGACY_DOWNGRADE_REJECTED]:
         "Esta herramienta o servidor ya usa enlaces tipados; se rechazan las actualizaciones con plantillas heredadas.",
+      [APP_ERROR_CODES.MCP_WRITE_CONFLICT]:
+        "Este servidor cambio en otro lugar. Recarga la configuracion mas reciente e intentalo de nuevo.",
+      [APP_ERROR_CODES.MCP_TRANSIENT_WRITE_FAILURE]:
+        "El cambio no se guardo por un problema temporal de base de datos. Es seguro reintentar.",
 
       [APP_ERROR_CODES.ROUTE_NOT_FOUND]: "Esta ruta de API no existe.",
       [APP_ERROR_CODES.INTERNAL_ERROR]:

@@ -42,6 +42,7 @@ describe("EditVariableDialog", () => {
     expect(updateMutate).toHaveBeenCalledWith(
       {
         serverId: "mcs_1",
+        expectedRevision: 1,
         name: "api_token",
         isSecret: true,
         value: "sk_rotated",
@@ -72,6 +73,7 @@ describe("EditVariableDialog", () => {
     expect(updateMutate).toHaveBeenCalledWith(
       {
         serverId: "mcs_1",
+        expectedRevision: 1,
         name: "api_token",
         isSecret: false,
         value: "now-plain",

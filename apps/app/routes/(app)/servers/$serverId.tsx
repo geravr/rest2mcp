@@ -80,7 +80,7 @@ function ServerDetailPage() {
               <div className="flex items-start gap-3">
                 <ServerIcon
                   serverId={data.id}
-                  iconImage={data.iconImage}
+                  iconUrl={data.iconUrl}
                   size="lg"
                 />
                 <div className="space-y-1">
@@ -107,6 +107,7 @@ function ServerDetailPage() {
                   onClick={() =>
                     updateServer.mutate({
                       serverId,
+                      expectedRevision: data.configRevision,
                       status: data.status === "paused" ? "live" : "paused",
                     })
                   }
@@ -142,6 +143,7 @@ function ServerDetailPage() {
               <TabsContent value="tools">
                 <ServerToolsTab
                   serverId={serverId}
+                  configRevision={data.configRevision}
                   page={page}
                   pageSize={pageSize}
                   onPageChange={(next) =>
@@ -204,7 +206,11 @@ function ServerDetailPage() {
                 />
               </TabsContent>
               <TabsContent value="connection">
-                <ServerConnectionTab key={serverId} serverId={serverId} />
+                <ServerConnectionTab
+                  key={serverId}
+                  serverId={serverId}
+                  configRevision={data.configRevision}
+                />
               </TabsContent>
               <TabsContent value="settings">
                 <ServerSettingsTab

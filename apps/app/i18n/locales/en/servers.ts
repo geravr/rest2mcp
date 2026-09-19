@@ -69,6 +69,7 @@ export const enServers = {
     iconPhotoDescription: "Upload a JPG, PNG, or WebP image up to 5 MB.",
     invalidIconType: "Upload a JPG, PNG, or WebP image.",
     iconTooLarge: "Icon images must be 5 MB or smaller.",
+    iconUploadFailed: "The icon upload could not be finalized. Try again.",
     variables: "Server values",
     variablesDescription:
       "Configuration and secrets tools reference by name. Secret values are encrypted and never shown again.",

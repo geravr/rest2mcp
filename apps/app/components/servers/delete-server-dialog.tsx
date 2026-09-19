@@ -25,7 +25,7 @@ export function DeleteServerDialog({
   server,
   onClose,
 }: {
-  server: { id: string; name: string };
+  server: { id: string; name: string; configRevision?: number };
   onClose: () => void;
 }) {
   const { t } = useTranslations();
@@ -71,7 +71,10 @@ export function DeleteServerDialog({
             disabled={!confirmed || deleteServer.isPending}
             onClick={() =>
               deleteServer.mutate(
-                { serverId: server.id },
+                {
+                  serverId: server.id,
+                  expectedRevision: server.configRevision ?? 1,
+                },
                 {
                   onSuccess: () => {
                     onClose();

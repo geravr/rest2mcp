@@ -119,6 +119,10 @@ export const enErrors = {
         "This definition uses typed semantics that cannot be represented with legacy templates; it stays typed and cannot be rolled back to template fields.",
       [APP_ERROR_CODES.MCP_LEGACY_DOWNGRADE_REJECTED]:
         "This tool or server already uses typed request bindings; legacy template updates are rejected.",
+      [APP_ERROR_CODES.MCP_WRITE_CONFLICT]:
+        "This server changed elsewhere. Reload the latest configuration and try again.",
+      [APP_ERROR_CODES.MCP_TRANSIENT_WRITE_FAILURE]:
+        "The change did not save because of a temporary database issue. It is safe to retry.",
 
       [APP_ERROR_CODES.ROUTE_NOT_FOUND]: "This API route does not exist.",
       [APP_ERROR_CODES.INTERNAL_ERROR]:

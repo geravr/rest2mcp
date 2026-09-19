@@ -1,7 +1,7 @@
 import { useTranslations } from "@/i18n/use-translations";
-import { resolveErrorMessage } from "@/lib/errors";
+import { getAppCode, resolveErrorMessage } from "@/lib/errors";
 import { api } from "@/lib/trpc";
-import type { PaginationInput } from "@repo/core";
+import { APP_ERROR_CODES, type PaginationInput } from "@repo/core";
 import {
   keepPreviousData,
   useMutation,
@@ -153,8 +153,25 @@ function useInvalidateMcp() {
   };
 }
 
+/**
+ * Centralized mutation error handling. A `MCP_WRITE_CONFLICT` invalidates and
+ * reloads the server aggregate so stale optimistic state is never reported as
+ * saved; every failure surfaces localized copy.
+ */
+export function useMcpMutationError() {
+  const { t } = useTranslations();
+  const invalidate = useInvalidateMcp();
+  return (error: unknown) => {
+    if (getAppCode(error) === APP_ERROR_CODES.MCP_WRITE_CONFLICT) {
+      void invalidate();
+    }
+    toast.error(resolveErrorMessage(error, t));
+  };
+}
+
 export function useCreateMcpServer() {
   const { t } = useTranslations();
+  const handleError = useMcpMutationError();
   const invalidate = useInvalidateMcp();
   const baseOptions = api.mcp.createServer.mutationOptions();
   return useMutation({
@@ -166,13 +183,14 @@ export function useCreateMcpServer() {
     },
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);
-      toast.error(resolveErrorMessage(error, t));
+      handleError(error);
     },
   });
 }
 
 export function useSetMcpServerAuth() {
   const { t } = useTranslations();
+  const handleError = useMcpMutationError();
   const invalidate = useInvalidateMcp();
   const baseOptions = api.mcp.setServerAuth.mutationOptions();
   return useMutation({
@@ -184,13 +202,14 @@ export function useSetMcpServerAuth() {
     },
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);
-      toast.error(resolveErrorMessage(error, t));
+      handleError(error);
     },
   });
 }
 
 export function useUpdateMcpServer() {
   const { t } = useTranslations();
+  const handleError = useMcpMutationError();
   const invalidate = useInvalidateMcp();
   const baseOptions = api.mcp.updateServer.mutationOptions();
   return useMutation({
@@ -202,13 +221,14 @@ export function useUpdateMcpServer() {
     },
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);
-      toast.error(resolveErrorMessage(error, t));
+      handleError(error);
     },
   });
 }
 
 export function useUpdateMcpServerCommon() {
   const { t } = useTranslations();
+  const handleError = useMcpMutationError();
   const invalidate = useInvalidateMcp();
   const baseOptions = api.mcp.updateServerCommon.mutationOptions();
   return useMutation({
@@ -220,13 +240,14 @@ export function useUpdateMcpServerCommon() {
     },
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);
-      toast.error(resolveErrorMessage(error, t));
+      handleError(error);
     },
   });
 }
 
 export function useDeleteMcpServer() {
   const { t } = useTranslations();
+  const handleError = useMcpMutationError();
   const invalidate = useInvalidateMcp();
   const baseOptions = api.mcp.deleteServer.mutationOptions();
   return useMutation({
@@ -238,31 +259,31 @@ export function useDeleteMcpServer() {
     },
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);
-      toast.error(resolveErrorMessage(error, t));
+      handleError(error);
     },
   });
 }
 
 export function useTestMcpConnection() {
-  const { t } = useTranslations();
+  const handleError = useMcpMutationError();
   const baseOptions = api.mcp.testConnection.mutationOptions();
   return useMutation({
     ...baseOptions,
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);
-      toast.error(resolveErrorMessage(error, t));
+      handleError(error);
     },
   });
 }
 
 export function useParseCurlPreview() {
-  const { t } = useTranslations();
+  const handleError = useMcpMutationError();
   const baseOptions = api.mcp.parseCurlPreview.mutationOptions();
   return useMutation({
     ...baseOptions,
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);
-      toast.error(resolveErrorMessage(error, t));
+      handleError(error);
     },
   });
 }
@@ -273,13 +294,13 @@ export function usePreviewToolCompile(): UseMutationResult<
   McpToolPreviewCompileInput,
   unknown
 > {
-  const { t } = useTranslations();
+  const handleError = useMcpMutationError();
   const baseOptions = api.mcp.previewToolCompile.mutationOptions();
   return useMutation({
     ...baseOptions,
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);
-      toast.error(resolveErrorMessage(error, t));
+      handleError(error);
     },
   }) as unknown as UseMutationResult<
     McpToolPreviewCompileResult,
@@ -291,6 +312,7 @@ export function usePreviewToolCompile(): UseMutationResult<
 
 export function useCreateMcpTool() {
   const { t } = useTranslations();
+  const handleError = useMcpMutationError();
   const invalidate = useInvalidateMcp();
   const baseOptions = api.mcp.createTool.mutationOptions();
   return useMutation({
@@ -302,13 +324,14 @@ export function useCreateMcpTool() {
     },
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);
-      toast.error(resolveErrorMessage(error, t));
+      handleError(error);
     },
   });
 }
 
 export function useCreateMcpToolFromCurl() {
   const { t } = useTranslations();
+  const handleError = useMcpMutationError();
   const invalidate = useInvalidateMcp();
   const baseOptions = api.mcp.createToolFromCurl.mutationOptions();
   return useMutation({
@@ -320,13 +343,14 @@ export function useCreateMcpToolFromCurl() {
     },
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);
-      toast.error(resolveErrorMessage(error, t));
+      handleError(error);
     },
   });
 }
 
 export function useUpdateMcpTool() {
   const { t } = useTranslations();
+  const handleError = useMcpMutationError();
   const invalidate = useInvalidateMcp();
   const baseOptions = api.mcp.updateTool.mutationOptions();
   return useMutation({
@@ -338,13 +362,14 @@ export function useUpdateMcpTool() {
     },
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);
-      toast.error(resolveErrorMessage(error, t));
+      handleError(error);
     },
   });
 }
 
 export function useDeleteMcpTool() {
   const { t } = useTranslations();
+  const handleError = useMcpMutationError();
   const invalidate = useInvalidateMcp();
   const baseOptions = api.mcp.deleteTool.mutationOptions();
   return useMutation({
@@ -356,13 +381,14 @@ export function useDeleteMcpTool() {
     },
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);
-      toast.error(resolveErrorMessage(error, t));
+      handleError(error);
     },
   });
 }
 
 export function useCreateMcpVariable() {
   const { t } = useTranslations();
+  const handleError = useMcpMutationError();
   const invalidate = useInvalidateMcp();
   const baseOptions = api.mcp.createVariable.mutationOptions();
   return useMutation({
@@ -374,13 +400,14 @@ export function useCreateMcpVariable() {
     },
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);
-      toast.error(resolveErrorMessage(error, t));
+      handleError(error);
     },
   });
 }
 
 export function useUpdateMcpVariable() {
   const { t } = useTranslations();
+  const handleError = useMcpMutationError();
   const invalidate = useInvalidateMcp();
   const baseOptions = api.mcp.updateVariable.mutationOptions();
   return useMutation({
@@ -392,13 +419,14 @@ export function useUpdateMcpVariable() {
     },
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);
-      toast.error(resolveErrorMessage(error, t));
+      handleError(error);
     },
   });
 }
 
 export function useDeleteMcpVariable() {
   const { t } = useTranslations();
+  const handleError = useMcpMutationError();
   const invalidate = useInvalidateMcp();
   const baseOptions = api.mcp.deleteVariable.mutationOptions();
   return useMutation({
@@ -410,13 +438,14 @@ export function useDeleteMcpVariable() {
     },
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);
-      toast.error(resolveErrorMessage(error, t));
+      handleError(error);
     },
   });
 }
 
 export function useCreateMcpToken() {
   const { t } = useTranslations();
+  const handleError = useMcpMutationError();
   const invalidate = useInvalidateMcp();
   const baseOptions = api.mcp.createToken.mutationOptions();
   return useMutation({
@@ -428,13 +457,14 @@ export function useCreateMcpToken() {
     },
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);
-      toast.error(resolveErrorMessage(error, t));
+      handleError(error);
     },
   });
 }
 
 export function useRevokeMcpToken() {
   const { t } = useTranslations();
+  const handleError = useMcpMutationError();
   const invalidate = useInvalidateMcp();
   const baseOptions = api.mcp.revokeToken.mutationOptions();
   return useMutation({
@@ -446,13 +476,13 @@ export function useRevokeMcpToken() {
     },
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);
-      toast.error(resolveErrorMessage(error, t));
+      handleError(error);
     },
   });
 }
 
 export function useInvokeMcpTool() {
-  const { t } = useTranslations();
+  const handleError = useMcpMutationError();
   const queryClient = useQueryClient();
   const baseOptions = api.mcp.invokeTool.mutationOptions();
   return useMutation({
@@ -465,13 +495,14 @@ export function useInvokeMcpTool() {
     },
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);
-      toast.error(resolveErrorMessage(error, t));
+      handleError(error);
     },
   });
 }
 
 export function useCreatePlatformToken() {
   const { t } = useTranslations();
+  const handleError = useMcpMutationError();
   const invalidate = useInvalidateMcp();
   const baseOptions = api.mcp.createPlatformToken.mutationOptions();
   return useMutation({
@@ -483,13 +514,14 @@ export function useCreatePlatformToken() {
     },
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);
-      toast.error(resolveErrorMessage(error, t));
+      handleError(error);
     },
   });
 }
 
 export function useRevokePlatformToken() {
   const { t } = useTranslations();
+  const handleError = useMcpMutationError();
   const invalidate = useInvalidateMcp();
   const baseOptions = api.mcp.revokePlatformToken.mutationOptions();
   return useMutation({
@@ -501,7 +533,7 @@ export function useRevokePlatformToken() {
     },
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);
-      toast.error(resolveErrorMessage(error, t));
+      handleError(error);
     },
   });
 }

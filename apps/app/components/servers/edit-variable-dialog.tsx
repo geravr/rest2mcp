@@ -24,10 +24,12 @@ export type EditableVariable = {
 
 export function EditVariableDialog({
   serverId,
+  configRevision = 1,
   variable,
   onClose,
 }: {
   serverId: string;
+  configRevision?: number;
   variable: EditableVariable;
   onClose: () => void;
 }) {
@@ -62,6 +64,7 @@ export function EditVariableDialog({
             updateVariable.mutate(
               {
                 serverId,
+                expectedRevision: configRevision,
                 name: variable.name,
                 isSecret,
                 ...(value.length > 0 ? { value } : {}),

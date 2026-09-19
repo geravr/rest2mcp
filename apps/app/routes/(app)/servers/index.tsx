@@ -145,10 +145,7 @@ function ServersPage() {
               <Card key={server.id} className="flex flex-col">
                 <CardContent className="flex flex-1 flex-col gap-3 p-4">
                   <div className="flex items-start gap-3">
-                    <ServerIcon
-                      serverId={server.id}
-                      iconImage={server.iconImage}
-                    />
+                    <ServerIcon serverId={server.id} iconUrl={server.iconUrl} />
                     <div className="min-w-0 flex-1">
                       <Link
                         to="/servers/$serverId"
@@ -210,6 +207,7 @@ function ServersPage() {
                       onClick={() =>
                         updateServer.mutate({
                           serverId: server.id,
+                          expectedRevision: server.configRevision,
                           status:
                             server.status === "paused" ? "live" : "paused",
                         })

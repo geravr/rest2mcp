@@ -62,6 +62,11 @@ function extractAppCode(error: unknown): AppErrorCode | undefined {
   return undefined;
 }
 
+/** Public accessor for the stable application code behind any thrown error. */
+export function getAppCode(error: unknown): AppErrorCode | undefined {
+  return extractAppCode(error);
+}
+
 function extractErrorDetails(
   error: unknown,
 ): { placeholder?: string } | undefined {

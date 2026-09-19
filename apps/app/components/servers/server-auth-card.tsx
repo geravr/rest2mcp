@@ -34,9 +34,11 @@ export function authResetKey(auth: InferredAuth): string {
 
 export function ServerAuthCard({
   serverId,
+  configRevision,
   auth,
 }: {
   serverId: string;
+  configRevision: number;
   auth: InferredAuth;
 }) {
   const { t } = useTranslations();
@@ -138,6 +140,7 @@ export function ServerAuthCard({
               }
               setServerAuth.mutate({
                 serverId,
+                expectedRevision: configRevision,
                 auth: recipe,
               });
             }}

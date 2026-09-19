@@ -22,7 +22,13 @@ import { LoaderCircle } from "lucide-react";
 import { useState } from "react";
 
 /** Client connection: gateway URL and agent tokens. */
-export function ServerConnectionTab({ serverId }: { serverId: string }) {
+export function ServerConnectionTab({
+  serverId,
+  configRevision,
+}: {
+  serverId: string;
+  configRevision: number;
+}) {
   const { t } = useTranslations();
   const snippet = useMcpSnippet(serverId);
   const tokens = useMcpTokens(serverId);
@@ -64,8 +70,12 @@ export function ServerConnectionTab({ serverId }: { serverId: string }) {
           type="button"
           onClick={() =>
             createToken.mutate(
-              { serverId },
-              { onSuccess: (created) => setRawToken(created.token) },
+              { serverId, expectedRevision: configRevision },
+              {
+                onSuccess: (created) => {
+                  setRawToken(created.token);
+                },
+              },
             )
           }
           disabled={createToken.isPending}
@@ -107,7 +117,14 @@ export function ServerConnectionTab({ serverId }: { serverId: string }) {
                     size="sm"
                     disabled={revokeToken.isPending}
                     onClick={() =>
-                      revokeToken.mutate({ serverId, tokenId: token.id })
+                      revokeToken.mutate(
+                        {
+                          serverId,
+                          tokenId: token.id,
+                          expectedRevision: configRevision,
+                        },
+                        {},
+                      )
                     }
                   >
                     {revokeToken.isPending

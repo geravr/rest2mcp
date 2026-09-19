@@ -51,7 +51,8 @@ type ServerIdentity = {
   name: string;
   description: string | null;
   baseUrl: string;
-  iconImage: string | null;
+  iconUrl: string | null;
+  configRevision: number;
 };
 
 function ServerDefaultsCard({
@@ -242,10 +243,15 @@ export function ServerSettingsTab({
       const upload = await uploadFileToStorage({
         file,
         directory: "server-icons",
+        purpose: "server_icon",
       });
+      if (!upload.assetId) {
+        throw new Error(t.servers.iconUploadFailed);
+      }
       await updateServer.mutateAsync({
         serverId: server.id,
-        iconImage: upload.accessUrl,
+        expectedRevision: server.configRevision,
+        iconAssetId: upload.assetId,
       });
     } finally {
       setIconUploadPending(false);
@@ -266,7 +272,7 @@ export function ServerSettingsTab({
           <div className="flex flex-wrap items-center gap-4">
             <ServerIcon
               serverId={server.id}
-              iconImage={server.iconImage}
+              iconUrl={server.iconUrl}
               size="lg"
             />
             <div className="space-y-2">
@@ -315,7 +321,7 @@ export function ServerSettingsTab({
                     t.servers.iconUpload
                   )}
                 </Button>
-                {server.iconImage ? (
+                {server.iconUrl ? (
                   <Button
                     type="button"
                     variant="outline"
@@ -324,7 +330,11 @@ export function ServerSettingsTab({
                     onClick={() => {
                       setIconRemovePending(true);
                       updateServer.mutate(
-                        { serverId: server.id, iconImage: null },
+                        {
+                          serverId: server.id,
+                          expectedRevision: server.configRevision,
+                          iconAssetId: null,
+                        },
                         { onSettled: () => setIconRemovePending(false) },
                       );
                     }}
@@ -358,6 +368,7 @@ export function ServerSettingsTab({
               if (!identityDirty) return;
               updateServer.mutate({
                 serverId: server.id,
+                expectedRevision: server.configRevision,
                 name: name.trim(),
                 baseUrl: baseUrl.trim(),
                 description: description.trim() ? description.trim() : null,
@@ -417,6 +428,7 @@ export function ServerSettingsTab({
       <ServerAuthCard
         key={authResetKey(auth)}
         serverId={server.id}
+        configRevision={server.configRevision}
         auth={auth}
       />
 
@@ -507,6 +519,7 @@ export function ServerSettingsTab({
               createVariable.mutate(
                 {
                   serverId: server.id,
+                  expectedRevision: server.configRevision,
                   name: trimmedVariableName,
                   isSecret: variableSecret,
                   value: variableValue,
@@ -596,7 +609,11 @@ export function ServerSettingsTab({
         defaultQuery={defaultQuery}
         pending={updateServerCommon.isPending}
         onSave={(common) =>
-          updateServerCommon.mutate({ serverId: server.id, common })
+          updateServerCommon.mutate({
+            serverId: server.id,
+            expectedRevision: server.configRevision,
+            common,
+          })
         }
       />
 
@@ -636,6 +653,7 @@ export function ServerSettingsTab({
       {editVariable ? (
         <EditVariableDialog
           serverId={server.id}
+          configRevision={server.configRevision}
           variable={editVariable}
           onClose={() => setEditVariable(null)}
         />
@@ -643,6 +661,7 @@ export function ServerSettingsTab({
       {deleteVariableName ? (
         <DeleteVariableDialog
           serverId={server.id}
+          configRevision={server.configRevision}
           name={deleteVariableName}
           tools={tools.data?.items ?? []}
           defaultHeaders={defaultHeaders}

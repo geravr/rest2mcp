@@ -13,10 +13,12 @@ import { LoaderCircle } from "lucide-react";
 
 export function DeleteToolDialog({
   serverId,
+  configRevision,
   tool,
   onClose,
 }: {
   serverId: string;
+  configRevision?: number;
   tool: { id: string; name: string };
   onClose: () => void;
 }) {
@@ -42,7 +44,11 @@ export function DeleteToolDialog({
             disabled={deleteTool.isPending}
             onClick={() =>
               deleteTool.mutate(
-                { serverId, toolId: tool.id },
+                {
+                  serverId,
+                  toolId: tool.id,
+                  expectedRevision: configRevision ?? 1,
+                },
                 { onSuccess: () => onClose() },
               )
             }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { APP_ERROR_CODES } from "@repo/core";
 import { getTranslations } from "@/i18n";
 import {
+  getAppCode,
   getErrorMessage,
   getErrorStatus,
   isUnauthenticatedError,
@@ -205,5 +206,40 @@ describe("resolveErrorMessage", () => {
     ).toBe(
       "El placeholder limit de la plantilla no tiene argumento ni variable correspondiente.",
     );
+  });
+
+  it("detects MCP_WRITE_CONFLICT for centralized recovery", () => {
+    expect(
+      getAppCode({
+        data: { appCode: APP_ERROR_CODES.MCP_WRITE_CONFLICT },
+      }),
+    ).toBe(APP_ERROR_CODES.MCP_WRITE_CONFLICT);
+    expect(
+      getAppCode({
+        shape: { data: { appCode: APP_ERROR_CODES.MCP_WRITE_CONFLICT } },
+      }),
+    ).toBe(APP_ERROR_CODES.MCP_WRITE_CONFLICT);
+  });
+
+  it("renders localized conflict and transient copy in both locales", () => {
+    const es = getTranslations("es");
+    expect(
+      resolveErrorMessage(
+        { data: { appCode: APP_ERROR_CODES.MCP_WRITE_CONFLICT } },
+        t,
+      ),
+    ).toBe(t.errors.codes.MCP_WRITE_CONFLICT);
+    expect(
+      resolveErrorMessage(
+        { data: { appCode: APP_ERROR_CODES.MCP_WRITE_CONFLICT } },
+        es,
+      ),
+    ).toBe(es.errors.codes.MCP_WRITE_CONFLICT);
+    expect(
+      resolveErrorMessage(
+        { data: { appCode: APP_ERROR_CODES.MCP_TRANSIENT_WRITE_FAILURE } },
+        t,
+      ),
+    ).toBe(t.errors.codes.MCP_TRANSIENT_WRITE_FAILURE);
   });
 });

@@ -6,13 +6,13 @@ const dataUriCache = new Map<string, string>();
 
 export function getServerIconSrc({
   id,
-  iconImage,
+  iconUrl,
 }: {
   id: string;
-  iconImage?: string | null;
+  iconUrl?: string | null;
 }): string {
-  if (iconImage) {
-    return iconImage;
+  if (iconUrl) {
+    return iconUrl;
   }
 
   const cached = dataUriCache.get(id);

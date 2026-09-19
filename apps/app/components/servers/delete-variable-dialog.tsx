@@ -57,6 +57,7 @@ export function findVariableReferences(
 
 export function DeleteVariableDialog({
   serverId,
+  configRevision = 1,
   name,
   tools,
   defaultHeaders,
@@ -64,6 +65,7 @@ export function DeleteVariableDialog({
   onClose,
 }: {
   serverId: string;
+  configRevision?: number;
   name: string;
   tools: VariableReferenceTool[];
   defaultHeaders: Record<string, string> | null;
@@ -130,7 +132,11 @@ export function DeleteVariableDialog({
             disabled={deleteVariable.isPending}
             onClick={() =>
               deleteVariable.mutate(
-                { serverId, name },
+                {
+                  serverId,
+                  name,
+                  expectedRevision: configRevision,
+                },
                 { onSuccess: () => onClose() },
               )
             }

@@ -1,6 +1,8 @@
 export interface UploadFileInput {
   file: File;
   directory?: string;
+  /** Staged-asset purpose; `server_icon` creates a durable asset id. */
+  purpose?: "server_icon";
 }
 
 export interface UploadFileResult {
@@ -13,6 +15,8 @@ export interface UploadFileResult {
   contentType: string;
   contentLength: number;
   accessUrl: string;
+  /** Present when a staged asset was created for the upload. */
+  assetId?: string;
 }
 
 export async function uploadFileToStorage(
@@ -23,6 +27,10 @@ export async function uploadFileToStorage(
 
   if (input.directory) {
     formData.set("directory", input.directory);
+  }
+
+  if (input.purpose) {
+    formData.set("purpose", input.purpose);
   }
 
   const response = await fetch("/api/storage/upload", {

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ServerSettingsTab } from "./settings-tab";
@@ -8,6 +8,9 @@ const updateServerMutate = vi.fn();
 const updateCommonMutate = vi.fn();
 const setServerAuthMutate = vi.fn();
 const testConnectionMutate = vi.fn();
+const uploadFileToStorage = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/storage", () => ({ uploadFileToStorage }));
 
 vi.mock("@/hooks/use-mcp", () => ({
   useMcpVariables: () => ({
@@ -69,7 +72,8 @@ const server = {
   name: "CRM",
   description: null,
   baseUrl: "https://api.example.com",
-  iconImage: null,
+  iconUrl: null,
+  configRevision: 1,
 };
 
 const noneAuth = { type: "none" as const };
@@ -81,6 +85,7 @@ describe("ServerSettingsTab", () => {
     updateCommonMutate.mockClear();
     setServerAuthMutate.mockClear();
     testConnectionMutate.mockClear();
+    uploadFileToStorage.mockReset();
   });
 
   it("keeps identity and defaults save disabled until the form is dirty", () => {
@@ -141,6 +146,7 @@ describe("ServerSettingsTab", () => {
     expect(updateServerMutate).toHaveBeenCalledWith(
       expect.objectContaining({
         serverId: "mcs_1",
+        expectedRevision: 1,
         name: "Billing",
         baseUrl: "https://api.example.com",
       }),
@@ -183,6 +189,7 @@ describe("ServerSettingsTab", () => {
 
     expect(updateCommonMutate).toHaveBeenCalledWith({
       serverId: "mcs_1",
+      expectedRevision: 1,
       common: {
         headers: [
           expect.objectContaining({
@@ -231,6 +238,7 @@ describe("ServerSettingsTab", () => {
 
     expect(setServerAuthMutate).toHaveBeenCalledWith({
       serverId: "mcs_1",
+      expectedRevision: 1,
       auth: { type: "none" },
     });
   });
@@ -267,5 +275,77 @@ describe("ServerSettingsTab", () => {
     expect(
       screen.getByRole("button", { name: /save authentication/i }),
     ).toBeDisabled();
+  });
+
+  it("sends the advanced revision after the aggregate reloads", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <ServerSettingsTab
+        server={server}
+        defaultHeaders={null}
+        defaultQuery={null}
+        auth={noneAuth}
+      />,
+    );
+    const nameInput = screen.getByLabelText(/^name$/i);
+    await user.clear(nameInput);
+    await user.type(nameInput, "Billing");
+    await user.click(screen.getByRole("button", { name: /save changes/i }));
+    expect(updateServerMutate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ expectedRevision: 1 }),
+    );
+
+    rerender(
+      <ServerSettingsTab
+        server={{ ...server, name: "Billing", configRevision: 2 }}
+        defaultHeaders={null}
+        defaultQuery={null}
+        auth={noneAuth}
+      />,
+    );
+    const reloadedName = screen.getByLabelText(/^name$/i);
+    await user.clear(reloadedName);
+    await user.type(reloadedName, "Billing 2");
+    await user.click(screen.getByRole("button", { name: /save changes/i }));
+    expect(updateServerMutate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ expectedRevision: 2 }),
+    );
+  });
+
+  it("keeps unsaved input available for resubmission", async () => {
+    const user = userEvent.setup();
+    render(
+      <ServerSettingsTab
+        server={server}
+        defaultHeaders={null}
+        defaultQuery={null}
+        auth={noneAuth}
+      />,
+    );
+    const nameInput = screen.getByLabelText(/^name$/i);
+    await user.clear(nameInput);
+    await user.type(nameInput, "Unsaved");
+    await user.click(screen.getByRole("button", { name: /save changes/i }));
+    // The value stays in the field (no optimistic clear) so a conflict can be
+    // corrected and resubmitted.
+    expect(screen.getByLabelText(/^name$/i)).toHaveValue("Unsaved");
+  });
+
+  it("does not attach an icon when the upload fails", async () => {
+    uploadFileToStorage.mockRejectedValueOnce(new Error("upload failed"));
+    render(
+      <ServerSettingsTab
+        server={server}
+        defaultHeaders={null}
+        defaultQuery={null}
+        auth={noneAuth}
+      />,
+    );
+    const file = new File(["x"], "icon.png", { type: "image/png" });
+    fireEvent.change(screen.getByLabelText(/upload icon/i), {
+      target: { files: [file] },
+    });
+    await waitFor(() => expect(uploadFileToStorage).toHaveBeenCalledTimes(1));
+    expect(updateServerMutate).not.toHaveBeenCalled();
   });
 });

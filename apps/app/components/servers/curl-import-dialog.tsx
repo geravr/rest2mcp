@@ -63,9 +63,11 @@ function truncate(value: string, length = 48): string {
  */
 export function CurlImportDialog({
   serverId,
+  configRevision = 1,
   onClose,
 }: {
   serverId: string;
+  configRevision?: number;
   onClose: () => void;
 }) {
   const { t } = useTranslations();
@@ -121,6 +123,7 @@ export function CurlImportDialog({
     createFromCurl.mutate(
       {
         serverId,
+        expectedRevision: configRevision,
         curl,
         markings: activeMarkings.map((entry) => ({
           location: entry.occurrence!.location,

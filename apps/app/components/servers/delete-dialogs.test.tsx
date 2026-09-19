@@ -59,7 +59,7 @@ describe("DeleteServerDialog", () => {
 
     await user.click(confirmButton);
     expect(deleteServerMutate).toHaveBeenCalledWith(
-      { serverId: "mcs_1" },
+      { serverId: "mcs_1", expectedRevision: 1 },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
     expect(navigateMock).toHaveBeenCalledWith({ to: "/servers" });
@@ -86,7 +86,7 @@ describe("DeleteToolDialog", () => {
 
     await user.click(screen.getByRole("button", { name: /^delete$/i }));
     expect(deleteToolMutate).toHaveBeenCalledWith(
-      { serverId: "mcs_1", toolId: "mct_1" },
+      { serverId: "mcs_1", toolId: "mct_1", expectedRevision: 1 },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
     expect(onClose).toHaveBeenCalled();

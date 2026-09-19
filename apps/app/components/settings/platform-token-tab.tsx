@@ -199,9 +199,10 @@ export function PlatformTokenTab() {
               variant="outline"
               disabled={revokeToken.isPending}
               onClick={() =>
-                revokeToken.mutate(undefined, {
-                  onSuccess: () => setRawToken(null),
-                })
+                revokeToken.mutate(
+                  { tokenId: token.data!.id },
+                  { onSuccess: () => setRawToken(null) },
+                )
               }
             >
               {revokeToken.isPending
