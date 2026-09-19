@@ -18,6 +18,7 @@ const { drizzle } = await import("drizzle-orm/postgres-js");
 const postgres = (await import("postgres")).default;
 const schema = await import("../schema");
 const { seedUsers } = await import("../seeds/users");
+const { seedMcp } = await import("../seeds/mcp");
 
 // Import drizzle config to trigger environment loading
 await import("../drizzle.config");
@@ -29,6 +30,7 @@ console.log("🌱 Starting database seeding...");
 
 try {
   await seedUsers(db);
+  await seedMcp(db);
   console.log("✅ Database seeding completed successfully!");
 } catch (error) {
   console.error("❌ Database seeding failed:");
