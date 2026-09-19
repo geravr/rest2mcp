@@ -50,6 +50,22 @@ export type {
   PlatformScopeValidationFailure,
 } from "./src/mcp-platform.js";
 
+// OpenAPI import and Studio tool groups
+export {
+  assertUniqueMcpOpenApiIssueCodes,
+  isMcpOpenApiBlockingIssueCode,
+  isMcpOpenApiIssueCode,
+  MCP_OPENAPI_BLOCKING_ISSUE_CODES,
+  MCP_OPENAPI_ISSUE_CODES,
+  MCP_OPENAPI_LIMITS,
+  MCP_OPENAPI_VERSIONS,
+  MCP_TOOL_GROUP_LIMITS,
+} from "./src/openapi-import.js";
+export type {
+  McpOpenApiIssueCode,
+  McpOpenApiVersion,
+} from "./src/openapi-import.js";
+
 // Pagination
 export {
   DEFAULT_PAGE,

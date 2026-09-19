@@ -95,6 +95,28 @@ export const APP_ERROR_CODES = {
   /** Deleting this secret slot would break the active published revision. */
   MCP_ACTIVE_SECRET_IN_USE: "MCP_ACTIVE_SECRET_IN_USE",
 
+  /** A Studio tool group id does not exist on the owner server. */
+  MCP_TOOL_GROUP_NOT_FOUND: "MCP_TOOL_GROUP_NOT_FOUND",
+  /** A Studio tool group name collides after normalization on the same server. */
+  MCP_TOOL_GROUP_NAME_CONFLICT: "MCP_TOOL_GROUP_NAME_CONFLICT",
+  /** The server already holds the maximum number of Studio tool groups. */
+  MCP_TOOL_GROUP_LIMIT_REACHED: "MCP_TOOL_GROUP_LIMIT_REACHED",
+  /** The server already holds the maximum number of draft tools. */
+  MCP_TOOL_LIMIT_REACHED: "MCP_TOOL_LIMIT_REACHED",
+
+  /** The submitted OpenAPI source is not bounded, well-formed JSON. */
+  MCP_OPENAPI_INVALID: "MCP_OPENAPI_INVALID",
+  /** The document declares a version this build cannot import. */
+  MCP_OPENAPI_VERSION_UNSUPPORTED: "MCP_OPENAPI_VERSION_UNSUPPORTED",
+  /** The document or its operation inventory exceeds a bounded limit. */
+  MCP_OPENAPI_LIMIT_EXCEEDED: "MCP_OPENAPI_LIMIT_EXCEEDED",
+  /** A document URL failed the dedicated safe-retrieval policy. */
+  MCP_OPENAPI_SOURCE_UNAVAILABLE: "MCP_OPENAPI_SOURCE_UNAVAILABLE",
+  /** The resubmitted source no longer matches the previewed fingerprint. */
+  MCP_OPENAPI_STALE_PREVIEW: "MCP_OPENAPI_STALE_PREVIEW",
+  /** The selection is empty, unknown, blocked, or breaks name/capacity rules. */
+  MCP_OPENAPI_INVALID_SELECTION: "MCP_OPENAPI_INVALID_SELECTION",
+
   /** Requested Platform PAT scopes are unknown, duplicated, or dependency-invalid. */
   MCP_PAT_SCOPE_INVALID: "MCP_PAT_SCOPE_INVALID",
   /** A high-risk Platform grant requires a fresh, matching step-up approval. */
@@ -155,6 +177,18 @@ export type AppErrorDetails = {
   policyVersion?: number;
   /** Platform resource mode involved in a grant validation failure. */
   resourceMode?: string;
+  /** Studio tool group involved in a conflict, when known and owner-scoped. */
+  groupId?: string;
+  /** Normalized Studio tool group name involved in a conflict. */
+  groupName?: string;
+  /** Stable OpenAPI operation keys affected by a selection or fingerprint conflict. */
+  operationKeys?: string[];
+  /** Canonical fingerprint of the source document the caller submitted. */
+  documentFingerprint?: string;
+  /** Configured ceiling involved in a capacity failure. */
+  limit?: number;
+  /** Observed count at the time of a capacity failure. */
+  observed?: number;
 };
 
 const appErrorCodeValues = Object.values(APP_ERROR_CODES);
