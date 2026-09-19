@@ -10,36 +10,6 @@ import {
 import { generateId } from "./id";
 import { mcpServer } from "./mcp-server";
 
-export type McpBodyType = "json" | "form" | "raw";
-
-export type McpRequestTemplate = {
-  query?: Record<string, string>;
-  headers?: Record<string, string>;
-  body?: string | null;
-  bodyType?: McpBodyType;
-};
-
-export type McpToolParamType = "string" | "number" | "boolean" | "json";
-
-export type McpToolParam = {
-  name: string;
-  description?: string;
-  required: boolean;
-  type: McpToolParamType;
-  /** Never logged/previewed in call history; masked as a password field in the playground. */
-  sensitive?: boolean;
-  minimum?: number;
-  maximum?: number;
-  minLength?: number;
-  maxLength?: number;
-  pattern?: string;
-  /** Supported string format preserved in the agent-visible schema. */
-  format?: "date" | "date-time" | "email" | "uri" | "uuid";
-  enum?: Array<string | number | boolean>;
-  examples?: unknown[];
-  allowEmpty?: boolean;
-};
-
 export type McpCompileIssueRow = {
   path: string;
   /** Stable definition-local id of the affected node, when known. */
@@ -70,16 +40,11 @@ export const mcpTool = pgTable(
     title: text(),
     description: text(),
     method: text().notNull(),
-    pathTemplate: text().notNull(),
-    /** Legacy request template (query/headers/body) with {{placeholder}} interpolation. */
-    requestTemplate: jsonb().$type<McpRequestTemplate>(),
-    /** Declared agent params used to derive the gateway input schema (legacy). */
-    params: jsonb().$type<McpToolParam[]>(),
     /** Versioned explicit request definition (bindings by id). */
     requestDefinition: jsonb().$type<Record<string, unknown>>(),
     /** Immutable compiled effective plan produced by the publish-time compiler. */
     compiledPlan: jsonb().$type<Record<string, unknown>>(),
-    /** "valid" | "invalid" | "legacy" | null (uncompiled). */
+    /** "valid" | "invalid" | null (uncompiled). */
     compileStatus: text(),
     compileIssues: jsonb().$type<McpCompileIssueRow[]>(),
     annotations: jsonb().$type<McpBehaviorAnnotationsRow>(),

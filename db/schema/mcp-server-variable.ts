@@ -1,11 +1,4 @@
-import {
-  boolean,
-  index,
-  pgTable,
-  text,
-  timestamp,
-  unique,
-} from "drizzle-orm/pg-core";
+import { index, pgTable, text, timestamp, unique } from "drizzle-orm/pg-core";
 import { generateId } from "./id";
 import { mcpServer } from "./mcp-server";
 
@@ -20,16 +13,14 @@ export const mcpServerVariable = pgTable(
       .references(() => mcpServer.id, { onDelete: "cascade" }),
     /** [a-z][a-z0-9_]*, unique per server. */
     name: text().notNull(),
-    /** Legacy boolean; prefer `kind`. Kept for rollback readers. */
-    isSecret: boolean().notNull().default(false),
-    /** "config" | "secret" — nullable during compatibility backfill. */
-    kind: text(),
-    /** "manual" | "auth" — nullable during compatibility backfill. */
-    owner: text(),
+    /** "config" | "secret" */
+    kind: text().notNull(),
+    /** "manual" | "auth" */
+    owner: text().notNull(),
     description: text(),
-    /** Plaintext value when kind/config (or legacy isSecret=false). */
+    /** Plaintext config storage; used only when kind is "config". */
     value: text(),
-    /** AES-256-GCM envelope when kind/secret (or legacy isSecret=true). */
+    /** AES-256-GCM secret storage; used only when kind is "secret". */
     ciphertext: text(),
     createdAt: timestamp({ withTimezone: true, mode: "date" })
       .defaultNow()

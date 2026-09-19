@@ -51,10 +51,6 @@ export const mcpServer = pgTable(
     baseUrl: text().notNull(),
     /** Hostnames allowed for upstream fetch. Default: host derived from baseUrl. */
     allowedHosts: jsonb().$type<string[]>().notNull(),
-    /** Legacy template-aware headers; dual-written during migration. */
-    defaultHeaders: jsonb().$type<Record<string, string>>(),
-    /** Legacy template-aware query params; dual-written during migration. */
-    defaultQuery: jsonb().$type<Record<string, string>>(),
     /** Explicit common header/query bindings (literal or server-value). */
     commonEntries: jsonb().$type<{
       headers: McpNamedEntryRow[];

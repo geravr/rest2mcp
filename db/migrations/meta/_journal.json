@@ -57,6 +57,13 @@
       "when": 1789802612685,
       "tag": "0007_glamorous_paper_doll",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789805157142,
+      "tag": "0008_minor_colonel_america",
+      "breakpoints": true
     }
   ]
 }

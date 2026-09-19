@@ -134,7 +134,6 @@ export const mcpServerRevisionTool = pgTable(
     title: text(),
     description: text(),
     method: text().notNull(),
-    pathTemplate: text().notNull(),
     requestDefinition: jsonb().$type<Record<string, unknown>>(),
     /** Immutable compiled plan for enabled valid tools; null otherwise. */
     compiledPlan: jsonb().$type<Record<string, unknown>>(),
@@ -199,7 +198,6 @@ export const mcpServerRevisionConfig = pgTable(
     /** "manual" | "auth" */
     owner: text(),
     description: text(),
-    isSecret: boolean().notNull(),
     /** Non-secret config value snapshot; null for secret slots. */
     value: text(),
     createdAt: timestamp({ withTimezone: true, mode: "date" })
