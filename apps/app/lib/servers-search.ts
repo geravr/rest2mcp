@@ -7,6 +7,7 @@ export const serverDetailTabValues = [
   "tools",
   "playground",
   "logs",
+  "revisions",
   "connection",
   "settings",
 ] as const;

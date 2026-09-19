@@ -218,7 +218,7 @@ export const esServers = {
     authSave: "Guardar autenticación",
     authSaving: "Guardando…",
     authRequiredFields: "Completa los campos de autenticación requeridos.",
-    authSaved: "Autenticación guardada.",
+    authSaved: "Estructura de autenticación guardada en el borrador.",
     existingAuthKept:
       "Herramienta creada. Se mantuvo la autenticación del servidor — la credencial del curl no se guardó.",
     invokeDisabledTool:
@@ -392,5 +392,99 @@ export const esServers = {
     mutationConfirmConfirm: "Revocar y deshabilitar",
     enabledBlockedHelp:
       "Esta herramienta no se puede habilitar hasta resolver los problemas de compilación anteriores.",
+    unpublishedChanges: "Cambios sin publicar",
+    publicationBlocked: "Publicación bloqueada",
+    publishedRevision: "Revisión publicada {number}",
+    neverPublished:
+      "Aún no se publica — los agentes no pueden llamar a este servidor.",
+    publishChanges: "Publicar cambios",
+    publishingChanges: "Publicando…",
+    publishTitle: "Revisión de publicación",
+    publishDescription:
+      "Revisa lo que verán los agentes y crea una revisión publicada inmutable.",
+    publishUnavailable: "La vista previa de publicación no está disponible.",
+    publishStale:
+      "El borrador o la revisión publicada cambiaron después de esta vista previa. Revisa los cambios actualizados antes de publicar.",
+    publishRefresh: "Actualizar vista previa",
+    unpublishedRevision: "Sin revisión publicada",
+    publishReady: "Listo para publicar",
+    publishBlocked: "Bloqueado por errores",
+    publishNoChanges: "Sin cambios publicables",
+    publishBlockingErrors: "Resuelve estos errores bloqueantes:",
+    publishWarningsTitle: "Confirma estas advertencias:",
+    publishWarnings: {
+      contract_changed:
+        "El contrato del agente habilitado cambia con esta publicación.",
+      tool_added: "Se añaden una o más herramientas al contrato del agente.",
+      tool_removed: "Se eliminan una o más herramientas publicadas.",
+      tool_disabled: "Se deshabilitan una o más herramientas publicadas.",
+      destructive_change:
+        "Esta publicación cambia el comportamiento de mutación o destructivo.",
+      auth_changed: "La estructura de configuración de autenticación cambia.",
+      config_changed: "Cambian valores de configuración no secretos.",
+    },
+    publishIssueFallback: "Problema sin resolver ({code}).",
+    publishDiffTitle: "Qué cambia",
+    publishDiffServer: "Enrutamiento del servidor",
+    publishDiffAuth: "Estructura de autenticación",
+    publishDiffCommon: "Headers o query por defecto",
+    publishDiffToolsAdded: "Herramientas añadidas",
+    publishDiffToolsRemoved: "Herramientas eliminadas",
+    publishDiffToolsChanged: "Herramientas cambiadas",
+    publishDiffToolsEnabled: "Herramientas habilitadas",
+    publishDiffToolsDisabled: "Herramientas deshabilitadas",
+    publishDiffConfig: "Valores del servidor cambiados",
+    publishDiffContract: "Contrato del agente cambiado",
+    publishDiffDestructive: "Comportamiento destructivo cambiado",
+    publishFingerprint: "Huella del candidato {fingerprint}",
+    publishNoteLabel: "Nota de publicación (opcional)",
+    publishNotePlaceholder: "¿Por qué publicas estos cambios?",
+    publishAckRemaining:
+      "Confirma cada advertencia para habilitar la publicación.",
+    publishSuccessTitle: "Publicado",
+    publishSuccessDescription:
+      "La revisión {number} ya está activa para los agentes. El borrador está limpio.",
+    publishSuccessDone: "Listo",
+    revisions: "Revisiones",
+    revisionNumber: "Revisión",
+    revisionNote: "Nota",
+    noRevisions: "Aún no hay revisiones publicadas.",
+    revisionTitle: "Revisión {number}",
+    revisionDetailTitle: "Detalle de la revisión",
+    revisionDetailDescription:
+      "Instantánea inmutable registrada al publicar. Los valores secretos nunca se muestran.",
+    revisionNotFound: "No se encontró esta revisión.",
+    revisionActive: "Activa",
+    revisionActorStudio: "Studio",
+    revisionActorPlatform: "Plataforma",
+    revisionCandidateFingerprint: "Huella del candidato {fingerprint}",
+    revisionContractFingerprint: "Huella del contrato {fingerprint}",
+    revisionToolsTitle: "Herramientas",
+    revisionNoTools: "Esta revisión no registró herramientas.",
+    revisionIssueCount: "{count} problema(s) de compilación",
+    revisionDisabled: "Deshabilitada",
+    revisionConfigTitle: "Valores del servidor",
+    revisionNoConfig: "Esta revisión no registró valores del servidor.",
+    revisionSecretUnavailable: "Secreto faltante",
+    revisionMissingSecrets:
+      "Esta revisión referencia secretos que ya no existen. Restaurar crea un borrador editable con un problema bloqueante.",
+    restoreToDraft: "Restaurar al borrador",
+    restoreConfirmDescription:
+      "Restaurar copia esta revisión al borrador. El comportamiento del agente no cambia hasta que revises y publiques una nueva revisión.",
+    restoreConfirm: "Restaurar al borrador",
+    restoring: "Restaurando…",
+    invokeNoPublishedRevision:
+      "Este servidor no tiene una revisión publicada. Publica cambios o usa la vista previa del borrador.",
+    playgroundNoPublishedTools:
+      "La revisión publicada activa no expone herramientas invocables.",
+    playgroundMode: "Origen de ejecución",
+    playgroundModePublished: "Publicada",
+    playgroundModeDraft: "Vista previa del borrador",
+    playgroundPublishedSource:
+      "Llamando a la revisión publicada activa {number}.",
+    playgroundDraftSource:
+      "Probando la revisión del borrador {revision} como propietario. No es comportamiento publicado.",
+    playgroundDraftNotice:
+      "La vista previa del borrador es prueba solo para el propietario. No cambia ni suplanta la revisión publicada, y estas llamadas no afectan la salud de producción.",
   },
 } as const;

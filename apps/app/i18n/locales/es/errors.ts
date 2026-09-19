@@ -151,6 +151,29 @@ export const esErrors = {
       [APP_ERROR_CODES.MCP_POLICY_VERSION_UNSUPPORTED]:
         "Este token de plataforma usa una versión de política no compatible y debe recrearse.",
 
+      [APP_ERROR_CODES.MCP_PUBLISH_NOT_READY]:
+        "Este borrador tiene errores que impiden publicarlo todavía.",
+      [APP_ERROR_CODES.MCP_PUBLISH_STALE_DRAFT]:
+        "El borrador cambió después de la vista previa. Revisa los cambios más recientes y publica de nuevo.",
+      [APP_ERROR_CODES.MCP_PUBLISH_STALE_REVISION]:
+        "La revisión publicada cambió. Recarga el servidor antes de publicar.",
+      [APP_ERROR_CODES.MCP_PUBLISH_CANDIDATE_CHANGED]:
+        "El borrador cambió desde la vista previa. Vuelve a previsualizar la publicación.",
+      [APP_ERROR_CODES.MCP_PUBLISH_WARNINGS_UNACKNOWLEDGED]:
+        "Confirma las advertencias de publicación antes de publicar.",
+      [APP_ERROR_CODES.MCP_PUBLISH_NO_CHANGES]:
+        "No hay cambios publicables en este borrador.",
+      [APP_ERROR_CODES.MCP_PUBLISH_IDEMPOTENCY_CONFLICT]:
+        "Esta solicitud de publicación ya se usó con contenido diferente.",
+      [APP_ERROR_CODES.MCP_PUBLISH_MISSING_SECRET]:
+        "Una herramienta publicada referencia un secreto o valor que ya no existe.",
+      [APP_ERROR_CODES.MCP_REVISION_NOT_FOUND]:
+        "No se encontró la revisión publicada.",
+      [APP_ERROR_CODES.MCP_REVISION_NOT_RESTORABLE]:
+        "Esta revisión no se puede restaurar al borrador tal cual.",
+      [APP_ERROR_CODES.MCP_ACTIVE_SECRET_IN_USE]:
+        "Este secreto lo usa la revisión publicada activa y no se puede eliminar.",
+
       [APP_ERROR_CODES.ROUTE_NOT_FOUND]: "Esta ruta de API no existe.",
       [APP_ERROR_CODES.INTERNAL_ERROR]:
         "Ocurri\u00f3 un error inesperado. Int\u00e9ntalo de nuevo.",

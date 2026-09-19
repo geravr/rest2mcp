@@ -3,6 +3,9 @@ import { SettingsFormSkeleton } from "@/components/loading";
 import { ServerConnectionTab } from "@/components/servers/connection-tab";
 import { ServerLogsTab } from "@/components/servers/logs-tab";
 import { ServerPlaygroundTab } from "@/components/servers/playground-tab";
+import { ServerPublicationStatus } from "@/components/servers/publication-status";
+import { PublishReviewDialog } from "@/components/servers/publish-review-dialog";
+import { ServerRevisionsTab } from "@/components/servers/revisions-tab";
 import { ServerIcon } from "@/components/servers/server-icon";
 import { ServerSettingsTab } from "@/components/servers/settings-tab";
 import { TrafficLightBadge } from "@/components/servers/traffic-light";
@@ -21,6 +24,7 @@ import {
 import { Button, Tabs, TabsContent, TabsList, TabsTrigger } from "@repo/ui";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { LoaderCircle } from "lucide-react";
+import { useState } from "react";
 
 export const Route = createFileRoute("/(app)/servers/$serverId")({
   validateSearch: serverDetailSearchSchema,
@@ -36,6 +40,7 @@ function ServerDetailPage() {
   const activeTab = search.tab ?? "tools";
   const { data, isLoading, isError, error } = useMcpServer(serverId);
   const updateServer = useUpdateMcpServer();
+  const [publishOpen, setPublishOpen] = useState(false);
 
   const setTab = (tab: string) => {
     const valid = serverDetailTabValues.includes(
@@ -84,7 +89,7 @@ function ServerDetailPage() {
                   size="lg"
                 />
                 <div className="space-y-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <h1 className="text-2xl font-semibold tracking-tight">
                       {data.name}
                     </h1>
@@ -93,6 +98,11 @@ function ServerDetailPage() {
                   <p className="text-sm text-muted-foreground">
                     {data.baseUrl}
                   </p>
+                  <ServerPublicationStatus
+                    publishedRevisionNumber={data.publishedRevisionNumber}
+                    dirty={data.dirty}
+                    publishReady={data.publishReady}
+                  />
                   {data.description ? (
                     <p className="text-sm text-muted-foreground">
                       {data.description}
@@ -101,6 +111,9 @@ function ServerDetailPage() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                <Button onClick={() => setPublishOpen(true)}>
+                  {t.servers.publishChanges}
+                </Button>
                 <Button
                   variant="outline"
                   disabled={updateServer.isPending}
@@ -130,6 +143,9 @@ function ServerDetailPage() {
                     {t.servers.playground}
                   </TabsTrigger>
                   <TabsTrigger value="logs">{t.servers.logs}</TabsTrigger>
+                  <TabsTrigger value="revisions">
+                    {t.servers.revisions}
+                  </TabsTrigger>
                 </TabsList>
                 <TabsList aria-label={t.servers.tabsSetup}>
                   <TabsTrigger value="connection">
@@ -170,6 +186,36 @@ function ServerDetailPage() {
                 <ServerPlaygroundTab
                   serverId={serverId}
                   serverStatus={data.status as "draft" | "live" | "paused"}
+                  draftRevision={data.draftRevision}
+                  publishedRevisionNumber={data.publishedRevisionNumber}
+                  publishedTools={data.publishedTools}
+                />
+              </TabsContent>
+              <TabsContent value="revisions">
+                <ServerRevisionsTab
+                  serverId={serverId}
+                  draftRevision={data.draftRevision}
+                  configRevision={data.configRevision}
+                  page={page}
+                  pageSize={pageSize}
+                  onPageChange={(next) =>
+                    void navigate({
+                      search: (prev) =>
+                        omitPaginationDefaults({ ...prev, page: next }),
+                      replace: true,
+                    })
+                  }
+                  onPageSizeChange={(next) =>
+                    void navigate({
+                      search: (prev) =>
+                        omitPaginationDefaults({
+                          ...prev,
+                          pageSize: next,
+                          page: 1,
+                        }),
+                      replace: true,
+                    })
+                  }
                 />
               </TabsContent>
               <TabsContent value="logs">
@@ -222,6 +268,12 @@ function ServerDetailPage() {
                 />
               </TabsContent>
             </Tabs>
+            {publishOpen ? (
+              <PublishReviewDialog
+                serverId={serverId}
+                onClose={() => setPublishOpen(false)}
+              />
+            ) : null}
           </>
         )}
       </div>

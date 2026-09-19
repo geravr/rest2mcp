@@ -22,16 +22,44 @@ import { useState } from "react";
 
 type ParamValue = string | boolean;
 
+type PlaygroundMode = "published" | "draft";
+
 export function ServerPlaygroundTab({
   serverId,
   serverStatus,
+  draftRevision,
+  publishedRevisionNumber,
+  publishedTools = [],
 }: {
   serverId: string;
   serverStatus: "draft" | "live" | "paused";
+  draftRevision: number;
+  publishedRevisionNumber: number | null;
+  publishedTools?: Array<{
+    id: string;
+    name: string;
+    method: string;
+    allowMutation: boolean;
+    params: Array<{
+      name: string;
+      type: string;
+      required: boolean;
+      sensitive: boolean;
+      description?: string;
+      minimum?: number;
+      maximum?: number;
+      minLength?: number;
+      maxLength?: number;
+      pattern?: string;
+    }>;
+  }>;
 }) {
   const { t } = useTranslations();
   const tools = useMcpTools(serverId, { page: 1, pageSize: 50 });
   const invoke = useInvokeMcpTool();
+  const [mode, setMode] = useState<PlaygroundMode>(
+    publishedRevisionNumber !== null ? "published" : "draft",
+  );
   const [toolId, setToolId] = useState("");
   const [values, setValues] = useState<Record<string, ParamValue>>({});
   const [attempted, setAttempted] = useState(false);
@@ -48,11 +76,37 @@ export function ServerPlaygroundTab({
     ok: boolean;
   } | null>(null);
 
-  const tool = tools.data?.items.find((item) => item.id === toolId) ?? null;
+  const publishedById = new Map(publishedTools.map((item) => [item.id, item]));
+  const visibleTools =
+    mode === "published"
+      ? (tools.data?.items ?? []).flatMap((item) => {
+          const published = publishedById.get(item.id);
+          if (!published) return [];
+          // Published mode mirrors the active revision, not the mutable draft:
+          // a draft disable/edit must not change the executable contract.
+          return [
+            {
+              ...item,
+              name: published.name,
+              method: published.method,
+              allowMutation: published.allowMutation,
+              enabled: true,
+              // Published mode advertises the active revision's input schema.
+              params: published.params,
+            },
+          ];
+        })
+      : (tools.data?.items ?? []);
+  const tool = visibleTools.find((item) => item.id === toolId) ?? null;
   const params = tool?.params ?? [];
 
   const invokeBlockedReason = (() => {
-    if (serverStatus === "paused") return t.servers.invokeServerPaused;
+    if (mode === "published" && publishedRevisionNumber === null) {
+      return t.servers.invokeNoPublishedRevision;
+    }
+    if (mode === "published" && serverStatus === "paused") {
+      return t.servers.invokeServerPaused;
+    }
     if (!tool) return null;
     if (!tool.enabled) return t.servers.invokeDisabledTool;
     const mutating = ["POST", "PUT", "PATCH", "DELETE"].includes(tool.method);
@@ -104,7 +158,13 @@ export function ServerPlaygroundTab({
     if (invalidJson.size > 0 || invalidNumber.size > 0) return;
 
     invoke.mutate(
-      { serverId, toolId: tool.id, args },
+      {
+        serverId,
+        toolId: tool.id,
+        args,
+        mode,
+        expectedDraftRevision: draftRevision,
+      },
       {
         onSuccess: (payload) => {
           const envelope = payload.envelope;
@@ -151,6 +211,14 @@ export function ServerPlaygroundTab({
     );
   }
 
+  if (mode === "published" && visibleTools.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        {t.servers.playgroundNoPublishedTools}
+      </p>
+    );
+  }
+
   if (!tools.data || tools.data.items.length === 0) {
     return <p className="text-sm text-muted-foreground">{t.servers.noTools}</p>;
   }
@@ -163,13 +231,60 @@ export function ServerPlaygroundTab({
         submit();
       }}
     >
+      <div className="flex flex-col gap-3 rounded-md border border-border p-3 sm:flex-row sm:items-center sm:justify-between">
+        <Field>
+          <Label htmlFor="playground-mode">{t.servers.playgroundMode}</Label>
+          <Select
+            value={mode}
+            onValueChange={(next) => {
+              setMode(next as PlaygroundMode);
+              setResult(null);
+            }}
+          >
+            <SelectTrigger id="playground-mode" className="w-52">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem
+                value="published"
+                disabled={publishedRevisionNumber === null}
+              >
+                {t.servers.playgroundModePublished}
+              </SelectItem>
+              <SelectItem value="draft">
+                {t.servers.playgroundModeDraft}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <p className="text-sm text-muted-foreground">
+          {mode === "published"
+            ? publishedRevisionNumber !== null
+              ? t.servers.playgroundPublishedSource.replace(
+                  "{number}",
+                  String(publishedRevisionNumber),
+                )
+              : t.servers.invokeNoPublishedRevision
+            : t.servers.playgroundDraftSource.replace(
+                "{revision}",
+                String(draftRevision),
+              )}
+        </p>
+      </div>
+
+      {mode === "draft" ? (
+        <p className="text-sm text-muted-foreground">
+          {t.servers.playgroundDraftNotice}
+        </p>
+      ) : null}
+
       <Field>
-        <Label>{t.servers.selectTool}</Label>
+        <Label htmlFor="playground-tool">{t.servers.selectTool}</Label>
         <Select
           value={toolId}
           onValueChange={(next) => {
             setToolId(next);
-            const nextTool = tools.data?.items.find((item) => item.id === next);
+            const nextTool = visibleTools.find((item) => item.id === next);
             const defaults: Record<string, ParamValue> = {};
             for (const param of nextTool?.params ?? []) {
               if (param.type === "boolean") defaults[param.name] = false;
@@ -181,11 +296,11 @@ export function ServerPlaygroundTab({
             setInvalidNumberParams(new Set());
           }}
         >
-          <SelectTrigger>
+          <SelectTrigger id="playground-tool">
             <SelectValue placeholder={t.servers.selectTool} />
           </SelectTrigger>
           <SelectContent>
-            {tools.data.items.map((item) => (
+            {visibleTools.map((item) => (
               <SelectItem key={item.id} value={item.id}>
                 {item.name}
               </SelectItem>

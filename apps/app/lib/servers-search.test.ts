@@ -16,6 +16,7 @@ describe("serverDetailSearchSchema", () => {
       "tools",
       "playground",
       "logs",
+      "revisions",
       "connection",
       "settings",
     ]);

@@ -1,7 +1,11 @@
 import { useTranslations } from "@/i18n/use-translations";
 import { getAppCode, resolveErrorMessage } from "@/lib/errors";
 import { api } from "@/lib/trpc";
-import { APP_ERROR_CODES, type PaginationInput } from "@repo/core";
+import {
+  APP_ERROR_CODES,
+  type Paginated,
+  type PaginationInput,
+} from "@repo/core";
 import {
   keepPreviousData,
   useMutation,
@@ -46,6 +50,131 @@ export type McpToolPreviewCompileResult = {
   plan: unknown;
   contract: unknown;
   compatibilityProjectable: boolean;
+};
+
+export type PublicationIssue = {
+  severity: "error" | "warning";
+  code: string;
+  message: string;
+  path?: string;
+  nodeId?: string;
+  toolName?: string;
+};
+
+export type PublishDiff = {
+  serverChanged: string[];
+  commonChanged: boolean;
+  authChanged: boolean;
+  toolsAdded: string[];
+  toolsRemoved: string[];
+  toolsChanged: string[];
+  toolsEnabled: string[];
+  toolsDisabled: string[];
+  configChanged: boolean;
+  contractChanged: boolean;
+  changed: boolean;
+  destructive: boolean;
+};
+
+export type PublishPreview = {
+  serverId: string;
+  draftRevision: number;
+  publishedRevisionId: string | null;
+  publishedRevisionNumber: number | null;
+  candidateFingerprint: string;
+  contractFingerprint: string;
+  ready: boolean;
+  dirty: boolean;
+  errors: PublicationIssue[];
+  warnings: PublicationIssue[];
+  warningCodes: string[];
+  diff: PublishDiff;
+};
+
+export type PublishServerInput = {
+  serverId: string;
+  expectedDraftRevision: number;
+  expectedPublishedRevisionId: string | null;
+  publishRequestId: string;
+  candidateFingerprint: string;
+  acknowledgedWarningCodes?: string[];
+  note?: string;
+};
+
+export type PublishResult = {
+  serverId: string;
+  revisionId: string;
+  revisionNumber: number;
+  candidateFingerprint: string;
+  contractFingerprint: string;
+  sourceDraftRevision: number;
+  status: string;
+  configRevision: number;
+  idempotent: boolean;
+};
+
+export type RevisionSummary = {
+  id: string;
+  revisionNumber: number;
+  sourceDraftRevision: number;
+  candidateFingerprint: string;
+  contractFingerprint: string;
+  actorSource: string;
+  note: string | null;
+  isActive: boolean;
+  createdAt: Date;
+};
+
+export type RevisionDetail = RevisionSummary & {
+  schemaVersion: number;
+  compilerVersion: string;
+  server: {
+    name: string;
+    description: string | null;
+    baseUrl: string;
+    allowedHosts: string[];
+  };
+  diffSummary: unknown;
+  tools: Array<{
+    sourceToolId: string;
+    name: string;
+    title: string | null;
+    description: string | null;
+    method: string;
+    enabled: boolean;
+    allowMutation: boolean;
+    source: string;
+    contractFingerprint: string | null;
+    definitionHash: string | null;
+    compileStatus: string | null;
+    compileIssueCount: number;
+  }>;
+  configs: Array<{
+    sourceValueId: string;
+    name: string;
+    kind: string;
+    owner: string | null;
+    isSecret: boolean;
+    hasValue: boolean;
+    available: boolean;
+  }>;
+  missingSecretCount: number;
+};
+
+export type RestoreRevisionInput = {
+  serverId: string;
+  revisionId: string;
+  expectedRevision: number;
+  expectedDraftRevision: number;
+};
+
+export type RestoreRevisionResult = {
+  serverId: string;
+  revisionId: string;
+  draftRevision: number;
+  configRevision: number;
+  missingSecretCount: number;
+  toolCount: number;
 };
 
 export function useMcpServers(input: PaginationInput) {
@@ -122,6 +251,39 @@ export function useMcpCallLogs(serverId: string, input: PaginationInput) {
   });
 }
 
+/** Advisory publication preview for the observed draft revision. */
+export function usePublishPreview(
+  serverId: string,
+): UseQueryResult<PublishPreview> {
+  return useQuery({
+    ...api.mcp.publishPreview.queryOptions({ serverId }),
+    enabled: serverId.length > 0,
+  }) as unknown as UseQueryResult<PublishPreview>;
+}
+
+export function useRevisionHistory(
+  serverId: string,
+  input: PaginationInput,
+): UseQueryResult<Paginated<RevisionSummary>> {
+  return useQuery({
+    ...api.mcp.revisionHistory.queryOptions({ serverId, ...input }),
+    placeholderData: keepPreviousData,
+    enabled: serverId.length > 0,
+  }) as unknown as UseQueryResult<Paginated<RevisionSummary>>;
+}
+
+export function useRevisionDetail(
+  serverId: string,
+  revisionId: string,
+  options: { enabled?: boolean } = {},
+): UseQueryResult<RevisionDetail> {
+  return useQuery({
+    ...api.mcp.revisionDetail.queryOptions({ serverId, revisionId }),
+    enabled:
+      (options.enabled ?? true) && serverId.length > 0 && revisionId.length > 0,
+  }) as unknown as UseQueryResult<RevisionDetail>;
+}
+
 export function usePlatformTokens(
   input: { page?: number; pageSize?: 10 | 20 | 50 } = {},
 ) {
@@ -159,6 +321,9 @@ function useInvalidateMcp() {
       queryClient.invalidateQueries(api.mcp.serverCommon.pathFilter()),
       queryClient.invalidateQueries(api.mcp.toolEditorState.pathFilter()),
       queryClient.invalidateQueries(api.mcp.callLogs.pathFilter()),
+      queryClient.invalidateQueries(api.mcp.publishPreview.pathFilter()),
+      queryClient.invalidateQueries(api.mcp.revisionHistory.pathFilter()),
+      queryClient.invalidateQueries(api.mcp.revisionDetail.pathFilter()),
       queryClient.invalidateQueries(api.mcp.platformTokens.pathFilter()),
       queryClient.invalidateQueries(
         api.mcp.platformSecurityEvents.pathFilter(),
@@ -167,16 +332,26 @@ function useInvalidateMcp() {
   };
 }
 
+export const STALE_PUBLISH_CODES: ReadonlySet<string> = new Set([
+  APP_ERROR_CODES.MCP_PUBLISH_STALE_DRAFT,
+  APP_ERROR_CODES.MCP_PUBLISH_STALE_REVISION,
+  APP_ERROR_CODES.MCP_PUBLISH_CANDIDATE_CHANGED,
+]);
+
 /**
- * Centralized mutation error handling. A `MCP_WRITE_CONFLICT` invalidates and
- * reloads the server aggregate so stale optimistic state is never reported as
- * saved; every failure surfaces localized copy.
+ * Centralized mutation error handling. Write and publication conflicts
+ * invalidate and reload the server aggregate so stale state is never reported
+ * as saved; every failure surfaces localized copy.
  */
 export function useMcpMutationError() {
   const { t } = useTranslations();
   const invalidate = useInvalidateMcp();
   return (error: unknown) => {
-    if (getAppCode(error) === APP_ERROR_CODES.MCP_WRITE_CONFLICT) {
+    const code = getAppCode(error);
+    if (
+      code === APP_ERROR_CODES.MCP_WRITE_CONFLICT ||
+      STALE_PUBLISH_CODES.has(code ?? "")
+    ) {
       void invalidate();
     }
     toast.error(resolveErrorMessage(error, t));
@@ -512,6 +687,69 @@ export function useInvokeMcpTool() {
       handleError(error);
     },
   });
+}
+
+export function usePublishServer(): UseMutationResult<
+  PublishResult,
+  Error,
+  PublishServerInput,
+  unknown
+> {
+  const { t } = useTranslations();
+  const handleError = useMcpMutationError();
+  const invalidate = useInvalidateMcp();
+  const baseOptions = api.mcp.publishServer.mutationOptions();
+  return useMutation({
+    ...baseOptions,
+    onSuccess: async (data, ...rest) => {
+      baseOptions.onSuccess?.(data, ...rest);
+      await invalidate();
+      toast.success(
+        t.toasts.servers.published.replace(
+          "{number}",
+          String(data.revisionNumber),
+        ),
+      );
+    },
+    onError: (error, ...rest) => {
+      baseOptions.onError?.(error, ...rest);
+      handleError(error);
+    },
+  }) as unknown as UseMutationResult<
+    PublishResult,
+    Error,
+    PublishServerInput,
+    unknown
+  >;
+}
+
+export function useRestoreRevision(): UseMutationResult<
+  RestoreRevisionResult,
+  Error,
+  RestoreRevisionInput,
+  unknown
+> {
+  const { t } = useTranslations();
+  const handleError = useMcpMutationError();
+  const invalidate = useInvalidateMcp();
+  const baseOptions = api.mcp.restoreRevision.mutationOptions();
+  return useMutation({
+    ...baseOptions,
+    onSuccess: async (data, ...rest) => {
+      baseOptions.onSuccess?.(data, ...rest);
+      await invalidate();
+      toast.success(t.toasts.servers.restored);
+    },
+    onError: (error, ...rest) => {
+      baseOptions.onError?.(error, ...rest);
+      handleError(error);
+    },
+  }) as unknown as UseMutationResult<
+    RestoreRevisionResult,
+    Error,
+    RestoreRevisionInput,
+    unknown
+  >;
 }
 
 export function useCreatePlatformToken() {

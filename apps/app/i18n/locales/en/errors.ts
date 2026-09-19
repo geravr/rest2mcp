@@ -138,6 +138,28 @@ export const enErrors = {
       [APP_ERROR_CODES.MCP_POLICY_VERSION_UNSUPPORTED]:
         "This platform token uses an unsupported policy version and must be recreated.",
 
+      [APP_ERROR_CODES.MCP_PUBLISH_NOT_READY]:
+        "This draft has blocking issues and cannot be published yet.",
+      [APP_ERROR_CODES.MCP_PUBLISH_STALE_DRAFT]:
+        "The draft changed after you previewed. Review the latest changes and publish again.",
+      [APP_ERROR_CODES.MCP_PUBLISH_STALE_REVISION]:
+        "The published revision changed. Reload the server before publishing.",
+      [APP_ERROR_CODES.MCP_PUBLISH_CANDIDATE_CHANGED]:
+        "The draft changed since the preview. Re-run the publish preview.",
+      [APP_ERROR_CODES.MCP_PUBLISH_WARNINGS_UNACKNOWLEDGED]:
+        "Acknowledge the publication warnings before publishing.",
+      [APP_ERROR_CODES.MCP_PUBLISH_NO_CHANGES]:
+        "There are no publishable changes in this draft.",
+      [APP_ERROR_CODES.MCP_PUBLISH_IDEMPOTENCY_CONFLICT]:
+        "This publish request was already used for different content.",
+      [APP_ERROR_CODES.MCP_PUBLISH_MISSING_SECRET]:
+        "A published tool references a secret or value that no longer exists.",
+      [APP_ERROR_CODES.MCP_REVISION_NOT_FOUND]: "Published revision not found.",
+      [APP_ERROR_CODES.MCP_REVISION_NOT_RESTORABLE]:
+        "This revision cannot be restored to the draft as-is.",
+      [APP_ERROR_CODES.MCP_ACTIVE_SECRET_IN_USE]:
+        "This secret is used by the active published revision and cannot be deleted.",
+
       [APP_ERROR_CODES.ROUTE_NOT_FOUND]: "This API route does not exist.",
       [APP_ERROR_CODES.INTERNAL_ERROR]:
         "An unexpected error occurred. Please try again.",

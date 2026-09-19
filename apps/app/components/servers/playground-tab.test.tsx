@@ -54,6 +54,59 @@ vi.mock("@tanstack/react-router", () => ({
   ),
 }));
 
+function renderTab(
+  props?: Partial<{
+    serverStatus: "draft" | "live" | "paused";
+    draftRevision: number;
+    publishedRevisionNumber: number | null;
+    publishedTools: Array<{
+      id: string;
+      name: string;
+      method: string;
+      allowMutation: boolean;
+      params: Array<{
+        name: string;
+        type: string;
+        required: boolean;
+        sensitive: boolean;
+      }>;
+    }>;
+  }>,
+) {
+  return render(
+    <ServerPlaygroundTab
+      serverId="mcs_1"
+      serverStatus="live"
+      draftRevision={4}
+      publishedRevisionNumber={1}
+      publishedTools={[
+        {
+          id: "mct_1",
+          name: "get_contact",
+          method: "GET",
+          allowMutation: false,
+          params: [],
+        },
+        {
+          id: "mct_2",
+          name: "delete_contact",
+          method: "DELETE",
+          allowMutation: false,
+          params: [],
+        },
+        {
+          id: "mct_3",
+          name: "create_contact",
+          method: "POST",
+          allowMutation: false,
+          params: [],
+        },
+      ]}
+      {...props}
+    />,
+  );
+}
+
 describe("ServerPlaygroundTab", () => {
   beforeEach(() => {
     invokeMutate.mockReset();
@@ -82,33 +135,60 @@ describe("ServerPlaygroundTab", () => {
       },
     );
 
-    render(<ServerPlaygroundTab serverId="mcs_1" serverStatus="live" />);
+    renderTab();
 
-    await user.click(screen.getByRole("combobox"));
+    await user.click(screen.getByRole("combobox", { name: /select a tool/i }));
     await user.click(screen.getByRole("option", { name: "get_contact" }));
     await user.click(screen.getByRole("button", { name: /invoke/i }));
 
     expect(screen.getByText(/HTTP 401/i)).toBeInTheDocument();
     expect(screen.getByText(/{"error":"unauthorized"}/)).toBeInTheDocument();
     expect(screen.getByText(/view call log/i)).toBeInTheDocument();
+    expect(invokeMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "published",
+        expectedDraftRevision: 4,
+      }),
+      expect.anything(),
+    );
   });
 
   it("disables invoke for a disabled tool with an explanation", async () => {
     const user = userEvent.setup();
-    render(<ServerPlaygroundTab serverId="mcs_1" serverStatus="live" />);
+    renderTab({ publishedRevisionNumber: null });
 
-    await user.click(screen.getByRole("combobox"));
+    await user.click(screen.getByRole("combobox", { name: /select a tool/i }));
     await user.click(screen.getByRole("option", { name: "delete_contact" }));
 
     expect(screen.getByText(/tool is disabled/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /invoke/i })).toBeDisabled();
   });
 
-  it("explains paused servers and blocks invoke", async () => {
+  it("uses published metadata instead of draft state in published mode", async () => {
     const user = userEvent.setup();
-    render(<ServerPlaygroundTab serverId="mcs_1" serverStatus="paused" />);
+    renderTab({
+      publishedTools: [
+        {
+          id: "mct_2",
+          name: "delete_contact_v2",
+          method: "GET",
+          allowMutation: false,
+          params: [],
+        },
+      ],
+    });
 
-    await user.click(screen.getByRole("combobox"));
+    await user.click(screen.getByRole("combobox", { name: /select a tool/i }));
+    await user.click(screen.getByRole("option", { name: "delete_contact_v2" }));
+
+    expect(screen.getByRole("button", { name: /invoke/i })).not.toBeDisabled();
+  });
+
+  it("explains paused servers and blocks published invoke", async () => {
+    const user = userEvent.setup();
+    renderTab({ serverStatus: "paused" });
+
+    await user.click(screen.getByRole("combobox", { name: /select a tool/i }));
     await user.click(screen.getByRole("option", { name: "get_contact" }));
 
     expect(screen.getByText(/server is paused/i)).toBeInTheDocument();
@@ -117,9 +197,9 @@ describe("ServerPlaygroundTab", () => {
 
   it("explains mutation-blocked tools", async () => {
     const user = userEvent.setup();
-    render(<ServerPlaygroundTab serverId="mcs_1" serverStatus="live" />);
+    renderTab();
 
-    await user.click(screen.getByRole("combobox"));
+    await user.click(screen.getByRole("combobox", { name: /select a tool/i }));
     await user.click(screen.getByRole("option", { name: "create_contact" }));
 
     expect(screen.getByText(/mutations are not allowed/i)).toBeInTheDocument();
@@ -162,9 +242,9 @@ describe("ServerPlaygroundTab", () => {
         },
       );
 
-    render(<ServerPlaygroundTab serverId="mcs_1" serverStatus="live" />);
+    renderTab();
 
-    await user.click(screen.getByRole("combobox"));
+    await user.click(screen.getByRole("combobox", { name: /select a tool/i }));
     await user.click(screen.getByRole("option", { name: "get_contact" }));
     await user.click(screen.getByRole("button", { name: /invoke/i }));
     expect(screen.getByText("first")).toBeInTheDocument();
@@ -172,5 +252,50 @@ describe("ServerPlaygroundTab", () => {
     await user.click(screen.getByRole("button", { name: /invoke/i }));
     expect(screen.queryByText("first")).not.toBeInTheDocument();
     expect(screen.getByText("second")).toBeInTheDocument();
+  });
+
+  it("defaults to draft preview when the server has no published revision", async () => {
+    const user = userEvent.setup();
+    renderTab({ publishedRevisionNumber: null });
+
+    expect(screen.getByText(/testing draft revision 4/i)).toBeInTheDocument();
+    expect(screen.getByText(/owner-only testing/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("combobox", { name: /select a tool/i }));
+    await user.click(screen.getByRole("option", { name: "get_contact" }));
+    await user.click(screen.getByRole("button", { name: /invoke/i }));
+
+    expect(invokeMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "draft",
+        expectedDraftRevision: 4,
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("switches to draft preview and passes the draft mode", async () => {
+    const user = userEvent.setup();
+    renderTab();
+
+    expect(
+      screen.getByText(/active published revision 1/i),
+    ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("combobox", { name: /execution source/i }),
+    );
+    await user.click(screen.getByRole("option", { name: /draft preview/i }));
+
+    expect(screen.getByText(/testing draft revision 4/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("combobox", { name: /select a tool/i }));
+    await user.click(screen.getByRole("option", { name: "get_contact" }));
+    await user.click(screen.getByRole("button", { name: /invoke/i }));
+
+    expect(invokeMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "draft" }),
+      expect.anything(),
+    );
   });
 });
