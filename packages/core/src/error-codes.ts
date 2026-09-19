@@ -69,6 +69,10 @@ export const APP_ERROR_CODES = {
   MCP_BINARY_UNSUPPORTED: "MCP_BINARY_UNSUPPORTED",
   MCP_LEGACY_PROJECTION_UNAVAILABLE: "MCP_LEGACY_PROJECTION_UNAVAILABLE",
   MCP_LEGACY_DOWNGRADE_REJECTED: "MCP_LEGACY_DOWNGRADE_REJECTED",
+  /** Stale `expectedRevision`: the aggregate changed elsewhere; reread before retrying. */
+  MCP_WRITE_CONFLICT: "MCP_WRITE_CONFLICT",
+  /** A known fully-rolled-back transient database failure after retries were exhausted. */
+  MCP_TRANSIENT_WRITE_FAILURE: "MCP_TRANSIENT_WRITE_FAILURE",
 
   ROUTE_NOT_FOUND: "ROUTE_NOT_FOUND",
   INTERNAL_ERROR: "INTERNAL_ERROR",
@@ -107,6 +111,12 @@ export type AppErrorDetails = {
   retryAfterSeconds?: number;
   references?: Array<{ kind: string; id: string; name?: string }>;
   scopes?: string[];
+  /** Current aggregate revision returned with `MCP_WRITE_CONFLICT`. */
+  currentRevision?: number;
+  /** Server aggregate affected by a structured conflict, when known. */
+  serverId?: string;
+  /** Whether a fully-rolled-back infrastructure failure may be retried safely. */
+  retryable?: boolean;
 };
 
 const appErrorCodeValues = Object.values(APP_ERROR_CODES);
