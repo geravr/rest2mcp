@@ -38,7 +38,7 @@ describe("revision persistence foundations", () => {
 
     const configColumns = getTableColumns(mcpServerRevisionConfig);
     expect(configColumns.sourceValueId.notNull).toBe(true);
-    expect(configColumns.isSecret.notNull).toBe(true);
+    expect(configColumns.kind.notNull).toBe(true);
     expect(configColumns.value.notNull).toBe(false);
   });
 

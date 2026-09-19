@@ -54,8 +54,6 @@ function makeServer(overrides: Partial<McpServer> = {}): McpServer {
     iconAssetId: null,
     baseUrl: "https://api.example.com/v1",
     allowedHosts: ["api.example.com"],
-    defaultHeaders: null,
-    defaultQuery: null,
     commonEntries: { headers: [], query: [] },
     authConfiguration: null,
     status: "draft",
@@ -76,9 +74,6 @@ function makeTool(overrides: Partial<McpTool> = {}): McpTool {
     title: "List contacts",
     description: "List contacts.",
     method: "GET",
-    pathTemplate: "/contacts",
-    requestTemplate: null,
-    params: null,
     requestDefinition: listContactsDefinition,
     compiledPlan: null,
     compileStatus: null,
@@ -100,7 +95,6 @@ function makeValue(
     id: "msv_config",
     serverId: "mcs_unit",
     name: "region",
-    isSecret: false,
     kind: "config",
     owner: "manual",
     description: null,
@@ -137,7 +131,6 @@ describe("canonical publication candidate", () => {
     const toolB = makeTool({
       id: "mct_b",
       name: "list_companies",
-      pathTemplate: "/companies",
       requestDefinition: listCompaniesDefinition,
     });
     const forward = fingerprintOf(makeAggregate({ tools: [toolA, toolB] }));
@@ -184,9 +177,7 @@ describe("canonical publication candidate", () => {
     const omitted = fingerprintOf(
       makeAggregate({
         server: makeServer({ description: undefined }),
-        tools: [
-          makeTool({ annotations: undefined, requestTemplate: undefined }),
-        ],
+        tools: [makeTool({ annotations: undefined })],
       }),
     );
     expect(omitted).toBe(canonical);
@@ -198,7 +189,6 @@ describe("canonical publication candidate", () => {
       makeAggregate({
         tools: [
           makeTool({
-            pathTemplate: "/companies",
             requestDefinition: listCompaniesDefinition,
           }),
         ],
@@ -243,7 +233,6 @@ describe("canonical publication candidate", () => {
             id: "msv_secret",
             name: "api_token",
             kind: "secret",
-            isSecret: true,
             value: null,
             ciphertext: "envelope-1",
           }),
@@ -260,7 +249,6 @@ describe("canonical publication candidate", () => {
             id: "msv_secret",
             name: "auth_token",
             kind: "secret",
-            isSecret: true,
             value: null,
             ciphertext: "envelope-1",
           }),
@@ -278,7 +266,6 @@ describe("canonical publication candidate", () => {
           id: "msv_secret",
           name: "api_token",
           kind: "secret",
-          isSecret: true,
           value: null,
           ciphertext: "envelope-v1",
         }),
@@ -291,7 +278,6 @@ describe("canonical publication candidate", () => {
           id: "msv_secret",
           name: "api_token",
           kind: "secret",
-          isSecret: true,
           value: "plaintext-should-be-ignored",
           ciphertext: "envelope-v2",
         }),
@@ -305,13 +291,11 @@ describe("canonical publication candidate", () => {
     const validOther = makeTool({
       id: "mct_b",
       name: "list_companies",
-      pathTemplate: "/companies",
       requestDefinition: listCompaniesDefinition,
     });
     const disabled = makeTool({
       id: "mct_c",
       name: "list_disabled",
-      pathTemplate: "/disabled",
       requestDefinition: {
         version: 1,
         pathSegments: [
@@ -331,7 +315,6 @@ describe("canonical publication candidate", () => {
         id: "msv_secret",
         name: "api_token",
         kind: "secret",
-        isSecret: true,
         value: null,
       }),
     ];
@@ -361,70 +344,6 @@ describe("canonical publication candidate", () => {
   });
 });
 
-describe("candidate readiness", () => {
-  it("excludes auth-owned keys from legacy common entries", () => {
-    const candidate = candidateOf(
-      makeAggregate({
-        server: makeServer({
-          commonEntries: null,
-          defaultHeaders: { Authorization: "Bearer fixed", "X-Trace": "1" },
-          authConfiguration: {
-            kind: "bearer",
-            bindings: [
-              {
-                location: "header",
-                key: "Authorization",
-                serverValueId: "msv_secret",
-              },
-            ],
-          },
-        }),
-        tools: [
-          makeTool({
-            requestDefinition: {
-              version: 1,
-              pathSegments: [
-                {
-                  id: "path_1",
-                  value: { kind: "literal", value: "/contacts" },
-                },
-              ],
-              query: [
-                {
-                  id: "q_region",
-                  name: "region",
-                  value: { kind: "serverValue", serverValueId: "msv_config" },
-                },
-              ],
-              headers: [],
-              body: { bodyType: "none" },
-              agentInputs: [],
-            },
-          }),
-        ],
-        values: [
-          makeValue(),
-          makeValue({
-            id: "msv_secret",
-            name: "api_token",
-            kind: "secret",
-            isSecret: true,
-            value: null,
-          }),
-        ],
-      }),
-    );
-
-    // The auth-owned Authorization header must not be re-injected as a common
-    // entry, otherwise the candidate compiles as invalid and publish deadlocks.
-    expect(candidate.ready).toBe(true);
-    const common = candidate.server.commonEntries as {
-      headers: Array<{ name: string }>;
-    };
-    expect(common.headers.map((header) => header.name)).toEqual(["X-Trace"]);
-  });
-});
-
 describe("secret-safe candidate projection", () => {
   const secretValue = "super-secret-token-value";
   const secretCiphertext = "enc:v1:secret-ciphertext-envelope";
@@ -438,7 +357,6 @@ describe("secret-safe candidate projection", () => {
           id: "msv_secret",
           name: "api_token",
           kind: "secret",
-          isSecret: true,
           value: secretValue,
           ciphertext: secretCiphertext,
         }),
@@ -454,8 +372,8 @@ describe("secret-safe candidate projection", () => {
     const config = candidate.configs.find(
       (config) => config.sourceValueId === "msv_config",
     );
-    expect(secret).toMatchObject({ isSecret: true, value: null });
-    expect(config).toMatchObject({ isSecret: false, value: "mx" });
+    expect(secret).toMatchObject({ kind: "secret", value: null });
+    expect(config).toMatchObject({ kind: "config", value: "mx" });
     expect(JSON.stringify(candidate.configs)).not.toContain(secretValue);
     expect(JSON.stringify(candidate.configs)).not.toContain(secretCiphertext);
   });

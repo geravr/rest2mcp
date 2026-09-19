@@ -103,7 +103,6 @@ const VARIABLE_ROWS = [
   {
     id: SECRET_VALUE_ID,
     name: SECRET_VALUE_NAME,
-    isSecret: true,
     hasValue: true,
     ciphertext: SECRET_CIPHERTEXT,
     kind: "secret",
@@ -112,7 +111,6 @@ const VARIABLE_ROWS = [
   {
     id: CONFIG_VALUE_ID,
     name: "region",
-    isSecret: false,
     hasValue: true,
     value: "mx",
     kind: "config",
@@ -451,7 +449,6 @@ describe("platform MCP non-disclosure", () => {
           {
             id: CONFIG_VALUE_ID,
             name: "region",
-            isSecret: false,
             hasValue: true,
             kind: "config",
             owner: "manual",
@@ -484,7 +481,6 @@ describe("platform MCP non-disclosure", () => {
         expect(data).toContainEqual({
           id: SECRET_VALUE_ID,
           name: SECRET_VALUE_NAME,
-          isSecret: true,
           hasValue: true,
           kind: "secret",
           owner: "manual",

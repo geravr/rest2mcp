@@ -9,9 +9,6 @@ import type { DatabaseSchema } from "@repo/db";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 export const MCP_TELEMETRY_EVENTS = {
-  legacyCompatWrite: "mcp_legacy_compat_write",
-  legacyConversion: "mcp_legacy_conversion",
-  definitionNotProjectable: "mcp_definition_not_projectable",
   typedCompileFailed: "mcp_typed_compile_failed",
   contractReadinessFailed: "mcp_contract_readiness_failed",
   contractEmitted: "mcp_contract_emitted",

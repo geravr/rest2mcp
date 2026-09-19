@@ -21,13 +21,19 @@ describe("mcp router lifecycle procedures", () => {
     );
   });
 
-  it("accepts optional isSecret on updateVariable", () => {
+  it("updates variables by stable id and canonical kind", () => {
     expect(source).toContain("updateVariable: protectedProcedure");
     expect(source).toMatch(
-      /updateVariable:[\s\S]*?isSecret:\s*z\.boolean\(\)\.optional\(\)/,
+      /updateVariable:[\s\S]*?valueId:\s*z\.string\(\)\.min\(1\)/,
     );
     expect(source).toMatch(
-      /updateVariable:[\s\S]*?value:\s*z\.string\(\)\.max\(8_000\)\.optional\(\)/,
+      /updateVariable:[\s\S]*?kind:\s*z\.enum\(\["config",\s*"secret"\]\)\.optional\(\)/,
+    );
+  });
+
+  it("creates variables with an explicit kind", () => {
+    expect(source).toMatch(
+      /createVariable:[\s\S]*?kind:\s*z\.enum\(\["config",\s*"secret"\]\)/,
     );
   });
 });

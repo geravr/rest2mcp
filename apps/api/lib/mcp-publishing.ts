@@ -42,7 +42,6 @@ export type PublicationTool = {
   title: string | null;
   description: string | null;
   method: string;
-  pathTemplate: string;
   requestDefinition: Record<string, unknown> | null;
   compiledPlan: Record<string, unknown> | null;
   compileStatus: string | null;
@@ -69,7 +68,6 @@ export type PublicationConfig = {
   kind: "config" | "secret";
   owner: string | null;
   description: string | null;
-  isSecret: boolean;
   /** Config value snapshot; null for secret slots. */
   value: string | null;
 };
@@ -121,13 +119,11 @@ export type ActiveRevisionSummary = {
     method: string;
     contractFingerprint: string | null;
     definitionHash: string | null;
-    pathTemplate: string;
   }>;
   configs: Array<{
     sourceValueId: string;
     name: string;
     kind: "config" | "secret";
-    isSecret: boolean;
     value: string | null;
   }>;
 };
@@ -186,7 +182,6 @@ export function candidateFingerprintPayload(
       title: canonicalNullable(tool.title),
       description: canonicalNullable(tool.description),
       method: tool.method,
-      pathTemplate: tool.pathTemplate,
       requestDefinition: canonicalNullable(tool.requestDefinition),
       enabled: tool.enabled,
       allowMutation: tool.allowMutation,
@@ -199,8 +194,7 @@ export function candidateFingerprintPayload(
       name: config.name,
       kind: config.kind,
       owner: canonicalNullable(config.owner),
-      isSecret: config.isSecret,
-      value: config.isSecret ? null : canonicalNullable(config.value),
+      value: config.kind === "secret" ? null : canonicalNullable(config.value),
     })),
   };
 }
@@ -337,7 +331,6 @@ export function diffCandidateAgainstRevision(
     }
     const identityChanged =
       previous.method.toUpperCase() !== tool.method.toUpperCase() ||
-      previous.pathTemplate !== tool.pathTemplate ||
       previous.allowMutation !== tool.allowMutation ||
       previous.definitionHash !== tool.definitionHash ||
       previous.contractFingerprint !== tool.contractFingerprint;
@@ -400,8 +393,7 @@ function candidateFingerprintConfigChanged(
     if (
       previous.name !== config.name ||
       previous.kind !== config.kind ||
-      previous.isSecret !== config.isSecret ||
-      (!config.isSecret && previous.value !== config.value)
+      (config.kind !== "secret" && previous.value !== config.value)
     ) {
       return true;
     }

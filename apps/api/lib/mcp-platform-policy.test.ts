@@ -516,7 +516,7 @@ describe("platform policy: draft, publish, and config transitions", () => {
         {
           expectedRevision: 1,
           name: "region",
-          isSecret: false,
+          kind: "config",
           value: "mx",
         },
         SECRET,

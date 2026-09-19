@@ -119,7 +119,6 @@ describeIntegration("mcp publishing service", () => {
         name: "region",
         kind: "config",
         owner: "manual",
-        isSecret: false,
         value: "mx",
       },
       {
@@ -128,7 +127,6 @@ describeIntegration("mcp publishing service", () => {
         name: "api_token",
         kind: "secret",
         owner: "manual",
-        isSecret: true,
         ciphertext: encryptCredential("token-v1", CREDENTIAL_SECRET),
       },
     ]);
@@ -139,7 +137,6 @@ describeIntegration("mcp publishing service", () => {
       title: "List contacts",
       description: "List contacts.",
       method: "GET",
-      pathTemplate: "/contacts",
       requestDefinition: secretDefinition(secretId, `${serverId}_config`),
       allowMutation: false,
       enabled: true,
@@ -382,7 +379,7 @@ describeIntegration("mcp publishing service", () => {
           db as unknown as Parameters<typeof deleteVariable>[0],
           userId,
           serverId,
-          "api_token",
+          `${serverId}_secret`,
           server!.configRevision,
         ),
       ).rejects.toMatchObject({
@@ -411,7 +408,7 @@ describeIntegration("mcp publishing service", () => {
           db as unknown as Parameters<typeof deleteVariable>[0],
           userId,
           serverId,
-          "api_token",
+          `${serverId}_secret`,
           beforeDelete!.configRevision,
         ),
       ).rejects.toMatchObject({
@@ -425,7 +422,7 @@ describeIntegration("mcp publishing service", () => {
         db as unknown as Parameters<typeof deleteVariable>[0],
         userId,
         serverId,
-        "api_token",
+        `${serverId}_secret`,
         afterPublish!.configRevision,
       );
 
@@ -446,9 +443,9 @@ describeIntegration("mcp publishing service", () => {
         revision.revisionId,
       );
       expect(detail.missingSecretCount).toBe(1);
-      expect(detail.configs.find((config) => config.isSecret)?.available).toBe(
-        false,
-      );
+      expect(
+        detail.configs.find((config) => config.kind === "secret")?.available,
+      ).toBe(false);
 
       const secretRows = await db
         .select()
@@ -499,10 +496,10 @@ describeIntegration("mcp publishing service", () => {
           db as unknown as Parameters<typeof updateVariable>[0],
           userId,
           serverId,
-          "api_token",
+          `${serverId}_secret`,
           {
             expectedRevision: server!.configRevision,
-            isSecret: false,
+            kind: "config",
             value: "plaintext",
           },
           CREDENTIAL_SECRET,
@@ -735,7 +732,6 @@ describeIntegration("mcp publishing service", () => {
         sourceToolId: `${serverId}_rev_3_tool`,
         name: "old_tool",
         method: "GET",
-        pathTemplate: "/old",
         allowMutation: false,
         enabled: true,
         source: "manual",
@@ -747,7 +743,6 @@ describeIntegration("mcp publishing service", () => {
         sourceToolId: `${serverId}_rev_10_tool`,
         name: "kept_tool",
         method: "GET",
-        pathTemplate: "/kept",
         allowMutation: false,
         enabled: true,
         source: "manual",
@@ -845,7 +840,6 @@ describeIntegration("mcp publishing service", () => {
         sourceToolId: `${serverId}_snapshot_tool`,
         name: "snapshot_tool",
         method: "GET",
-        pathTemplate: "/snapshot",
         allowMutation: false,
         enabled: true,
         source: "manual",

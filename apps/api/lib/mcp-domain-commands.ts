@@ -13,7 +13,6 @@ import {
   MCP_FIELD_LIMITS,
   mcpAgentInputSchema,
   mcpAuthConfigurationSchema,
-  mcpCommonEntriesSchema,
   mcpRequestDefinitionSchema,
   mcpServerValueKindSchema,
   mcpValueNameSchema,
@@ -50,98 +49,6 @@ export const createServerCommandSchema = z.object({
   baseUrl: z.string().trim().url().max(2048),
   allowedHosts: z.array(z.string().min(1).max(253)).max(20).optional(),
 });
-
-export const updateServerCommandSchema = z
-  .strictObject({
-    serverId: z.string().min(1),
-    expectedRevision: expectedRevisionSchema,
-    name: z.string().trim().min(1).max(MCP_FIELD_LIMITS.name).optional(),
-    description: z
-      .string()
-      .max(MCP_FIELD_LIMITS.description)
-      .optional()
-      .nullable(),
-    baseUrl: z.string().trim().url().max(2048).optional(),
-    allowedHosts: z.array(z.string().min(1).max(253)).max(20).optional(),
-    status: z.enum(["draft", "live", "paused"]).optional(),
-    iconAssetId: z.string().min(1).optional().nullable(),
-    common: mcpCommonEntriesSchema.optional(),
-    /** Legacy compatibility maps during dual-write window. */
-    defaultHeaders: z.record(z.string(), z.string()).optional().nullable(),
-    defaultQuery: z.record(z.string(), z.string()).optional().nullable(),
-  })
-  .refine(
-    (value) =>
-      value.common === undefined ||
-      (value.defaultHeaders === undefined && value.defaultQuery === undefined),
-    {
-      message:
-        "Typed common entries and legacy default maps cannot be combined in one update.",
-    },
-  );
-
-/** Legacy `{{name}}` template shape, shared by tRPC and Platform MCP until authoring migrates to `requestDefinition`. */
-export const legacyToolParamSchema = z.object({
-  name: mcpValueNameSchema,
-  description: z.string().max(MCP_FIELD_LIMITS.description).optional(),
-  required: z.boolean(),
-  type: z.enum(["string", "number", "boolean", "json"]),
-  /** Never logged/previewed; masked as a password field in the playground. */
-  sensitive: z.boolean().optional(),
-  minimum: z.number().optional(),
-  maximum: z.number().optional(),
-  minLength: z.number().int().nonnegative().optional(),
-  maxLength: z.number().int().nonnegative().optional(),
-  pattern: z.string().max(512).optional(),
-  format: z.enum(["date", "date-time", "email", "uri", "uuid"]).optional(),
-  enum: z.array(z.union([z.string(), z.number(), z.boolean()])).optional(),
-  examples: z.array(z.unknown()).max(8).optional(),
-  allowEmpty: z.boolean().optional(),
-});
-
-export const legacyRequestTemplateSchema = z.object({
-  query: z
-    .record(z.string(), z.string().max(MCP_FIELD_LIMITS.queryValue))
-    .optional(),
-  headers: z
-    .record(z.string(), z.string().max(MCP_FIELD_LIMITS.headerValue))
-    .optional(),
-  body: z.string().max(MCP_FIELD_LIMITS.body).nullable().optional(),
-  bodyType: z.enum(["json", "form", "raw"]).optional(),
-});
-
-export const createLegacyToolCommandSchema = z.strictObject({
-  serverId: z.string().min(1),
-  expectedRevision: expectedRevisionSchema,
-  name: z.string().trim().min(1).max(MCP_FIELD_LIMITS.name),
-  description: z
-    .string()
-    .max(MCP_FIELD_LIMITS.description)
-    .optional()
-    .nullable(),
-  method: mcpHttpMethodSchema,
-  pathTemplate: z
-    .string()
-    .trim()
-    .min(1)
-    .max(MCP_FIELD_LIMITS.legacyPathTemplate),
-  requestTemplate: legacyRequestTemplateSchema.optional(),
-  params: z
-    .array(legacyToolParamSchema)
-    .max(MCP_FIELD_LIMITS.agentInputCount)
-    .optional(),
-  allowMutation: z.boolean().optional(),
-  enabled: z.boolean().optional(),
-});
-
-export const updateLegacyToolCommandSchema = createLegacyToolCommandSchema
-  .omit({ serverId: true })
-  .partial()
-  .extend({
-    toolId: z.string().min(1),
-    serverId: z.string().min(1),
-    expectedRevision: expectedRevisionSchema,
-  });
 
 export const createToolCommandSchema = z.strictObject({
   serverId: z.string().min(1).describe("Owning server id."),
@@ -234,19 +141,6 @@ export const setServerValueCommandSchema = z.strictObject({
     .max(MCP_FIELD_LIMITS.description)
     .optional()
     .describe("Optional human-facing description."),
-});
-
-export const updateServerValueCommandSchema = z.object({
-  serverId: z.string().min(1),
-  expectedRevision: expectedRevisionSchema,
-  valueId: z.string().min(1),
-  name: mcpValueNameSchema.optional(),
-  value: z.string().max(MCP_FIELD_LIMITS.body).optional(),
-  description: z
-    .string()
-    .max(MCP_FIELD_LIMITS.description)
-    .optional()
-    .nullable(),
 });
 
 export const setAuthConfigurationCommandSchema = z.object({
@@ -374,30 +268,6 @@ export const previewToolCompileCommandSchema = z.strictObject({
     .describe("Whether the candidate tool may mutate upstream state."),
 });
 
-/** Explicit legacy compatibility preview retained during the migration window. */
-export const previewLegacyToolCompileCommandSchema = z.strictObject({
-  serverId: z.string().min(1),
-  method: mcpHttpMethodSchema,
-  pathTemplate: z
-    .string()
-    .trim()
-    .min(1)
-    .max(MCP_FIELD_LIMITS.legacyPathTemplate),
-  requestTemplate: legacyRequestTemplateSchema.optional(),
-  params: z
-    .array(legacyToolParamSchema)
-    .max(MCP_FIELD_LIMITS.agentInputCount)
-    .optional(),
-  allowMutation: z.boolean().optional(),
-});
-
-export const invokeToolCommandSchema = z.object({
-  serverId: z.string().min(1),
-  toolId: z.string().min(1).optional(),
-  toolName: z.string().min(1).optional(),
-  args: z.record(z.string(), z.unknown()).optional(),
-});
-
 /** Write-free publication preview for one observed draft revision. */
 export const publishPreviewCommandSchema = z.object({
   serverId: z.string().min(1).describe("Owning server id."),
@@ -469,7 +339,6 @@ export type RestoreRevisionCommand = z.infer<
 >;
 
 export type CreateServerCommand = z.infer<typeof createServerCommandSchema>;
-export type UpdateServerCommand = z.infer<typeof updateServerCommandSchema>;
 export type CreateToolCommand = z.infer<typeof createToolCommandSchema>;
 export type UpdateToolCommand = z.infer<typeof updateToolCommandSchema>;
 export type DuplicateToolCommand = z.infer<typeof duplicateToolCommandSchema>;

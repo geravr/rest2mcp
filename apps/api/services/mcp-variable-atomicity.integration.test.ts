@@ -51,7 +51,7 @@ describeIntegration("server aggregate variable atomicity", () => {
         {
           expectedRevision: 1,
           name: "api_token",
-          isSecret: true,
+          kind: "secret",
           value: "sk_live_secret",
         },
         CREDENTIAL_SECRET,

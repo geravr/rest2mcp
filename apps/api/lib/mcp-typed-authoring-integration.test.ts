@@ -119,17 +119,12 @@ describe("typed authoring integration", () => {
         compiledPlan: null,
         compileStatus: "valid",
         allowMutation: true,
-        pathTemplate: "",
-        requestTemplate: null,
-        params: null,
       } as never,
       {
         serverValueRefs: serverValues,
         common: { headers: [], query: [] },
         auth: null,
         basePath: "/",
-        legacyDefaultHeaders: null,
-        legacyDefaultQuery: null,
       },
     );
 

@@ -3,7 +3,6 @@ import { APP_ERROR_CODES } from "@repo/core";
 import { AppError } from "./app-error.js";
 import {
   encodeBasicAuth,
-  inferServerAuth,
   isAuthHeaderName,
   normalizeAuthPaste,
   recipeToMapping,
@@ -49,9 +48,7 @@ describe("recipeToMapping", () => {
     });
     expect(mapping.variableName).toBe("basic_auth");
     expect(mapping.plaintext).toBe(encodeBasicAuth("user", "pass"));
-    expect(mapping.defaultHeadersPatch).toEqual({
-      Authorization: "Basic {{basic_auth}}",
-    });
+    expect(mapping.headerKeys).toEqual(["Authorization"]);
   });
 
   it("maps bearer with stripped prefix", () => {
@@ -62,9 +59,7 @@ describe("recipeToMapping", () => {
     expect(mapping).toMatchObject({
       variableName: "api_token",
       plaintext: "sk_live_123",
-      defaultHeadersPatch: {
-        Authorization: "Bearer {{api_token}}",
-      },
+      headerKeys: ["Authorization"],
     });
   });
 
@@ -87,9 +82,7 @@ describe("recipeToMapping", () => {
       value: "shpat_123",
     });
     expect(mapping.variableName).toBe("x_shopify_access_token");
-    expect(mapping.defaultHeadersPatch).toEqual({
-      "X-Shopify-Access-Token": "{{x_shopify_access_token}}",
-    });
+    expect(mapping.headerKeys).toEqual(["X-Shopify-Access-Token"]);
   });
 });
 
@@ -111,52 +104,5 @@ describe("serverAuthRecipeSchema", () => {
       value: "secret",
     });
     expect(parsed.type).toBe("query");
-  });
-});
-
-describe("inferServerAuth", () => {
-  it("returns None when defaults are empty", () => {
-    expect(inferServerAuth({}, {})).toEqual({ type: "none" });
-    expect(inferServerAuth(null, null)).toEqual({ type: "none" });
-  });
-
-  it("infers Bearer from Authorization + api_token", () => {
-    expect(
-      inferServerAuth({ Authorization: "Bearer {{api_token}}" }, {}),
-    ).toEqual({ type: "bearer", variableName: "api_token" });
-  });
-
-  it("returns Custom when two credential defaults exist", () => {
-    expect(
-      inferServerAuth(
-        {
-          Authorization: "Bearer {{api_token}}",
-          "X-Partner-Key": "{{partner}}",
-        },
-        {},
-      ),
-    ).toEqual({ type: "custom" });
-  });
-
-  it("infers Basic from Authorization Basic template", () => {
-    expect(
-      inferServerAuth({ Authorization: "Basic {{basic_auth}}" }, {}),
-    ).toEqual({ type: "basic", variableName: "basic_auth" });
-  });
-
-  it("infers query auth from a sole credential param", () => {
-    expect(inferServerAuth({}, { api_key: "{{api_key}}" })).toEqual({
-      type: "query",
-      paramName: "api_key",
-      variableName: "api_key",
-    });
-  });
-
-  it("infers header auth from a sole templated API key header", () => {
-    expect(inferServerAuth({ "X-API-Key": "{{api_key}}" }, {})).toEqual({
-      type: "header",
-      headerName: "X-API-Key",
-      variableName: "api_key",
-    });
   });
 });

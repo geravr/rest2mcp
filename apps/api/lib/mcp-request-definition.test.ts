@@ -5,10 +5,6 @@ import {
   mcpRequestDefinitionSchema,
   regenerateDefinitionIds,
 } from "./mcp-request-definition.js";
-import {
-  projectCommonEntriesToLegacy,
-  projectDefinitionToLegacy,
-} from "./mcp-legacy-migrate.js";
 
 function definition(overrides: Record<string, unknown> = {}) {
   return {
@@ -248,99 +244,5 @@ describe("server-value changes cannot reclassify typed bindings", () => {
         (issue) => issue.code === "MCP_VARIABLE_NAME_CONFLICT",
       ),
     ).toBe(true);
-  });
-});
-
-describe("legacy compatibility projection", () => {
-  it("projects a lossless definition", () => {
-    const source = mcpRequestDefinitionSchema.parse(
-      definition({
-        query: [
-          {
-            id: "query_1",
-            name: "limit",
-            value: { kind: "agentInput", agentInputId: "ain_1" },
-          },
-        ],
-        agentInputs: [
-          { id: "ain_1", name: "limit", required: false, type: "integer" },
-        ],
-      }),
-    );
-    const result = projectDefinitionToLegacy(source, "GET", {});
-    expect(result.projectable).toBe(true);
-    expect(result.projection?.params).toEqual([
-      expect.objectContaining({
-        name: "limit",
-        type: "number",
-        required: false,
-      }),
-    ]);
-    expect(result.projection?.requestTemplate.query).toEqual({
-      limit: "{{limit}}",
-    });
-  });
-
-  it("marks literal placeholder-shaped text non-projectable", () => {
-    const source = mcpRequestDefinitionSchema.parse(
-      definition({
-        headers: [
-          {
-            id: "hdr_1",
-            name: "X-Note",
-            value: { kind: "literal", value: "Example {{name}}" },
-          },
-        ],
-      }),
-    );
-    const result = projectDefinitionToLegacy(source, "GET", {});
-    expect(result.projectable).toBe(false);
-    expect(result.projection).toBeNull();
-    expect(result.issues[0]?.code).toBe("MCP_LEGACY_PROJECTION_UNAVAILABLE");
-  });
-
-  it("marks repeated entry names non-projectable", () => {
-    const source = mcpRequestDefinitionSchema.parse(
-      definition({
-        query: [
-          { id: "q1", name: "tag", value: { kind: "literal", value: "a" } },
-          { id: "q2", name: "tag", value: { kind: "literal", value: "b" } },
-        ],
-      }),
-    );
-    const result = projectDefinitionToLegacy(source, "GET", {});
-    expect(result.projectable).toBe(false);
-  });
-
-  it("projects lossless common entries and rejects repeated names", () => {
-    const lossless = projectCommonEntriesToLegacy(
-      {
-        headers: [
-          {
-            id: "h1",
-            name: "Version",
-            value: { kind: "serverValue", serverValueId: "msv_1" },
-          },
-        ],
-        query: [],
-      },
-      { msv_1: "api_version" },
-    );
-    expect(lossless.projectable).toBe(true);
-    expect(lossless.defaultHeaders).toEqual({
-      Version: "{{api_version}}",
-    });
-
-    const repeated = projectCommonEntriesToLegacy(
-      {
-        headers: [
-          { id: "h1", name: "X", value: { kind: "literal", value: "a" } },
-          { id: "h2", name: "x", value: { kind: "literal", value: "b" } },
-        ],
-        query: [],
-      },
-      {},
-    );
-    expect(repeated.projectable).toBe(false);
   });
 });

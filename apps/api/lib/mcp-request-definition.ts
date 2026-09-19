@@ -696,8 +696,6 @@ export const MCP_FIELD_LIMITS = {
   toolTitle: 120,
   description: 2000,
   pathSegment: 512,
-  /** Legacy whole-path template shared by tRPC and Platform MCP tool authoring. */
-  legacyPathTemplate: 2048,
   headerName: 256,
   headerValue: 8_192,
   queryName: 256,

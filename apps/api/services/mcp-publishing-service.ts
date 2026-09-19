@@ -33,7 +33,6 @@ import {
   type CompileServerValueRef,
 } from "../lib/mcp-compiler.js";
 import { compileAgentToolContract } from "../lib/mcp-contract.js";
-import { analyzeLegacyCommonEntries } from "../lib/mcp-legacy-migrate.js";
 import {
   computeAggregateContractFingerprint,
   computeCandidateFingerprint,
@@ -49,7 +48,6 @@ import {
 import {
   mcpAuthConfigurationSchema,
   mcpCommonEntriesSchema,
-  mcpCompiledPlanSchema,
   mcpRequestDefinitionSchema,
   scanDefinitionIds,
   type McpAuthConfiguration,
@@ -165,7 +163,6 @@ export type RevisionDetail = RevisionSummary & {
     name: string;
     kind: string;
     owner: string | null;
-    isSecret: boolean;
     /** Never the value: detail surfaces existence and category only. */
     hasValue: boolean;
     /** A referenced secret slot still exists as a current operational slot. */
@@ -192,59 +189,9 @@ export type RestoreRevisionResult = {
   toolCount: number;
 };
 
-function protectedAuthKeys(server: McpServer): {
-  headers: Set<string>;
-  query: Set<string>;
-} {
-  const authConfig = server.authConfiguration as {
-    bindings?: Array<{ location: "header" | "query"; key: string }>;
-  } | null;
-  const headers = new Set<string>();
-  const query = new Set<string>();
-  for (const binding of authConfig?.bindings ?? []) {
-    if (binding.location === "header") headers.add(binding.key.toLowerCase());
-    else query.add(binding.key);
-  }
-  return { headers, query };
-}
-
-function excludeAuthOwnedCommonEntries(
-  server: McpServer,
-  common: McpCommonEntries,
-  authValid: boolean,
-): McpCommonEntries {
-  if (!server.authConfiguration || !authValid) return common;
-  const protectedKeys = protectedAuthKeys(server);
-  return {
-    headers: common.headers.filter(
-      (entry) => !protectedKeys.headers.has(entry.name.toLowerCase()),
-    ),
-    query: common.query.filter((entry) => !protectedKeys.query.has(entry.name)),
-  };
-}
-
-function parseCommonEntries(
-  server: McpServer,
-  serverValueRefs: CompileServerValueRef[],
-  authValid: boolean,
-): McpCommonEntries {
+function parseCommonEntries(server: McpServer): McpCommonEntries {
   const parsed = mcpCommonEntriesSchema.safeParse(server.commonEntries);
-  if (parsed.success) return parsed.data;
-  if (server.defaultHeaders || server.defaultQuery) {
-    const legacy = analyzeLegacyCommonEntries({
-      defaultHeaders: server.defaultHeaders,
-      defaultQuery: server.defaultQuery,
-      serverValues: serverValueRefs,
-    });
-    if (legacy.unambiguous && legacy.commonEntries) {
-      return excludeAuthOwnedCommonEntries(
-        server,
-        legacy.commonEntries,
-        authValid,
-      );
-    }
-  }
-  return { headers: [], query: [] };
+  return parsed.success ? parsed.data : { headers: [], query: [] };
 }
 
 function parseAuthConfiguration(raw: unknown): McpAuthConfiguration | null {
@@ -285,10 +232,7 @@ export async function loadDraftAggregate(
 }
 
 function resolveValueKind(row: McpServerVariable): "config" | "secret" {
-  return (
-    (row.kind as "config" | "secret" | null) ??
-    (row.isSecret ? "secret" : "config")
-  );
+  return row.kind as "config" | "secret";
 }
 
 function buildCandidateTools(
@@ -306,7 +250,6 @@ function buildCandidateTools(
       title: tool.title ?? null,
       description: tool.description ?? null,
       method: tool.method,
-      pathTemplate: tool.pathTemplate,
       requestDefinition:
         (tool.requestDefinition as Record<string, unknown> | null) ?? null,
       compiledPlan: null,
@@ -458,11 +401,7 @@ export function buildPublicationCandidate(
     }),
   );
   const auth = parseAuthConfiguration(aggregate.server.authConfiguration);
-  const common = parseCommonEntries(
-    aggregate.server,
-    serverValueRefs,
-    auth !== null,
-  );
+  const common = parseCommonEntries(aggregate.server);
   const basePath = new URL(aggregate.server.baseUrl).pathname;
 
   const tools = buildCandidateTools(
@@ -483,7 +422,6 @@ export function buildPublicationCandidate(
         kind,
         owner: row.owner ?? null,
         description: row.description ?? null,
-        isSecret: kind === "secret",
         value: kind === "secret" ? null : (row.value ?? null),
       };
     });
@@ -631,13 +569,11 @@ export async function loadRevisionSummary(
       method: tool.method,
       contractFingerprint: tool.contractFingerprint ?? null,
       definitionHash: tool.definitionHash ?? null,
-      pathTemplate: tool.pathTemplate,
     })),
     configs: configs.map((config) => ({
       sourceValueId: config.sourceValueId,
       name: config.name,
       kind: (config.kind as "config" | "secret") ?? "config",
-      isSecret: config.isSecret,
       value: config.value ?? null,
     })),
   };
@@ -972,7 +908,6 @@ async function runPublishTransaction(
           title: tool.title,
           description: tool.description,
           method: tool.method,
-          pathTemplate: tool.pathTemplate,
           requestDefinition: tool.requestDefinition,
           compiledPlan: tool.compiledPlan,
           compileStatus: tool.compileStatus,
@@ -1000,7 +935,6 @@ async function runPublishTransaction(
           kind: config.kind,
           owner: config.owner,
           description: config.description,
-          isSecret: config.isSecret,
           value: config.value,
         })),
       );
@@ -1101,80 +1035,6 @@ export async function getPublishedToolIdentity(
     method: entry.tool.method,
     snapshot,
   };
-}
-
-/**
- * Agent-visible input parameters of every tool in one revision, for the
- * published-mode Studio playground. Derived from the immutable compiled plan,
- * so draft edits cannot change the advertised published inputs.
- */
-export async function loadPublishedToolInputs(
-  db: DB,
-  revisionId: string,
-): Promise<
-  Map<
-    string,
-    Array<{
-      name: string;
-      type: string;
-      required: boolean;
-      sensitive: boolean;
-      description?: string;
-      minimum?: number;
-      maximum?: number;
-      minLength?: number;
-      maxLength?: number;
-      pattern?: string;
-    }>
-  >
-> {
-  type PublishedToolInput = {
-    name: string;
-    type: string;
-    required: boolean;
-    sensitive: boolean;
-    description?: string;
-    minimum?: number;
-    maximum?: number;
-    minLength?: number;
-    maxLength?: number;
-    pattern?: string;
-  };
-  const rows = await db
-    .select({
-      sourceToolId: mcpServerRevisionTool.sourceToolId,
-      compiledPlan: mcpServerRevisionTool.compiledPlan,
-    })
-    .from(mcpServerRevisionTool)
-    .where(eq(mcpServerRevisionTool.revisionId, revisionId));
-  const map = new Map<string, PublishedToolInput[]>();
-  for (const row of rows) {
-    const parsed = mcpCompiledPlanSchema.safeParse(row.compiledPlan);
-    map.set(
-      row.sourceToolId,
-      parsed.success
-        ? parsed.data.agentInputs.map((input) => ({
-            name: input.name,
-            type: input.type === "integer" ? "number" : input.type,
-            required: input.required,
-            sensitive: input.sensitive,
-            ...(input.description !== undefined
-              ? { description: input.description }
-              : {}),
-            ...(input.minimum !== undefined ? { minimum: input.minimum } : {}),
-            ...(input.maximum !== undefined ? { maximum: input.maximum } : {}),
-            ...(input.minLength !== undefined
-              ? { minLength: input.minLength }
-              : {}),
-            ...(input.maxLength !== undefined
-              ? { maxLength: input.maxLength }
-              : {}),
-            ...(input.pattern !== undefined ? { pattern: input.pattern } : {}),
-          }))
-        : [],
-    );
-  }
-  return map;
 }
 
 export async function listRevisionHistory(
@@ -1287,9 +1147,9 @@ export async function getRevisionDetail(
     name: config.name,
     kind: config.kind,
     owner: config.owner ?? null,
-    isSecret: config.isSecret,
     hasValue: config.value !== null && config.value !== undefined,
-    available: !config.isSecret || existingSecretIds.has(config.sourceValueId),
+    available:
+      config.kind !== "secret" || existingSecretIds.has(config.sourceValueId),
   }));
 
   return {
@@ -1321,7 +1181,7 @@ export async function getRevisionDetail(
     })),
     configs: mappedConfigs,
     missingSecretCount: mappedConfigs.filter(
-      (config) => config.isSecret && !config.available,
+      (config) => config.kind === "secret" && !config.available,
     ).length,
   };
 }
@@ -1421,7 +1281,6 @@ export async function restoreRevisionToDraft(
           title: tool.title,
           description: tool.description,
           method: tool.method,
-          pathTemplate: tool.pathTemplate,
           requestDefinition: tool.requestDefinition,
           compiledPlan: tool.compiledPlan,
           compileStatus: tool.compileStatus,
@@ -1441,12 +1300,13 @@ export async function restoreRevisionToDraft(
     const missingSecretIds = revisionConfigs
       .filter(
         (config) =>
-          config.isSecret && !existingSecretIds.has(config.sourceValueId),
+          config.kind === "secret" &&
+          !existingSecretIds.has(config.sourceValueId),
       )
       .map((config) => config.sourceValueId);
 
     for (const config of revisionConfigs) {
-      if (config.isSecret) continue;
+      if (config.kind === "secret") continue;
       const existing = currentValues.find(
         (row) => row.id === config.sourceValueId,
       );
@@ -1473,7 +1333,7 @@ export async function restoreRevisionToDraft(
             owner: config.owner ?? "manual",
             description: config.description,
             value: config.value,
-            isSecret: false,
+            ciphertext: null,
             updatedAt: new Date(),
           })
           .where(eq(mcpServerVariable.id, config.sourceValueId));
@@ -1486,7 +1346,7 @@ export async function restoreRevisionToDraft(
           owner: config.owner ?? "manual",
           description: config.description,
           value: config.value,
-          isSecret: false,
+          ciphertext: null,
         });
       }
       existingConfigIds.add(config.sourceValueId);

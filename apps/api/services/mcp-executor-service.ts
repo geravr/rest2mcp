@@ -1,9 +1,9 @@
 /**
  * @file Hardened MCP tool executor shared by the gateway, playground, and
- * Platform MCP. Prefers the immutable compiled plan, falls back to compiling
- * a stored request definition, and finally to a legacy-template compatibility
- * reader. Every binding is resolved only from its declared source; one
- * deadline covers address validation, redirects, headers, and body reads.
+ * Platform MCP. Prefers the immutable compiled plan, then compiles the stored
+ * canonical request definition. A tool with neither fails closed and never
+ * contacts upstream. Every binding is resolved only from its declared source;
+ * one deadline covers address validation, redirects, headers, and body reads.
  */
 import {
   generateId,
@@ -31,10 +31,6 @@ import {
 } from "../lib/mcp-compiler.js";
 import { decryptCredential } from "../lib/mcp-crypto.js";
 import {
-  analyzeLegacyCommonEntries,
-  analyzeLegacyTool,
-} from "../lib/mcp-legacy-migrate.js";
-import {
   MCP_LOG_PREVIEW_BYTE_LIMIT,
   MCP_RESPONSE_BYTE_LIMIT,
   MCP_SAFE_RESPONSE_HEADERS,
@@ -45,7 +41,6 @@ import {
   captureMcpTelemetry,
   MCP_TELEMETRY_EVENTS,
 } from "../lib/mcp-telemetry.js";
-import type { TemplateVariable } from "../lib/mcp-template.js";
 import {
   mcpAuthConfigurationSchema,
   mcpCommonEntriesSchema,
@@ -55,7 +50,6 @@ import {
   type McpAuthConfiguration,
   type McpCommonEntries,
   type McpCompiledPlan,
-  type McpCompileIssue,
   type McpJsonNode,
   type McpValueBinding,
 } from "../lib/mcp-request-definition.js";
@@ -109,34 +103,6 @@ export type ExecuteMappedToolResult = {
 };
 
 // ---------------------------------------------------------------------------
-// Legacy by-name variable loading (unchanged; consumed by mcp-studio-service).
-// ---------------------------------------------------------------------------
-
-export async function loadVariables(
-  db: DB,
-  serverId: string,
-  credentialSecret: string,
-): Promise<Record<string, TemplateVariable>> {
-  const rows = await db
-    .select()
-    .from(mcpServerVariable)
-    .where(eq(mcpServerVariable.serverId, serverId));
-  const variables: Record<string, TemplateVariable> = {};
-  for (const row of rows) {
-    if (row.isSecret) {
-      if (!row.ciphertext) continue;
-      variables[row.name] = {
-        value: decryptCredential(row.ciphertext, credentialSecret),
-        isSecret: true,
-      };
-    } else {
-      variables[row.name] = { value: row.value ?? "", isSecret: false };
-    }
-  }
-  return variables;
-}
-
-// ---------------------------------------------------------------------------
 // Server-value loading by id (bindings reference ids, never names).
 // ---------------------------------------------------------------------------
 
@@ -157,9 +123,7 @@ export async function loadServerValues(
     .where(eq(mcpServerVariable.serverId, serverId));
   const map = new Map<string, ResolvedServerValue>();
   for (const row of rows) {
-    const kind: "config" | "secret" =
-      (row.kind as "config" | "secret" | null) ??
-      (row.isSecret ? "secret" : "config");
+    const kind = row.kind as "config" | "secret";
     const value =
       kind === "secret"
         ? row.ciphertext
@@ -182,10 +146,8 @@ async function loadServerValueRefs(
   return rows.map((row) => ({
     id: row.id,
     name: row.name,
-    kind:
-      (row.kind as "config" | "secret" | null) ??
-      (row.isSecret ? "secret" : "config"),
-    owner: (row.owner as "manual" | "auth" | null) ?? "manual",
+    kind: row.kind as "config" | "secret",
+    owner: row.owner as "manual" | "auth",
   }));
 }
 
@@ -210,8 +172,6 @@ export type ToolCompileInputs = {
   common: McpCommonEntries;
   auth: McpAuthConfiguration | null;
   basePath: string;
-  legacyDefaultHeaders: Record<string, string> | null;
-  legacyDefaultQuery: Record<string, string> | null;
 };
 
 export async function loadToolCompileInputs(
@@ -219,24 +179,11 @@ export async function loadToolCompileInputs(
   server: McpServer,
 ): Promise<ToolCompileInputs> {
   const serverValueRefs = await loadServerValueRefs(db, server.id);
-  let common = parseCommonEntries(server.commonEntries);
-  if (!server.commonEntries && (server.defaultHeaders || server.defaultQuery)) {
-    const legacyCommon = analyzeLegacyCommonEntries({
-      defaultHeaders: server.defaultHeaders,
-      defaultQuery: server.defaultQuery,
-      serverValues: serverValueRefs,
-    });
-    if (legacyCommon.unambiguous && legacyCommon.commonEntries) {
-      common = legacyCommon.commonEntries;
-    }
-  }
   return {
     serverValueRefs,
-    common,
+    common: parseCommonEntries(server.commonEntries),
     auth: parseAuthConfiguration(server.authConfiguration),
     basePath: new URL(server.baseUrl).pathname,
-    legacyDefaultHeaders: server.defaultHeaders,
-    legacyDefaultQuery: server.defaultQuery,
   };
 }
 
@@ -289,9 +236,6 @@ function revisionToolToMcpTool(
     title: tool.title,
     description: tool.description,
     method: tool.method,
-    pathTemplate: tool.pathTemplate,
-    requestTemplate: null,
-    params: null,
     requestDefinition: tool.requestDefinition ?? null,
     compiledPlan: tool.compiledPlan ?? null,
     compileStatus: tool.compileStatus ?? null,
@@ -311,8 +255,6 @@ function emptyCompileInputs(server: McpServer): ToolCompileInputs {
     common: { headers: [], query: [] },
     auth: null,
     basePath: safeBasePath(server.baseUrl),
-    legacyDefaultHeaders: server.defaultHeaders,
-    legacyDefaultQuery: server.defaultQuery,
   };
 }
 
@@ -344,7 +286,7 @@ function materializePublishedSnapshot(
     (config) => ({
       id: config.sourceValueId,
       name: config.name,
-      kind: config.isSecret ? "secret" : "config",
+      kind: config.kind as "config" | "secret",
       owner: (config.owner as "manual" | "auth" | null) ?? "manual",
     }),
   );
@@ -352,7 +294,7 @@ function materializePublishedSnapshot(
   const secretById = new Map(secretRows.map((row) => [row.id, row]));
   const serverValues = new Map<string, ResolvedServerValue>();
   for (const config of revisionConfigs) {
-    if (config.isSecret) {
+    if (config.kind === "secret") {
       const row = secretById.get(config.sourceValueId);
       if (!row) continue;
       const value =
@@ -413,8 +355,6 @@ function materializePublishedSnapshot(
       common,
       auth,
       basePath: safeBasePath(revision.baseUrl),
-      legacyDefaultHeaders: null,
-      legacyDefaultQuery: null,
     },
     revisionMode: "published",
     publishedRevisionId: revision.id,
@@ -583,27 +523,10 @@ export async function loadDraftExecutionSnapshot(
   );
 }
 
-function throwFirstIssue(
-  issues: McpCompileIssue[],
-  fallbackMessage: string,
-): never {
-  const firstError =
-    issues.find((issue) => issue.severity === "error") ?? issues[0];
-  throw appError({
-    appCode: APP_ERROR_CODES.MCP_COMPILE_INVALID,
-    message: firstError?.message ?? fallbackMessage,
-    status: 409,
-    details: {
-      ...(firstError?.path !== undefined ? { path: firstError.path } : {}),
-      ...(firstError?.code !== undefined ? { issueCode: firstError.code } : {}),
-    },
-  });
-}
-
 /**
  * Pure compilation step (no I/O): prefers a stored valid compiled plan, else
- * compiles the stored request definition, else compiles a legacy-template
- * compatibility reading. Throws `MCP_COMPILE_INVALID` when none succeed.
+ * compiles the stored canonical request definition. A tool with neither fails
+ * closed as `MCP_COMPILE_INVALID` and never contacts upstream.
  */
 export function compilePlanForTool(
   tool: McpTool,
@@ -637,42 +560,11 @@ export function compilePlanForTool(
     return assertCompileSuccess(result);
   }
 
-  const legacy = analyzeLegacyTool({
-    method: tool.method,
-    pathTemplate: tool.pathTemplate,
-    requestTemplate: tool.requestTemplate,
-    params: tool.params,
-    serverValues: inputs.serverValueRefs,
+  throw appError({
+    appCode: APP_ERROR_CODES.MCP_COMPILE_INVALID,
+    message: "The tool has no stored request definition or compiled plan.",
+    status: 409,
   });
-  if (!legacy.unambiguous || !legacy.definition) {
-    throwFirstIssue(
-      legacy.issues,
-      "The legacy tool template could not be migrated automatically.",
-    );
-  }
-
-  const legacyCommon = analyzeLegacyCommonEntries({
-    defaultHeaders: inputs.legacyDefaultHeaders,
-    defaultQuery: inputs.legacyDefaultQuery,
-    serverValues: inputs.serverValueRefs,
-  });
-  if (!legacyCommon.unambiguous || !legacyCommon.commonEntries) {
-    throwFirstIssue(
-      legacyCommon.issues,
-      "The legacy server defaults could not be migrated automatically.",
-    );
-  }
-
-  const result = compileToolDefinition({
-    method: tool.method,
-    definition: legacy.definition,
-    common: legacyCommon.commonEntries,
-    auth: null,
-    serverValues: inputs.serverValueRefs,
-    basePath: inputs.basePath,
-    allowMutation: tool.allowMutation,
-  });
-  return assertCompileSuccess(result);
 }
 
 // ---------------------------------------------------------------------------

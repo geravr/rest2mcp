@@ -16,7 +16,7 @@ vi.mock("./posthog.js", () => ({
 const authenticatePlatformPat = vi.hoisted(() => vi.fn());
 const setVariable = vi.hoisted(() => vi.fn());
 const createServer = vi.hoisted(() => vi.fn());
-const createToolFromCurl = vi.hoisted(() => vi.fn());
+const confirmCurlImport = vi.hoisted(() => vi.fn());
 const createTool = vi.hoisted(() => vi.fn());
 const updateTool = vi.hoisted(() => vi.fn());
 const duplicateTool = vi.hoisted(() => vi.fn());
@@ -50,7 +50,7 @@ vi.mock("../services/mcp-studio-service.js", async () => {
     ...actual,
     setVariable,
     createServer,
-    createToolFromCurl,
+    confirmCurlImport,
     createTool,
     updateTool,
     duplicateTool,
@@ -715,7 +715,7 @@ describe("platform MCP", () => {
 
     it("denies secret server-value bindings without secret_reference scope", async () => {
       listVariables.mockResolvedValue([
-        { id: "msv_1", name: "api_token", isSecret: true, hasValue: true },
+        { id: "msv_1", name: "api_token", kind: "secret", hasValue: true },
       ]);
       const client = await connectClient(["author"]);
       try {
@@ -772,7 +772,7 @@ describe("platform MCP", () => {
         source: "manual",
       });
       listVariables.mockResolvedValue([
-        { id: "msv_1", name: "api_token", isSecret: true, hasValue: true },
+        { id: "msv_1", name: "api_token", kind: "secret", hasValue: true },
       ]);
       const client = await connectClient(["author", "secret_reference"]);
       try {
@@ -897,7 +897,7 @@ describe("platform MCP", () => {
 
     it("denies changing a value used by an enabled tool without publish scope", async () => {
       listVariables.mockResolvedValue([
-        { id: "msv_2", name: "region", isSecret: false, hasValue: true },
+        { id: "msv_2", name: "region", kind: "config", hasValue: true },
       ]);
       isServerValueRuntimeEffective.mockResolvedValueOnce(true);
       const client = await connectClient(["author"]);
@@ -926,7 +926,6 @@ describe("platform MCP", () => {
     it("denies get_tool_definition for a secret binding without secret_reference", async () => {
       getToolEditorState.mockResolvedValue({
         toolId: "mct_1",
-        typed: true,
         definition: {
           version: 1,
           pathSegments: [],
@@ -942,14 +941,12 @@ describe("platform MCP", () => {
           agentInputs: [],
         },
         issues: [],
-        conversionDraft: null,
-        conversionIssues: [],
       });
       listVariables.mockResolvedValue([
         {
           id: "msv_secret",
           name: "api_token",
-          isSecret: true,
+          kind: "secret",
           hasValue: true,
         },
       ]);
@@ -973,7 +970,6 @@ describe("platform MCP", () => {
     it("returns a secret-bound definition with secret_reference without values", async () => {
       getToolEditorState.mockResolvedValue({
         toolId: "mct_1",
-        typed: true,
         definition: {
           version: 1,
           pathSegments: [],
@@ -989,8 +985,6 @@ describe("platform MCP", () => {
           agentInputs: [],
         },
         issues: [],
-        conversionDraft: null,
-        conversionIssues: [],
       });
       const client = await connectClient(["author", "secret_reference"]);
       try {
@@ -1027,7 +1021,6 @@ describe("platform MCP", () => {
         ],
         plan: null,
         contract: null,
-        compatibilityProjectable: false,
       });
       duplicateTool.mockResolvedValue({
         id: "mct_2",
@@ -1043,7 +1036,6 @@ describe("platform MCP", () => {
       });
       getToolEditorState.mockResolvedValue({
         toolId: "mct_1",
-        typed: true,
         definition: {
           version: 1,
           pathSegments: [],
@@ -1053,8 +1045,6 @@ describe("platform MCP", () => {
           agentInputs: [],
         },
         issues: [],
-        conversionDraft: null,
-        conversionIssues: [],
       });
       listVariables.mockResolvedValue([]);
       const client = await connectClient(["author"]);
@@ -1118,10 +1108,9 @@ describe("platform MCP", () => {
           ],
         },
         contract: { fingerprint: "sha256:abc" },
-        compatibilityProjectable: true,
       });
       listVariables.mockResolvedValue([
-        { id: "msv_config", name: "region", isSecret: false },
+        { id: "msv_config", name: "region", kind: "config" },
       ]);
 
       const client = await connectClient(["author"]);
@@ -1183,7 +1172,6 @@ describe("platform MCP", () => {
       });
       getToolEditorState.mockResolvedValue({
         toolId: "mct_1",
-        typed: true,
         definition: {
           version: 1,
           pathSegments: [],
@@ -1193,8 +1181,6 @@ describe("platform MCP", () => {
           agentInputs: [],
         },
         issues: [],
-        conversionDraft: null,
-        conversionIssues: [],
       });
       listVariables.mockResolvedValue([]);
       const client = await connectClient(["author"]);
@@ -1254,7 +1240,7 @@ describe("platform MCP", () => {
     });
 
     it("allows set_variable for a non-secret configuration value", async () => {
-      setVariable.mockResolvedValue({ name: "region", isSecret: false });
+      setVariable.mockResolvedValue({ name: "region", kind: "config" });
       const client = await connectClient(["author"]);
       try {
         const result = await client.callTool({
@@ -1272,7 +1258,7 @@ describe("platform MCP", () => {
           expect.anything(),
           "usr_1",
           "mcs_1",
-          { expectedRevision: 1, name: "region", isSecret: false, value: "mx" },
+          { expectedRevision: 1, name: "region", kind: "config", value: "mx" },
           "s".repeat(32),
         );
       } finally {
@@ -1282,7 +1268,7 @@ describe("platform MCP", () => {
 
     it("refuses to overwrite an existing secret through set_variable", async () => {
       listVariables.mockResolvedValueOnce([
-        { id: "msv_1", name: "api_token", isSecret: true, hasValue: true },
+        { id: "msv_1", name: "api_token", kind: "secret", hasValue: true },
       ]);
       const client = await connectClient(["author"]);
       try {
@@ -1312,7 +1298,7 @@ describe("platform MCP", () => {
     });
 
     it("rejects secret-bearing curl entirely instead of sanitizing it", async () => {
-      createToolFromCurl.mockResolvedValue({
+      confirmCurlImport.mockResolvedValue({
         id: "mct_1",
         name: "get_items",
         enabled: false,
@@ -1329,7 +1315,7 @@ describe("platform MCP", () => {
           },
         });
         expect(result.isError).toBeFalsy();
-        expect(createToolFromCurl).toHaveBeenCalledWith(
+        expect(confirmCurlImport).toHaveBeenCalledWith(
           expect.anything(),
           "usr_1",
           "mcs_1",
@@ -1471,7 +1457,14 @@ describe("platform MCP", () => {
     });
 
     it("delete_variable succeeds when confirm repeats the name", async () => {
-      deleteVariable.mockResolvedValue({ name: "api_token", deleted: true });
+      listVariables.mockResolvedValue([
+        { id: "msv_1", name: "api_token", kind: "config" },
+      ]);
+      deleteVariable.mockResolvedValue({
+        id: "msv_1",
+        name: "api_token",
+        deleted: true,
+      });
       const client = await connectClient(["destructive"]);
       try {
         const result = await client.callTool({
@@ -1488,10 +1481,11 @@ describe("platform MCP", () => {
           expect.anything(),
           "usr_1",
           "mcs_1",
-          "api_token",
+          "msv_1",
           1,
         );
       } finally {
+        listVariables.mockResolvedValue([]);
         await client.close();
       }
     });
@@ -1500,14 +1494,14 @@ describe("platform MCP", () => {
   describe("secret non-disclosure", () => {
     it("lists secret metadata only with secret_reference scope", async () => {
       listVariables.mockResolvedValue([
-        { id: "msv_1", name: "api_token", isSecret: true, hasValue: true },
+        { id: "msv_1", name: "api_token", kind: "secret", hasValue: true },
         {
           id: "msv_2",
           name: "region",
-          isSecret: false,
+          kind: "config",
           hasValue: true,
           value: "mx",
-          kind: "config",
+
           owner: "manual",
         },
       ]);
@@ -1529,15 +1523,15 @@ describe("platform MCP", () => {
           {
             id: "msv_1",
             name: "api_token",
-            isSecret: true,
+            kind: "secret",
             hasValue: true,
           },
           {
             id: "msv_2",
             name: "region",
-            isSecret: false,
-            hasValue: true,
             kind: "config",
+            hasValue: true,
+
             owner: "manual",
           },
         ]);
@@ -1549,14 +1543,14 @@ describe("platform MCP", () => {
 
     it("omits secret rows without secret_reference scope", async () => {
       listVariables.mockResolvedValue([
-        { id: "msv_1", name: "api_token", isSecret: true, hasValue: true },
+        { id: "msv_1", name: "api_token", kind: "secret", hasValue: true },
         {
           id: "msv_2",
           name: "region",
-          isSecret: false,
+          kind: "config",
           hasValue: true,
           value: "mx",
-          kind: "config",
+
           owner: "manual",
         },
       ]);
@@ -1577,9 +1571,9 @@ describe("platform MCP", () => {
           {
             id: "msv_2",
             name: "region",
-            isSecret: false,
-            hasValue: true,
             kind: "config",
+            hasValue: true,
+
             owner: "manual",
           },
         ]);
@@ -2115,7 +2109,7 @@ describe("platform MCP", () => {
             name: "api_token",
             kind: "secret",
             owner: "manual",
-            isSecret: true,
+
             hasValue: true,
           },
           {
@@ -2123,7 +2117,7 @@ describe("platform MCP", () => {
             name: "region",
             kind: "config",
             owner: "manual",
-            isSecret: false,
+
             hasValue: true,
           },
         ],
@@ -2141,13 +2135,13 @@ describe("platform MCP", () => {
           }
         ).data;
         expect(data.configs).toEqual([
-          { kind: "secret", owner: "manual", isSecret: true, hasValue: true },
+          { kind: "secret", owner: "manual", hasValue: true },
           {
             sourceValueId: "msv_region",
             name: "region",
             kind: "config",
             owner: "manual",
-            isSecret: false,
+
             hasValue: true,
           },
         ]);

@@ -83,7 +83,6 @@ describeIntegration("execution snapshot isolation", () => {
       name: "api_token",
       kind: "secret",
       owner: "manual",
-      isSecret: true,
       ciphertext: encryptCredential("secret-v1", CREDENTIAL_SECRET),
     });
     await db.insert(schema.mcpTool).values({
@@ -93,7 +92,6 @@ describeIntegration("execution snapshot isolation", () => {
       title: "Get contact",
       description: "Fetch one contact.",
       method: "GET",
-      pathTemplate: "/contacts/{{id}}",
       requestDefinition: getContactDefinition,
       allowMutation: false,
       enabled: true,
@@ -155,12 +153,12 @@ describeIntegration("execution snapshot isolation", () => {
       await writer.unsafe(
         `insert into mcp_server_revision_tool (
            id, revision_id, server_id, source_tool_id, name, title, description,
-           method, path_template, request_definition, compiled_plan,
+           method, request_definition, compiled_plan,
            compile_status, compile_issues, annotations, allow_mutation, enabled,
            source, contract_fingerprint, definition_hash, tool_order
          )
          select 'mrt_snapshot_integration_2', $1, server_id, source_tool_id,
-           name, title, 'Fetch one contact (v2).', method, path_template,
+           name, title, 'Fetch one contact (v2).', method,
            request_definition, compiled_plan, compile_status, compile_issues,
            annotations, allow_mutation, enabled, source, contract_fingerprint,
            definition_hash, tool_order
@@ -173,10 +171,10 @@ describeIntegration("execution snapshot isolation", () => {
       await writer.unsafe(
         `insert into mcp_server_revision_config (
            id, revision_id, server_id, source_value_id, name, kind, owner,
-           description, is_secret, value
+           description, value
          )
          select 'mrc_snapshot_integration_2', $1, server_id, source_value_id,
-           name, kind, owner, description, is_secret, value
+           name, kind, owner, description, value
          from mcp_server_revision_config
          where revision_id = (
            select published_revision_id from mcp_server where id = $2

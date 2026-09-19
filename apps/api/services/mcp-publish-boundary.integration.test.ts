@@ -143,7 +143,6 @@ describeIntegration("published boundary end to end", () => {
       name: "api_token",
       kind: "secret",
       owner: "manual",
-      isSecret: true,
       ciphertext: encryptCredential(SECRET_VALUE, CREDENTIAL_SECRET),
     });
     await db.insert(schema.mcpTool).values({
@@ -153,7 +152,6 @@ describeIntegration("published boundary end to end", () => {
       title: "Get contact",
       description: "Fetch one contact.",
       method: "GET",
-      pathTemplate: "/contacts",
       requestDefinition: secureDefinition(secretId),
       allowMutation: false,
       enabled: true,
@@ -234,7 +232,6 @@ describeIntegration("published boundary end to end", () => {
       title: "List contacts",
       description: "List contacts (draft).",
       method: "GET",
-      pathTemplate: "/contacts/list",
       requestDefinition: {
         ...readDefinition,
         pathSegments: [
@@ -389,7 +386,6 @@ describeIntegration("published boundary end to end", () => {
       name: "api_token",
       kind: "secret",
       owner: "manual",
-      isSecret: true,
       ciphertext: encryptCredential(SECRET_VALUE, CREDENTIAL_SECRET),
     });
     await db.insert(schema.mcpTool).values({
@@ -399,7 +395,6 @@ describeIntegration("published boundary end to end", () => {
       title: "Get contact",
       description: "Fetch one contact.",
       method: "GET",
-      pathTemplate: "/contacts",
       requestDefinition: secureDefinition(secretId),
       allowMutation: false,
       enabled: true,

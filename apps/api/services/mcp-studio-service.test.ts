@@ -23,7 +23,8 @@ const tables = vi.hoisted(() => ({
     id: "mcp_server_variable.id",
     serverId: "mcp_server_variable.server_id",
     name: "mcp_server_variable.name",
-    isSecret: "mcp_server_variable.is_secret",
+    kind: "mcp_server_variable.kind",
+    owner: "mcp_server_variable.owner",
     createdAt: "mcp_server_variable.created_at",
   },
   mcpAgentToken: {
@@ -87,10 +88,9 @@ import {
 } from "@repo/db";
 import { appError } from "../lib/app-error.js";
 import {
-  createLegacyTool,
   createServer,
   createTool,
-  createToolFromCurl,
+  confirmCurlImport,
   createVariable,
   deleteServer,
   deleteTool,
@@ -107,7 +107,6 @@ import {
   setVariable,
   testConnection,
   toRecipeTemplate,
-  updateLegacyTool,
   updateServer,
   updateServerCommon,
   updateTool,
@@ -173,6 +172,17 @@ function makeDb(results: unknown[]) {
   return db;
 }
 
+const simpleTypedDefinition = {
+  version: 1 as const,
+  pathSegments: [
+    { id: "path_1", value: { kind: "literal" as const, value: "/contacts" } },
+  ],
+  query: [],
+  headers: [],
+  body: { bodyType: "none" as const },
+  agentInputs: [],
+};
+
 describe("mcp-studio helpers", () => {
   it("derives traffic-light states", () => {
     expect(
@@ -227,24 +237,45 @@ describe("mcp-studio helpers", () => {
     });
   });
 
-  it("recipe template carries variable flags without values", () => {
+  it("recipe template carries canonical entries without secret material", () => {
     const recipe = toRecipeTemplate({
       name: "CRM",
       description: null,
       baseUrl: "https://api.example.com",
       allowedHosts: ["api.example.com"],
-      defaultHeaders: { Authorization: "Bearer {{api_token}}" },
-      defaultQuery: null,
+      commonEntries: {
+        headers: [
+          {
+            id: "hdr_1",
+            name: "Version",
+            value: { kind: "literal", value: "2024-01" },
+          },
+        ],
+        query: [],
+      },
+      authConfiguration: {
+        kind: "bearer",
+        bindings: [
+          {
+            location: "header",
+            key: "Authorization",
+            serverValueId: "msv_1",
+          },
+        ],
+      },
       tools: [],
-      variables: [{ name: "api_token", isSecret: true }],
+      variables: [{ name: "api_token", kind: "secret", owner: "auth" }],
     });
     const serialized = JSON.stringify(recipe);
     expect(serialized).not.toContain("ciphertext");
     expect(serialized).not.toContain("sk_live");
-    expect(recipe.variables).toEqual([{ name: "api_token", isSecret: true }]);
-    expect(recipe.defaultHeaders).toEqual({
-      Authorization: "Bearer {{api_token}}",
+    expect(recipe.variables).toEqual([
+      { name: "api_token", kind: "secret", owner: "auth" },
+    ]);
+    expect(recipe.commonEntries.headers[0]).toMatchObject({
+      name: "Version",
     });
+    expect(recipe.authConfiguration?.kind).toBe("bearer");
   });
 });
 
@@ -266,11 +297,11 @@ describe("mcp-studio ownership", () => {
   it("rejects adding a tool to another user's server", async () => {
     const db = makeDb([[]]);
     await expect(
-      createLegacyTool(db as never, "user-b", "mcs_a", {
+      createTool(db as never, "user-b", "mcs_a", {
         expectedRevision: 1,
         name: "get_contact",
         method: "GET",
-        pathTemplate: "/contacts/{{id}}",
+        requestDefinition: simpleTypedDefinition,
       }),
     ).rejects.toSatisfy(
       (error: unknown) =>
@@ -443,12 +474,26 @@ describe("mcp-studio servers", () => {
       name: "CRM",
       status: "draft",
       allowedHosts: ["api.example.com"],
-      defaultHeaders: null,
-      defaultQuery: null,
+      commonEntries: null,
+      authConfiguration: null,
     };
     const withAuth = {
       ...created,
-      defaultHeaders: { Authorization: "Bearer {{api_token}}" },
+      commonEntries: {
+        headers: [],
+        query: [],
+      },
+      authConfiguration: {
+        kind: "bearer",
+        bindings: [
+          {
+            location: "header",
+            key: "Authorization",
+            serverValueId: "msv_1",
+            prefix: "Bearer ",
+          },
+        ],
+      },
     };
     const db = makeDb([
       [created],
@@ -472,9 +517,7 @@ describe("mcp-studio servers", () => {
       secret,
     );
 
-    expect(result.defaultHeaders).toEqual({
-      Authorization: "Bearer {{api_token}}",
-    });
+    expect(result.authConfiguration).toEqual(withAuth.authConfiguration);
     expect(JSON.stringify(db.insertedValues)).not.toContain("sk_live_123");
     const variableInsert = db.insertedValues.find(
       (row) =>
@@ -482,8 +525,8 @@ describe("mcp-studio servers", () => {
         typeof row === "object" &&
         "name" in row &&
         (row as { name: string }).name === "api_token",
-    ) as { ciphertext: string; isSecret: boolean };
-    expect(variableInsert.isSecret).toBe(true);
+    ) as { ciphertext: string; kind: string };
+    expect(variableInsert.kind).toBe("secret");
     expect(decryptCredential(variableInsert.ciphertext, secret)).toBe(
       "sk_live_123",
     );
@@ -499,7 +542,6 @@ describe("mcp-studio servers", () => {
           name: "CRM",
           status: "draft",
           allowedHosts: ["api.example.com"],
-          defaultHeaders: null,
         },
       ],
       [{ count: 0 }],
@@ -550,17 +592,59 @@ describe("mcp-studio servers", () => {
       status: "draft",
       baseUrl: "https://api.example.com",
       allowedHosts: ["api.example.com"],
-      defaultHeaders: {
-        Authorization: "Bearer {{api_token}}",
-        Version: "2024-01",
+      commonEntries: {
+        headers: [
+          {
+            id: "h_version",
+            name: "Version",
+            value: { kind: "literal", value: "2024-01" },
+          },
+          {
+            id: "h_auth",
+            name: "Authorization",
+            value: {
+              kind: "serverValue",
+              serverValueId: "msv_1",
+              prefix: "Bearer ",
+            },
+          },
+        ],
+        query: [],
       },
-      defaultQuery: null,
+      authConfiguration: {
+        kind: "bearer",
+        bindings: [
+          {
+            location: "header",
+            key: "Authorization",
+            serverValueId: "msv_1",
+            prefix: "Bearer ",
+          },
+        ],
+      },
     };
     const updated = {
       ...server,
-      defaultHeaders: {
-        Version: "2024-01",
-        "X-API-Key": "{{api_key}}",
+      commonEntries: {
+        headers: [
+          {
+            id: "h_version",
+            name: "Version",
+            value: { kind: "literal", value: "2024-01" },
+          },
+          {
+            id: "h_key",
+            name: "X-API-Key",
+            value: { kind: "serverValue", serverValueId: "msv_2" },
+          },
+        ],
+        query: [],
+      },
+      authConfiguration: {
+        kind: "header",
+        bindings: [
+          { location: "header", key: "X-API-Key", serverValueId: "msv_2" },
+        ],
       },
     };
     const db = makeDb([
@@ -588,10 +672,13 @@ describe("mcp-studio servers", () => {
       secret,
     );
 
-    expect(result.defaultHeaders).toEqual({
-      Version: "2024-01",
-      "X-API-Key": "{{api_key}}",
-    });
+    expect(result.authConfiguration?.kind).toBe("header");
+    const names = (result.commonEntries?.headers ?? []).map(
+      (header) => header.name,
+    );
+    expect(names).toContain("Version");
+    expect(names).toContain("X-API-Key");
+    expect(names).not.toContain("Authorization");
     expect(db.delete).toHaveBeenCalled();
   });
 
@@ -604,66 +691,41 @@ describe("mcp-studio servers", () => {
       status: "draft",
       baseUrl: "https://api.example.com",
       allowedHosts: ["api.example.com"],
-      defaultHeaders: { Authorization: "Bearer {{api_token}}" },
-      defaultQuery: null,
-    };
-    const updated = {
-      ...server,
-      defaultHeaders: null,
-    };
-    const db = makeDb([
-      [server],
-      [updated],
-      [{ id: "msv_1", name: "api_token", owner: null }],
-      [],
-      [],
-      [{ count: 0 }],
-      [],
-      [],
-      [],
-    ]);
-
-    const result = await setServerAuth(
-      db as never,
-      "user-a",
-      "mcs_1",
-
-      1,
-      { type: "none" },
-      "s".repeat(32),
-    );
-
-    expect(result.defaultHeaders).toBeNull();
-    expect(db.delete).toHaveBeenCalled();
-  });
-
-  it("clears all Custom credential defaults when set to none", async () => {
-    const server = {
-      configRevision: 1,
-      id: "mcs_1",
-      userId: "user-a",
-      name: "CRM",
-      status: "draft",
-      baseUrl: "https://api.example.com",
-      allowedHosts: ["api.example.com"],
-      defaultHeaders: {
-        Authorization: "Bearer {{api_token}}",
-        "X-Partner-Key": "{{partner}}",
-        Version: "2024-01",
+      commonEntries: {
+        headers: [
+          {
+            id: "h_auth",
+            name: "Authorization",
+            value: {
+              kind: "serverValue",
+              serverValueId: "msv_1",
+              prefix: "Bearer ",
+            },
+          },
+        ],
+        query: [],
       },
-      defaultQuery: null,
+      authConfiguration: {
+        kind: "bearer",
+        bindings: [
+          {
+            location: "header",
+            key: "Authorization",
+            serverValueId: "msv_1",
+            prefix: "Bearer ",
+          },
+        ],
+      },
     };
     const updated = {
       ...server,
-      defaultHeaders: { Version: "2024-01" },
+      commonEntries: { headers: [], query: [] },
+      authConfiguration: null,
     };
     const db = makeDb([
       [server],
       [updated],
       [{ id: "msv_1", name: "api_token", owner: null }],
-      [],
-      [],
-      [{ id: "msv_2", name: "partner", owner: null }],
       [],
       [],
       [{ count: 0 }],
@@ -682,8 +744,8 @@ describe("mcp-studio servers", () => {
       "s".repeat(32),
     );
 
-    expect(result.defaultHeaders).toEqual({ Version: "2024-01" });
-    expect(db.delete).toHaveBeenCalledTimes(2);
+    expect(result.authConfiguration).toBeNull();
+    expect(db.delete).toHaveBeenCalled();
   });
 
   it("rejects query auth without the exposure acknowledgement", async () => {
@@ -695,8 +757,6 @@ describe("mcp-studio servers", () => {
           userId: "user-a",
           status: "draft",
           baseUrl: "https://api.example.com",
-          defaultHeaders: null,
-          defaultQuery: null,
         },
       ],
     ]);
@@ -726,13 +786,10 @@ describe("mcp-studio servers", () => {
       userId: "user-a",
       status: "draft",
       baseUrl: "https://api.example.com",
-      defaultHeaders: null,
-      defaultQuery: null,
       authConfiguration: null,
     };
     const updated = {
       ...server,
-      defaultHeaders: { Authorization: "Bearer {{api_token_auth}}" },
       authConfiguration: {
         kind: "bearer",
         bindings: [
@@ -767,9 +824,9 @@ describe("mcp-studio servers", () => {
       "s".repeat(32),
     );
 
-    expect(result.defaultHeaders).toEqual({
-      Authorization: "Bearer {{api_token_auth}}",
-    });
+    expect(result.authConfiguration?.bindings[0]?.serverValueId).toBe(
+      "msv_new",
+    );
     // The manual "api_token" row is never targeted by update or delete.
     expect(
       db.updatedValues.some(
@@ -812,92 +869,6 @@ describe("mcp-studio servers", () => {
       baseUrl: "https://api.example.com/v3",
     });
   });
-
-  it("rejects literal auth headers in server defaults", async () => {
-    const db = makeDb([
-      [
-        {
-          configRevision: 1,
-          id: "mcs_1",
-          userId: "user-a",
-          name: "CRM",
-          status: "draft",
-          baseUrl: "https://api.example.com",
-          allowedHosts: ["api.example.com"],
-        },
-      ],
-    ]);
-
-    await expect(
-      updateServer(db as never, "user-a", "mcs_1", {
-        expectedRevision: 1,
-        defaultHeaders: { Authorization: "Bearer sk_live_123" },
-      }),
-    ).rejects.toSatisfy(
-      (error: unknown) =>
-        error instanceof AppError &&
-        error.appCode === APP_ERROR_CODES.MCP_PLAINTEXT_SECRET,
-    );
-    expect(db.update).not.toHaveBeenCalled();
-  });
-
-  it("rejects literal Shopify access-token headers as plaintext secrets", async () => {
-    const db = makeDb([
-      [
-        {
-          configRevision: 1,
-          id: "mcs_1",
-          userId: "user-a",
-          name: "CRM",
-          status: "draft",
-          baseUrl: "https://api.example.com",
-          allowedHosts: ["api.example.com"],
-        },
-      ],
-    ]);
-
-    await expect(
-      updateServer(db as never, "user-a", "mcs_1", {
-        expectedRevision: 1,
-        defaultHeaders: { "X-Shopify-Access-Token": "shpat_123" },
-      }),
-    ).rejects.toSatisfy(
-      (error: unknown) =>
-        error instanceof AppError &&
-        error.appCode === APP_ERROR_CODES.MCP_PLAINTEXT_SECRET,
-    );
-    expect(db.update).not.toHaveBeenCalled();
-  });
-
-  it("accepts templated auth headers in server defaults", async () => {
-    const db = makeDb([
-      [
-        {
-          configRevision: 1,
-          id: "mcs_1",
-          userId: "user-a",
-          name: "CRM",
-          status: "draft",
-          baseUrl: "https://api.example.com",
-          allowedHosts: ["api.example.com"],
-        },
-      ],
-      [{ configRevision: 1, id: "mcs_1" }],
-      [{ count: 0 }],
-      [],
-      [],
-      [],
-    ]);
-
-    await updateServer(db as never, "user-a", "mcs_1", {
-      expectedRevision: 1,
-      defaultHeaders: { Authorization: "Bearer {{api_token}}" },
-    });
-
-    expect(db.updatedValues[0]).toMatchObject({
-      defaultHeaders: { Authorization: "Bearer {{api_token}}" },
-    });
-  });
 });
 
 describe("mcp-studio tools", () => {
@@ -921,12 +892,13 @@ describe("mcp-studio tools", () => {
       [{ id: "mct_1", name: "get_contact" }],
     ]);
 
-    await createLegacyTool(db as never, "user-a", "mcs_1", {
+    await createTool(db as never, "user-a", "mcs_1", {
       expectedRevision: 1,
       name: "get_contact",
+      title: "Get contact",
+      description: "Fetch one contact.",
       method: "GET",
-      pathTemplate: "/contacts/{{id}}",
-      params: [{ name: "id", required: true, type: "string" }],
+      requestDefinition: simpleTypedDefinition,
     });
 
     expect(db.insertedValues[0]).toMatchObject({
@@ -934,45 +906,7 @@ describe("mcp-studio tools", () => {
       allowMutation: false,
       enabled: true,
       compileStatus: "valid",
-      requestTemplate: {},
-      params: [{ name: "id", required: true, type: "string" }],
-    });
-  });
-
-  it("warns about placeholders without a matching param or variable", async () => {
-    const db = makeDb([
-      [
-        {
-          configRevision: 1,
-          id: "mcs_1",
-          status: "live",
-          baseUrl: "https://api.example.com",
-        },
-      ],
-      [{ count: 0 }],
-      [],
-      [],
-      [{ id: "mct_1", name: "get_contact" }],
-    ]);
-
-    const created = await createLegacyTool(db as never, "user-a", "mcs_1", {
-      expectedRevision: 1,
-      name: "get_contact",
-      method: "GET",
-      pathTemplate: "/contacts/{{contactId}}",
-      requestTemplate: { query: { limit: "{{limit}}" } },
-      params: [{ name: "contactId", required: true, type: "string" }],
-    });
-
-    expect(created.warnings).toEqual([
-      { type: "placeholder_without_param", name: "limit" },
-    ]);
-    expect(
-      created.compileIssues?.some((issue) => issue.severity === "error"),
-    ).toBe(true);
-    expect(db.insertedValues[0]).toMatchObject({
-      compileStatus: "invalid",
-      enabled: false,
+      requestDefinition: expect.objectContaining({ version: 1 }),
     });
   });
 
@@ -1006,68 +940,19 @@ describe("mcp-studio tools", () => {
     };
 
     await expect(
-      createLegacyTool(db as never, "user-a", "mcs_1", {
+      createTool(db as never, "user-a", "mcs_1", {
         expectedRevision: 1,
         name: "get_contact",
+        title: "Get contact",
+        description: "Fetch one contact.",
         method: "GET",
-        pathTemplate: "/contacts",
+        requestDefinition: simpleTypedDefinition,
       }),
     ).rejects.toSatisfy(
       (error: unknown) =>
         error instanceof AppError &&
         error.appCode === APP_ERROR_CODES.MCP_TOOL_NAME_CONFLICT,
     );
-  });
-
-  it("warns about params without a matching placeholder", async () => {
-    const db = makeDb([
-      [
-        {
-          configRevision: 1,
-          id: "mcs_1",
-          status: "live",
-          baseUrl: "https://api.example.com",
-        },
-      ],
-      [{ count: 0 }],
-      [],
-      [],
-      [{ id: "mct_1", name: "get_contact" }],
-    ]);
-
-    const created = await createLegacyTool(db as never, "user-a", "mcs_1", {
-      expectedRevision: 1,
-      name: "get_contact",
-      method: "GET",
-      pathTemplate: "/contacts",
-      params: [{ name: "unused", required: false, type: "string" }],
-    });
-
-    expect(created.warnings).toEqual([
-      { type: "param_without_placeholder", name: "unused" },
-    ]);
-  });
-
-  it("rejects literal auth headers on tools", async () => {
-    const db = makeDb([
-      [{ configRevision: 1, id: "mcs_1", status: "live" }],
-      [{ count: 0 }],
-    ]);
-
-    await expect(
-      createLegacyTool(db as never, "user-a", "mcs_1", {
-        expectedRevision: 1,
-        name: "get_contact",
-        method: "GET",
-        pathTemplate: "/contacts",
-        requestTemplate: { headers: { "X-API-Key": "sk_live_123" } },
-      }),
-    ).rejects.toSatisfy(
-      (error: unknown) =>
-        error instanceof AppError &&
-        error.appCode === APP_ERROR_CODES.MCP_PLAINTEXT_SECRET,
-    );
-    expect(db.insert).not.toHaveBeenCalled();
   });
 });
 
@@ -1083,8 +968,6 @@ describe("mcp-studio typed tools", () => {
     baseUrl: "https://api.example.com",
     commonEntries: null,
     authConfiguration: null,
-    defaultHeaders: null,
-    defaultQuery: null,
   };
 
   const typedDefinition = {
@@ -1139,35 +1022,6 @@ describe("mcp-studio typed tools", () => {
     ).toBeTruthy();
   });
 
-  it("rejects legacy updates for a tool that already has a typed definition", async () => {
-    const db = makeDb([
-      [serverRow],
-      [
-        {
-          id: "mct_1",
-          name: "get_contact",
-          method: "GET",
-          pathTemplate: "/contacts",
-          requestDefinition: typedDefinition,
-          allowMutation: false,
-          enabled: true,
-        },
-      ],
-    ]);
-
-    await expect(
-      updateLegacyTool(db as never, "user-a", "mcs_1", "mct_1", {
-        expectedRevision: 1,
-        name: "renamed",
-      }),
-    ).rejects.toSatisfy(
-      (error: unknown) =>
-        error instanceof AppError &&
-        error.appCode === APP_ERROR_CODES.MCP_LEGACY_DOWNGRADE_REJECTED,
-    );
-    expect(db.update).not.toHaveBeenCalled();
-  });
-
   it("updates a typed tool without re-inferring its definition", async () => {
     const db = makeDb([
       [serverRow],
@@ -1178,7 +1032,6 @@ describe("mcp-studio typed tools", () => {
           name: "get_contact",
           description: null,
           method: "GET",
-          pathTemplate: "/contacts/{{id}}",
           requestDefinition: typedDefinition,
           compiledPlan: null,
           compileStatus: "valid",
@@ -1241,7 +1094,7 @@ describe("mcp-studio typed tools", () => {
     expect(db.insert).not.toHaveBeenCalled();
   });
 
-  it("preserves auth-owned legacy default maps on common updates", async () => {
+  it("stores common entries without disturbing auth configuration", async () => {
     const db = makeDb([
       [
         {
@@ -1256,8 +1109,6 @@ describe("mcp-studio typed tools", () => {
               },
             ],
           },
-          defaultHeaders: { Authorization: "Bearer {{api_token}}" },
-          defaultQuery: {},
         },
       ],
       [
@@ -1282,11 +1133,21 @@ describe("mcp-studio typed tools", () => {
     });
 
     expect(db.updatedValues[0]).toMatchObject({
-      defaultHeaders: {
-        Version: "{{api_version}}",
-        Authorization: "Bearer {{api_token}}",
+      commonEntries: {
+        headers: [
+          {
+            id: "hdr_1",
+            name: "Version",
+            value: { kind: "serverValue", serverValueId: "msv_1" },
+          },
+        ],
+        query: [],
       },
     });
+    expect(
+      (db.updatedValues[0] as { authConfiguration?: unknown })
+        .authConfiguration,
+    ).toBeUndefined();
   });
 
   it("rejects plaintext auth headers in typed common entries without writing", async () => {
@@ -1324,7 +1185,6 @@ describe("mcp-studio typed tools", () => {
           title: "Get contact",
           description: "Fetch one contact.",
           method: "GET",
-          pathTemplate: "/contacts/{{id}}",
           requestDefinition: typedDefinition,
           allowMutation: false,
           enabled: true,
@@ -1350,14 +1210,14 @@ describe("mcp-studio typed tools", () => {
     expect(inserted.requestDefinition?.agentInputs[0]?.id).not.toBe("ain_1");
   });
 
-  it("writes typed common entries with stable server-value ids and lossless legacy maps", async () => {
+  it("writes typed common entries with stable server-value ids", async () => {
     const db = makeDb([
       [serverRow],
       [{ id: "msv_1", name: "api_version", kind: "config", owner: "manual" }],
       [], // enabled tools
     ]);
 
-    const result = await updateServerCommon(db as never, "user-a", "mcs_1", {
+    await updateServerCommon(db as never, "user-a", "mcs_1", {
       expectedRevision: 1,
       common: {
         headers: [
@@ -1371,7 +1231,6 @@ describe("mcp-studio typed tools", () => {
       },
     });
 
-    expect(result.legacyProjectable).toBe(true);
     expect(db.updatedValues[0]).toMatchObject({
       commonEntries: {
         headers: [
@@ -1383,7 +1242,6 @@ describe("mcp-studio typed tools", () => {
         ],
         query: [],
       },
-      defaultHeaders: { Version: "{{api_version}}" },
     });
   });
 
@@ -1429,48 +1287,6 @@ describe("mcp-studio typed tools", () => {
     expect(db.updatedValues).toHaveLength(0);
   });
 
-  it("fails atomically with per-tool diagnostics for non-projectable common values", async () => {
-    const db = makeDb([
-      [serverRow],
-      [],
-      [
-        {
-          id: "mct_legacy",
-          name: "legacy_tool",
-          method: "GET",
-          requestDefinition: null,
-          allowMutation: false,
-          enabled: true,
-        },
-      ],
-    ]);
-
-    await expect(
-      updateServerCommon(db as never, "user-a", "mcs_1", {
-        expectedRevision: 1,
-        common: {
-          headers: [
-            {
-              id: "hdr_1",
-              name: "X-Note",
-              value: { kind: "literal", value: "Example {{name}}" },
-            },
-          ],
-          query: [],
-        },
-      }),
-    ).rejects.toSatisfy((error: unknown) => {
-      if (!(error instanceof AppError)) return false;
-      return (
-        error.appCode === APP_ERROR_CODES.MCP_COMPILE_INVALID &&
-        (error.details?.references ?? []).some(
-          (reference) => reference.id === "mct_legacy",
-        )
-      );
-    });
-    expect(db.updatedValues).toHaveLength(0);
-  });
-
   it("enforces the enabled-tool bound for common updates", async () => {
     const manyTools = Array.from({ length: 51 }, (_, index) => ({
       id: `mct_${index}`,
@@ -1507,8 +1323,6 @@ describe("mcp-studio safe curl import", () => {
     userId: "user-a",
     status: "live",
     baseUrl: "https://api.example.com",
-    defaultHeaders: null,
-    defaultQuery: null,
     authConfiguration: null,
     commonEntries: null,
   };
@@ -1528,7 +1342,7 @@ describe("mcp-studio safe curl import", () => {
       ], // insert tool
     ]);
 
-    const result = await createToolFromCurl(db as never, "user-a", "mcs_1", {
+    const result = await confirmCurlImport(db as never, "user-a", "mcs_1", {
       expectedRevision: 1,
       curl: `curl -H 'Authorization: Bearer super-secret' https://api.example.com/contacts`,
     });
@@ -1547,7 +1361,6 @@ describe("mcp-studio safe curl import", () => {
   it("leaves existing authentication byte-for-byte unchanged when curl carries a different credential", async () => {
     const authedServer = {
       ...server,
-      defaultHeaders: { Authorization: "Bearer {{api_token}}" },
       authConfiguration: {
         kind: "bearer",
         bindings: [
@@ -1561,7 +1374,6 @@ describe("mcp-studio safe curl import", () => {
         {
           id: "msv_1",
           name: "api_token",
-          isSecret: true,
           kind: "secret",
           owner: "auth",
         },
@@ -1570,7 +1382,7 @@ describe("mcp-studio safe curl import", () => {
       [{ id: "mct_1", name: "get_contacts", enabled: false }],
     ]);
 
-    await createToolFromCurl(db as never, "user-a", "mcs_1", {
+    await confirmCurlImport(db as never, "user-a", "mcs_1", {
       expectedRevision: 1,
       curl: `curl -H 'Authorization: Bearer other-secret' https://api.example.com/contacts`,
     });
@@ -1584,7 +1396,7 @@ describe("mcp-studio safe curl import", () => {
     const db = makeDb([[server]]);
 
     await expect(
-      createToolFromCurl(
+      confirmCurlImport(
         db as never,
         "user-a",
         "mcs_1",
@@ -1606,7 +1418,7 @@ describe("mcp-studio safe curl import", () => {
     const db = makeDb([[server], []]);
 
     await expect(
-      createToolFromCurl(db as never, "user-a", "mcs_1", {
+      confirmCurlImport(db as never, "user-a", "mcs_1", {
         expectedRevision: 1,
         curl: `curl https://evil.example.com/contacts`,
       }),
@@ -1625,7 +1437,6 @@ describe("mcp-studio safe curl import", () => {
         {
           id: "msv_1",
           name: "api_version",
-          isSecret: false,
           kind: "config",
           owner: "manual",
         },
@@ -1634,7 +1445,7 @@ describe("mcp-studio safe curl import", () => {
       [{ id: "mct_1", name: "get_items", enabled: false }],
     ]);
 
-    await createToolFromCurl(db as never, "user-a", "mcs_1", {
+    await confirmCurlImport(db as never, "user-a", "mcs_1", {
       expectedRevision: 1,
       curl: `curl -H 'X-Api-Version: v2' https://api.example.com/items`,
       markings: [
@@ -1661,7 +1472,7 @@ describe("mcp-studio safe curl import", () => {
       [{ id: "mct_1", name: "get_items", enabled: false }],
     ]);
 
-    await createToolFromCurl(db as never, "user-a", "mcs_1", {
+    await confirmCurlImport(db as never, "user-a", "mcs_1", {
       expectedRevision: 1,
       curl: `curl 'https://api.example.com/v1/items?locationId=loc_9'`,
       markings: [
@@ -1711,7 +1522,7 @@ describe("mcp-studio safe curl import", () => {
     };
 
     await expect(
-      createToolFromCurl(db as never, "user-a", "mcs_1", {
+      confirmCurlImport(db as never, "user-a", "mcs_1", {
         expectedRevision: 1,
         curl: `curl https://api.example.com/items`,
       }),
@@ -1735,7 +1546,7 @@ describe("mcp-studio variables", () => {
         {
           id: "msv_1",
           name: "api_token",
-          isSecret: true,
+          kind: "secret",
           value: null,
           ciphertext: "iv.tag.data",
         },
@@ -1749,7 +1560,7 @@ describe("mcp-studio variables", () => {
       {
         expectedRevision: 1,
         name: "api_token",
-        isSecret: true,
+        kind: "secret",
         value: "sk_live_123",
       },
       "s".repeat(32),
@@ -1757,7 +1568,7 @@ describe("mcp-studio variables", () => {
 
     expect(result).toMatchObject({
       name: "api_token",
-      isSecret: true,
+      kind: "secret",
       hasValue: true,
     });
     expect(JSON.stringify(result)).not.toContain("sk_live_123");
@@ -1772,7 +1583,7 @@ describe("mcp-studio variables", () => {
         {
           id: "msv_1",
           name: "location_id",
-          isSecret: false,
+          kind: "config",
           value: "loc_9",
           ciphertext: null,
         },
@@ -1786,7 +1597,7 @@ describe("mcp-studio variables", () => {
       {
         expectedRevision: 1,
         name: "location_id",
-        isSecret: false,
+        kind: "config",
         value: "loc_9",
       },
       "s".repeat(32),
@@ -1794,7 +1605,7 @@ describe("mcp-studio variables", () => {
 
     expect(result).toMatchObject({
       name: "location_id",
-      isSecret: false,
+      kind: "config",
       value: "loc_9",
     });
   });
@@ -1807,7 +1618,7 @@ describe("mcp-studio variables", () => {
         db as never,
         "user-a",
         "mcs_1",
-        { expectedRevision: 1, name: "1Bad-Name", isSecret: false, value: "x" },
+        { expectedRevision: 1, name: "1Bad-Name", kind: "config", value: "x" },
         "s".repeat(32),
       ),
     ).rejects.toSatisfy(
@@ -1838,7 +1649,7 @@ describe("mcp-studio variables", () => {
         db as never,
         "user-a",
         "mcs_1",
-        { expectedRevision: 1, name: "api_token", isSecret: true, value: "sk" },
+        { expectedRevision: 1, name: "api_token", kind: "secret", value: "sk" },
         "s".repeat(32),
       ),
     ).rejects.toSatisfy(
@@ -1855,14 +1666,18 @@ describe("mcp-studio variables", () => {
         {
           id: "msv_1",
           name: "api_token",
-          isSecret: true,
+          kind: "secret",
+          owner: "manual",
+          description: null,
           value: null,
           ciphertext: "iv.tag.data",
         },
         {
           id: "msv_2",
           name: "location_id",
-          isSecret: false,
+          kind: "config",
+          owner: "manual",
+          description: null,
           value: "loc_9",
           ciphertext: null,
         },
@@ -1875,7 +1690,6 @@ describe("mcp-studio variables", () => {
       {
         id: "msv_1",
         name: "api_token",
-        isSecret: true,
         kind: "secret",
         owner: "manual",
         description: null,
@@ -1884,7 +1698,6 @@ describe("mcp-studio variables", () => {
       {
         id: "msv_2",
         name: "location_id",
-        isSecret: false,
         kind: "config",
         owner: "manual",
         description: null,
@@ -1895,23 +1708,27 @@ describe("mcp-studio variables", () => {
     expect(JSON.stringify(variables)).not.toContain("iv.tag.data");
   });
 
-  it("deletes variables by name", async () => {
+  it("deletes variables by stable id", async () => {
     const db = makeDb([
       [{ configRevision: 1, id: "mcs_1" }],
-      [{ id: "msv_1", name: "api_token" }],
+      [{ id: "msv_1", name: "api_token", kind: "config" }],
       [], // findServerValueReferences: no referencing tools
-      [{ id: "msv_1" }],
     ]);
 
     const result = await deleteVariable(
       db as never,
       "user-a",
       "mcs_1",
-      "api_token",
+      "msv_1",
       1,
     );
 
-    expect(result).toEqual({ name: "api_token", deleted: true, revision: 2 });
+    expect(result).toEqual({
+      id: "msv_1",
+      name: "api_token",
+      deleted: true,
+      revision: 2,
+    });
     expect(db.delete).toHaveBeenCalled();
   });
 
@@ -1925,22 +1742,31 @@ describe("mcp-studio variables", () => {
           commonEntries: null,
         },
       ],
-      [{ id: "msv_1", name: "api_token" }],
+      [{ id: "msv_1", name: "api_token", kind: "config" }],
       [
         {
           id: "mct_1",
           name: "get_contact",
-          requestDefinition: null,
-          pathTemplate: "/contacts",
-          requestTemplate: {
-            headers: { Authorization: "Bearer {{api_token}}" },
+          requestDefinition: {
+            version: 1,
+            pathSegments: [],
+            query: [],
+            headers: [
+              {
+                id: "h1",
+                name: "Authorization",
+                value: { kind: "serverValue", serverValueId: "msv_1" },
+              },
+            ],
+            body: { bodyType: "none" },
+            agentInputs: [],
           },
         },
       ],
     ]);
 
     await expect(
-      deleteVariable(db as never, "user-a", "mcs_1", "api_token", 1),
+      deleteVariable(db as never, "user-a", "mcs_1", "msv_1", 1),
     ).rejects.toSatisfy(
       (error: unknown) =>
         error instanceof AppError &&
@@ -1970,12 +1796,12 @@ describe("mcp-studio variables", () => {
           commonEntries: null,
         },
       ],
-      [{ id: "msv_1", name: "api_token" }],
+      [{ id: "msv_1", name: "api_token", kind: "config" }],
       [], // no tools reference it
     ]);
 
     await expect(
-      deleteVariable(db as never, "user-a", "mcs_1", "api_token", 1),
+      deleteVariable(db as never, "user-a", "mcs_1", "msv_1", 1),
     ).rejects.toSatisfy(
       (error: unknown) =>
         error instanceof AppError &&
@@ -1987,56 +1813,84 @@ describe("mcp-studio variables", () => {
   });
 
   it("rotates secret variables with fresh encryption and no echo", async () => {
+    const secret = "s".repeat(32);
+    const existing = {
+      id: "msv_1",
+      name: "api_token",
+      kind: "secret",
+      owner: "manual",
+      description: null,
+      value: null,
+      ciphertext: encryptCredential("old", secret),
+    };
+    const updated = {
+      ...existing,
+      ciphertext: encryptCredential("new", secret),
+    };
     const db = makeDb([
       [{ configRevision: 1, id: "mcs_1" }],
-      [{ id: "msv_1", name: "api_token", isSecret: true }],
-      [],
+      [existing],
+      [updated],
     ]);
 
     const result = await updateVariable(
       db as never,
       "user-a",
       "mcs_1",
-      "api_token",
+      "msv_1",
       { expectedRevision: 1, value: "sk_rotated" },
-      "s".repeat(32),
+      secret,
     );
 
-    expect(result).toMatchObject({ name: "api_token", isSecret: true });
+    expect(result).toMatchObject({ name: "api_token", kind: "secret" });
     expect(JSON.stringify(result)).not.toContain("sk_rotated");
     const update = db.updatedValues[0] as Record<string, unknown>;
     expect(update).toMatchObject({ value: null });
     expect(typeof update.ciphertext).toBe("string");
-    expect(decryptCredential(update.ciphertext as string, "s".repeat(32))).toBe(
+    expect(decryptCredential(update.ciphertext as string, secret)).toBe(
       "sk_rotated",
     );
     expect(JSON.stringify(db.updatedValues)).not.toContain("sk_rotated");
   });
 
   it("updates plain variables in readable plaintext", async () => {
+    const existing = {
+      id: "msv_2",
+      name: "region",
+      kind: "config",
+      owner: "manual",
+      description: null,
+      value: "mx",
+      ciphertext: null,
+    };
+    const updated = { ...existing, value: "mx-2" };
     const db = makeDb([
       [{ configRevision: 1, id: "mcs_1" }],
-      [{ id: "msv_2", name: "region", isSecret: false }],
-      [],
+      [existing],
+      [updated],
     ]);
 
     const result = await updateVariable(
       db as never,
       "user-a",
       "mcs_1",
-      "region",
+      "msv_2",
       { expectedRevision: 1, value: "mx-2" },
       "s".repeat(32),
     );
 
     expect(result).toEqual({
+      id: "msv_2",
       name: "region",
-      isSecret: false,
+      kind: "config",
+      owner: "manual",
+      description: null,
       hasValue: true,
+      value: "mx-2",
       revision: 2,
     });
     expect(db.updatedValues[0]).toMatchObject({
-      isSecret: false,
+      kind: "config",
       value: "mx-2",
       ciphertext: null,
     });
@@ -2045,7 +1899,16 @@ describe("mcp-studio variables", () => {
   it("rejects clearing secrecy without a new value", async () => {
     const db = makeDb([
       [{ configRevision: 1, id: "mcs_1" }],
-      [{ id: "msv_1", name: "api_token", isSecret: true }],
+      [
+        {
+          id: "msv_1",
+          name: "api_token",
+          kind: "secret",
+          owner: "manual",
+          value: null,
+          ciphertext: "old",
+        },
+      ],
     ]);
 
     await expect(
@@ -2053,8 +1916,8 @@ describe("mcp-studio variables", () => {
         db as never,
         "user-a",
         "mcs_1",
-        "api_token",
-        { expectedRevision: 1, isSecret: false },
+        "msv_1",
+        { expectedRevision: 1, kind: "config" },
         "s".repeat(32),
       ),
     ).rejects.toSatisfy(
@@ -2067,40 +1930,43 @@ describe("mcp-studio variables", () => {
   });
 
   it("encrypts the current plaintext when flipping a variable to secret", async () => {
+    const secret = "s".repeat(32);
+    const existing = {
+      id: "msv_2",
+      name: "region",
+      kind: "config",
+      owner: "manual",
+      description: null,
+      value: "mx-visible",
+      ciphertext: null,
+    };
+    const updated = {
+      ...existing,
+      kind: "secret",
+      value: null,
+      ciphertext: encryptCredential("mx-visible", secret),
+    };
     const db = makeDb([
       [{ configRevision: 1, id: "mcs_1" }],
-      [
-        {
-          id: "msv_2",
-          name: "region",
-          isSecret: false,
-          value: "mx-visible",
-          ciphertext: null,
-        },
-      ],
-      [],
+      [existing],
+      [updated],
     ]);
 
     const result = await updateVariable(
       db as never,
       "user-a",
       "mcs_1",
-      "region",
-      { expectedRevision: 1, isSecret: true },
-      "s".repeat(32),
+      "msv_2",
+      { expectedRevision: 1, kind: "secret" },
+      secret,
     );
 
-    expect(result).toEqual({
-      name: "region",
-      isSecret: true,
-      hasValue: true,
-      revision: 2,
-    });
+    expect(result).toMatchObject({ name: "region", kind: "secret" });
     expect(JSON.stringify(result)).not.toContain("mx-visible");
     const update = db.updatedValues[0] as Record<string, unknown>;
-    expect(update).toMatchObject({ isSecret: true, value: null });
+    expect(update).toMatchObject({ kind: "secret", value: null });
     expect(typeof update.ciphertext).toBe("string");
-    expect(decryptCredential(update.ciphertext as string, "s".repeat(32))).toBe(
+    expect(decryptCredential(update.ciphertext as string, secret)).toBe(
       "mx-visible",
     );
     expect(JSON.stringify(db.updatedValues)).not.toContain("mx-visible");
@@ -2127,13 +1993,27 @@ describe("mcp-studio variables", () => {
     expect(db.update).not.toHaveBeenCalled();
   });
 
-  it("setVariable transitions an existing secret variable to plain", async () => {
+  it("setVariable transitions an existing secret variable to config", async () => {
+    const secret = "s".repeat(32);
+    const existing = {
+      id: "msv_1",
+      name: "api_token",
+      kind: "secret",
+      owner: "manual",
+      description: null,
+      value: null,
+      ciphertext: encryptCredential("old", secret),
+    };
+    const updated = {
+      ...existing,
+      kind: "config",
+      value: "now-plain",
+      ciphertext: null,
+    };
     const db = makeDb([
       [{ configRevision: 1, id: "mcs_1" }],
-      [{ name: "api_token" }],
-      [{ configRevision: 1, id: "mcs_1" }],
-      [{ id: "msv_1", name: "api_token", isSecret: true }],
-      [],
+      [existing],
+      [updated],
     ]);
 
     const result = await setVariable(
@@ -2143,28 +2023,42 @@ describe("mcp-studio variables", () => {
       {
         expectedRevision: 1,
         name: "api_token",
-        isSecret: false,
+        kind: "config",
         value: "now-plain",
       },
-      "s".repeat(32),
+      secret,
     );
 
-    expect(result).toMatchObject({ name: "api_token", isSecret: false });
+    expect(result).toMatchObject({ name: "api_token", kind: "config" });
     expect(db.updatedValues[0]).toMatchObject({
-      isSecret: false,
+      kind: "config",
       value: "now-plain",
       ciphertext: null,
     });
     expect(db.insert).not.toHaveBeenCalled();
   });
 
-  it("setVariable transitions an existing plain variable to secret", async () => {
+  it("setVariable transitions an existing config variable to secret", async () => {
+    const secret = "s".repeat(32);
+    const existing = {
+      id: "msv_2",
+      name: "region",
+      kind: "config",
+      owner: "manual",
+      description: null,
+      value: "visible",
+      ciphertext: null,
+    };
+    const updated = {
+      ...existing,
+      kind: "secret",
+      value: null,
+      ciphertext: encryptCredential("now-secret", secret),
+    };
     const db = makeDb([
       [{ configRevision: 1, id: "mcs_1" }],
-      [{ name: "region" }],
-      [{ configRevision: 1, id: "mcs_1" }],
-      [{ id: "msv_2", name: "region", isSecret: false }],
-      [],
+      [existing],
+      [updated],
     ]);
 
     const result = await setVariable(
@@ -2174,35 +2068,32 @@ describe("mcp-studio variables", () => {
       {
         expectedRevision: 1,
         name: "region",
-        isSecret: true,
+        kind: "secret",
         value: "now-secret",
       },
-      "s".repeat(32),
+      secret,
     );
 
-    expect(result).toMatchObject({ name: "region", isSecret: true });
+    expect(result).toMatchObject({ name: "region", kind: "secret" });
     expect(JSON.stringify(result)).not.toContain("now-secret");
     const update = db.updatedValues[0] as Record<string, unknown>;
-    expect(update).toMatchObject({ isSecret: true, value: null });
+    expect(update).toMatchObject({ kind: "secret", value: null });
     expect(typeof update.ciphertext).toBe("string");
     expect(JSON.stringify(db.updatedValues)).not.toContain("now-secret");
     expect(db.insert).not.toHaveBeenCalled();
   });
 
   it("setVariable creates the variable when it does not exist", async () => {
-    const db = makeDb([
-      [{ configRevision: 1, id: "mcs_1" }],
-      [],
-      [
-        {
-          id: "msv_3",
-          name: "location_id",
-          isSecret: false,
-          value: "loc_9",
-          ciphertext: null,
-        },
-      ],
-    ]);
+    const created = {
+      id: "msv_3",
+      name: "location_id",
+      kind: "config",
+      owner: "manual",
+      description: null,
+      value: "loc_9",
+      ciphertext: null,
+    };
+    const db = makeDb([[{ configRevision: 1, id: "mcs_1" }], [], [created]]);
 
     const result = await setVariable(
       db as never,
@@ -2211,7 +2102,7 @@ describe("mcp-studio variables", () => {
       {
         expectedRevision: 1,
         name: "location_id",
-        isSecret: false,
+        kind: "config",
         value: "loc_9",
       },
       "s".repeat(32),
@@ -2219,7 +2110,7 @@ describe("mcp-studio variables", () => {
 
     expect(result).toMatchObject({
       name: "location_id",
-      isSecret: false,
+      kind: "config",
       value: "loc_9",
     });
     expect(db.insert).toHaveBeenCalled();
@@ -2337,12 +2228,12 @@ describe("mcp-studio updateTool", () => {
             {
               id: "mct_1",
               name: "get_contact",
+              title: "Get contact",
+              description: "Fetch one contact.",
               method: "GET",
-              pathTemplate: "/contacts",
               allowMutation: false,
               enabled: true,
-              requestTemplate: {},
-              params: [],
+              requestDefinition: simpleTypedDefinition,
             },
           ]),
         )
@@ -2363,7 +2254,7 @@ describe("mcp-studio updateTool", () => {
     };
 
     await expect(
-      updateLegacyTool(db as never, "user-a", "mcs_1", "mct_1", {
+      updateTool(db as never, "user-a", "mcs_1", "mct_1", {
         expectedRevision: 1,
         name: "list_contacts",
       }),
@@ -2447,8 +2338,6 @@ describe("mcp-studio testConnection", () => {
     userId: "user-a",
     baseUrl: "https://api.example.com",
     allowedHosts: ["api.example.com"],
-    defaultHeaders: null,
-    defaultQuery: null,
   };
 
   it("treats any HTTP response, including 401, as reachable", async () => {
@@ -2471,7 +2360,7 @@ describe("mcp-studio testConnection", () => {
     expect(db.insert).not.toHaveBeenCalled();
   });
 
-  it("renders secret default headers and writes no call log", async () => {
+  it("renders secret auth configuration and writes no call log", async () => {
     const fetchMock = vi.fn<
       (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
     >(async () => new Response("ok", { status: 200 }));
@@ -2481,14 +2370,25 @@ describe("mcp-studio testConnection", () => {
       [
         {
           ...server,
-          defaultHeaders: { Authorization: "Bearer {{api_token}}" },
+          authConfiguration: {
+            kind: "bearer",
+            bindings: [
+              {
+                location: "header",
+                key: "Authorization",
+                serverValueId: "msv_1",
+                prefix: "Bearer ",
+              },
+            ],
+          },
         },
       ],
       [
         {
           id: "msv_1",
           name: "api_token",
-          isSecret: true,
+          kind: "secret",
+          owner: "auth",
           value: null,
           ciphertext,
         },

@@ -107,8 +107,6 @@ function makeServer(overrides: Partial<McpServer> = {}): McpServer {
     iconAssetId: null,
     baseUrl: "https://api.example.com",
     allowedHosts: ["api.example.com"],
-    defaultHeaders: null,
-    defaultQuery: null,
     commonEntries: null,
     authConfiguration: null,
     status: "live",
@@ -129,10 +127,19 @@ function makeTool(overrides: Partial<McpTool> = {}): McpTool {
     title: "Get contact",
     description: "Fetch one contact by id.",
     method: "GET",
-    pathTemplate: "/contacts/{{id}}",
-    requestTemplate: {},
-    params: [{ name: "id", required: true, type: "string" }],
-    requestDefinition: null,
+    requestDefinition: {
+      version: 1,
+      pathSegments: [
+        { id: "path_1", value: { kind: "literal", value: "/contacts/" } },
+        { id: "path_2", value: { kind: "agentInput", agentInputId: "ain_id" } },
+      ],
+      query: [],
+      headers: [],
+      body: { bodyType: "none" },
+      agentInputs: [
+        { id: "ain_id", name: "id", required: true, type: "string" },
+      ],
+    },
     compiledPlan: null,
     compileStatus: null,
     compileIssues: null,
@@ -150,7 +157,6 @@ type ServerValueFixture = {
   id: string;
   name: string;
   kind?: "config" | "secret";
-  isSecret?: boolean;
   owner?: "manual" | "auth";
   value?: string | null;
   ciphertext?: string | null;
@@ -161,7 +167,7 @@ function buildServerValues(
 ): Map<string, ResolvedServerValue> {
   const map = new Map<string, ResolvedServerValue>();
   for (const row of serverValues) {
-    const kind = row.kind ?? (row.isSecret ? "secret" : "config");
+    const kind = row.kind ?? "config";
     const value =
       kind === "secret"
         ? row.ciphertext
@@ -189,14 +195,12 @@ function makeSnapshot(
     serverValueRefs: serverValues.map((row) => ({
       id: row.id,
       name: row.name,
-      kind: row.kind ?? (row.isSecret ? "secret" : "config"),
+      kind: row.kind ?? "config",
       owner: row.owner ?? "manual",
     })),
     common: { headers: [], query: [] },
     auth: null,
     basePath: new URL(server.baseUrl).pathname,
-    legacyDefaultHeaders: server.defaultHeaders,
-    legacyDefaultQuery: server.defaultQuery,
   };
   return {
     configRevision: server.configRevision,
@@ -218,6 +222,27 @@ function makeSnapshot(
     draftRevision: server.draftRevision,
   };
 }
+
+describe("compilePlanForTool fails closed", () => {
+  it("throws MCP_COMPILE_INVALID when a tool has neither definition nor plan", () => {
+    const tool = makeTool({ requestDefinition: null, compiledPlan: null });
+    let error: unknown;
+    try {
+      compilePlanForTool(tool, {
+        serverValueRefs: [],
+        common: { headers: [], query: [] },
+        auth: null,
+        basePath: "/",
+      });
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(AppError);
+    expect((error as AppError).appCode).toBe(
+      APP_ERROR_CODES.MCP_COMPILE_INVALID,
+    );
+  });
+});
 
 /** Revision-aware db for the loader path (no preloaded snapshot). */
 function makePublishedDb(
@@ -251,7 +276,6 @@ function makePublishedDb(
     title: tool.title,
     description: tool.description,
     method: tool.method,
-    pathTemplate: tool.pathTemplate,
     requestDefinition: tool.requestDefinition,
     compiledPlan: snapshotTool.plan,
     compileStatus: "valid",
@@ -573,7 +597,32 @@ describe("executeMappedTool: envelope for completed responses", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
     const tool = {
-      requestTemplate: { headers: { Authorization: "Bearer {{api_token}}" } },
+      requestDefinition: {
+        version: 1,
+        pathSegments: [
+          { id: "path_1", value: { kind: "literal", value: "/contacts/" } },
+          {
+            id: "path_2",
+            value: { kind: "agentInput", agentInputId: "ain_id" },
+          },
+        ],
+        query: [],
+        headers: [
+          {
+            id: "hdr_auth",
+            name: "Authorization",
+            value: {
+              kind: "serverValue",
+              serverValueId: "msv_token",
+              prefix: "Bearer ",
+            },
+          },
+        ],
+        body: { bodyType: "none" },
+        agentInputs: [
+          { id: "ain_id", name: "id", required: true, type: "string" },
+        ],
+      },
     };
     const { db } = makeDb({ server: [makeServer()] });
 
@@ -590,7 +639,6 @@ describe("executeMappedTool: envelope for completed responses", () => {
           {
             id: "msv_token",
             name: "api_token",
-            isSecret: true,
             kind: "secret",
             owner: "manual",
             value: null,
@@ -643,7 +691,24 @@ describe("executeMappedTool: redirects", () => {
   const mutatingTool = {
     method: "POST" as const,
     allowMutation: true,
-    requestTemplate: { body: '{"note":"hi"}', bodyType: "json" as const },
+    requestDefinition: {
+      version: 1,
+      pathSegments: [
+        { id: "path_1", value: { kind: "literal", value: "/contacts/" } },
+        { id: "path_2", value: { kind: "agentInput", agentInputId: "ain_id" } },
+      ],
+      query: [],
+      headers: [],
+      body: {
+        bodyType: "raw",
+        contentType: "application/json",
+        bindings: [],
+        template: '{"note":"hi"}',
+      },
+      agentInputs: [
+        { id: "ain_id", name: "id", required: true, type: "string" },
+      ],
+    },
   };
 
   it("follows a same-origin 307 redirect, preserving method and body", async () => {
@@ -801,7 +866,24 @@ describe("executeMappedTool: deadline and network failures", () => {
         tool: {
           method: "POST",
           allowMutation: true,
-          requestTemplate: { body: "{}", bodyType: "json" },
+          requestDefinition: {
+            version: 1,
+            pathSegments: [
+              {
+                id: "path_1",
+                value: { kind: "literal", value: "/contacts/1" },
+              },
+            ],
+            query: [],
+            headers: [],
+            body: {
+              bodyType: "raw",
+              contentType: "application/json",
+              bindings: [],
+              template: "{}",
+            },
+            agentInputs: [],
+          },
         },
       }),
     });
@@ -832,7 +914,24 @@ describe("executeMappedTool: deadline and network failures", () => {
           tool: {
             method: "POST",
             allowMutation: true,
-            requestTemplate: { body: "{}", bodyType: "json" },
+            requestDefinition: {
+              version: 1,
+              pathSegments: [
+                {
+                  id: "path_1",
+                  value: { kind: "literal", value: "/contacts/1" },
+                },
+              ],
+              query: [],
+              headers: [],
+              body: {
+                bodyType: "raw",
+                contentType: "application/json",
+                bindings: [],
+                template: "{}",
+              },
+              agentInputs: [],
+            },
           },
         }),
       }),

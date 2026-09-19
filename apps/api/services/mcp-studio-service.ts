@@ -7,14 +7,13 @@ import {
   mcpCallLog,
   mcpServer,
   mcpServerRevisionConfig,
+  mcpServerRevisionTool,
   mcpServerVariable,
   mcpTool,
   type McpAuthConfigurationRow,
   type McpNamedEntryRow,
-  type McpRequestTemplate,
   type McpServer,
   type McpServerVariable,
-  type McpToolParam,
 } from "@repo/db";
 import { and, count, desc, eq, inArray } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -25,13 +24,9 @@ import {
   isAppErrorCode,
 } from "../lib/app-error.js";
 import {
-  allCredentialMappingKeys,
-  inferServerAuth,
-  inferredAuthOwnedKeys,
   isAuthHeaderName,
   isCredentialQueryName,
   recipeToMapping,
-  templatesReferenceVariable,
   type ServerAuthRecipe,
 } from "../lib/mcp-auth-recipe.js";
 import { generateAgentToken } from "../lib/mcp-agent-token.js";
@@ -50,16 +45,10 @@ import {
   type CurlImportPreview,
 } from "../lib/mcp-curl-import.js";
 import { encryptCredential } from "../lib/mcp-crypto.js";
-import {
-  analyzeLegacyTool,
-  analyzeLegacyCommonEntries,
-  projectCommonEntriesToLegacy,
-  projectDefinitionToLegacy,
-  renderDefinitionToLegacy,
-} from "../lib/mcp-legacy-migrate.js";
 import { isForbiddenTransportHeaderName } from "../lib/mcp-policy.js";
 import { MCP_MAX_TOOLS_PER_SERVER } from "../lib/mcp-redact.js";
 import {
+  mcpAuthConfigurationSchema,
   mcpCommonEntriesSchema,
   mcpRequestDefinitionSchema,
   redactSensitiveExamples,
@@ -69,6 +58,7 @@ import {
   type McpCompileIssue,
   type McpNamedEntry,
   type McpRequestDefinition,
+  type McpValueBinding,
 } from "../lib/mcp-request-definition.js";
 import { assertUpstreamUrlSafe } from "../lib/mcp-ssrf.js";
 import {
@@ -76,11 +66,6 @@ import {
   MCP_TELEMETRY_EVENTS,
   type McpTelemetryEvent,
 } from "../lib/mcp-telemetry.js";
-import {
-  extractPlaceholders,
-  renderTemplate,
-  type RenderScope,
-} from "../lib/mcp-template.js";
 import { paginate } from "../lib/paginate.js";
 import {
   isUniqueViolation,
@@ -93,14 +78,13 @@ import {
   requireAttachableAsset,
 } from "./mcp-asset-service.js";
 import {
-  loadVariables,
+  loadServerValues,
   MUTATING_METHODS,
   READ_METHODS,
 } from "./mcp-executor-service.js";
 import {
   buildPublicationCandidate,
   loadDraftAggregate,
-  loadPublishedToolInputs,
   loadRevisionSummary,
 } from "./mcp-publishing-service.js";
 
@@ -161,8 +145,6 @@ export type UpdateServerInput = {
   baseUrl?: string;
   status?: McpServerStatus;
   allowedHosts?: string[];
-  defaultHeaders?: Record<string, string> | null;
-  defaultQuery?: Record<string, string> | null;
 };
 
 const PUBLISHABLE_SERVER_FIELDS = [
@@ -170,33 +152,7 @@ const PUBLISHABLE_SERVER_FIELDS = [
   "description",
   "baseUrl",
   "allowedHosts",
-  "defaultHeaders",
-  "defaultQuery",
 ] as const satisfies readonly (keyof UpdateServerInput)[];
-
-export type CreateLegacyToolInput = {
-  expectedRevision: number;
-  name: string;
-  description?: string | null;
-  method: McpHttpMethod;
-  pathTemplate: string;
-  requestTemplate?: McpRequestTemplate;
-  params?: McpToolParam[];
-  allowMutation?: boolean;
-  enabled?: boolean;
-};
-
-export type UpdateLegacyToolInput = {
-  expectedRevision: number;
-  name?: string;
-  description?: string | null;
-  method?: McpHttpMethod;
-  pathTemplate?: string;
-  requestTemplate?: McpRequestTemplate;
-  params?: McpToolParam[];
-  allowMutation?: boolean;
-  enabled?: boolean;
-};
 
 /** Canonical typed create contract; the request definition is authoritative. */
 export type CreateTypedToolInput = {
@@ -229,17 +185,23 @@ export type DuplicateTypedToolInput = {
   enabled?: boolean;
 };
 
-export type TemplateWarning = {
-  type: "placeholder_without_param" | "param_without_placeholder";
-  name: string;
-};
-
-export type SetVariableInput = {
+export type CreateVariableInput = {
   expectedRevision: number;
   name: string;
-  isSecret: boolean;
+  kind: "config" | "secret";
   value: string;
+  description?: string | null;
 };
+
+export type UpdateVariableInput = {
+  expectedRevision: number;
+  value?: string;
+  kind?: "config" | "secret";
+  description?: string | null;
+};
+
+/** Canonical name-keyed create/upsert shape shared with Platform MCP. */
+export type SetVariableInput = CreateVariableInput;
 
 const VARIABLE_NAME_PATTERN = /^[a-z][a-z0-9_]*$/;
 
@@ -382,7 +344,7 @@ async function assertActiveRevisionDoesNotReferenceSecret(
       and(
         eq(mcpServerRevisionConfig.revisionId, server.publishedRevisionId),
         eq(mcpServerRevisionConfig.sourceValueId, variableId),
-        eq(mcpServerRevisionConfig.isSecret, true),
+        eq(mcpServerRevisionConfig.kind, "secret"),
       ),
     )
     .limit(1);
@@ -433,7 +395,7 @@ async function hasSecretVariable(db: DB, serverId: string): Promise<boolean> {
     .where(
       and(
         eq(mcpServerVariable.serverId, serverId),
-        eq(mcpServerVariable.isSecret, true),
+        eq(mcpServerVariable.kind, "secret"),
       ),
     )
     .limit(1);
@@ -505,28 +467,27 @@ export function toRecipeTemplate(input: {
   description: string | null;
   baseUrl: string;
   allowedHosts: string[];
-  defaultHeaders: Record<string, string> | null;
-  defaultQuery: Record<string, string> | null;
+  commonEntries: McpCommonEntries | null;
+  authConfiguration: McpAuthConfigurationRow | null;
   tools: Array<{
     name: string;
+    title: string | null;
     description: string | null;
     method: string;
-    pathTemplate: string;
-    requestTemplate: McpRequestTemplate | null;
-    params: McpToolParam[] | null;
+    requestDefinition: Record<string, unknown> | null;
     allowMutation: boolean;
     enabled: boolean;
     source: string;
   }>;
-  variables: Array<{ name: string; isSecret: boolean }>;
+  variables: Array<{ name: string; kind: string; owner: string }>;
 }) {
   return {
     name: input.name,
     description: input.description,
     baseUrl: input.baseUrl,
     allowedHosts: input.allowedHosts,
-    defaultHeaders: input.defaultHeaders,
-    defaultQuery: input.defaultQuery,
+    commonEntries: input.commonEntries ?? { headers: [], query: [] },
+    authConfiguration: input.authConfiguration,
     tools: input.tools,
     variables: input.variables,
   };
@@ -693,7 +654,6 @@ async function upsertAuthSecretVariable(
       .update(mcpServerVariable)
       .set({
         name,
-        isSecret: true,
         kind: "secret",
         owner: "auth",
         value: null,
@@ -708,7 +668,6 @@ async function upsertAuthSecretVariable(
     .values({
       serverId,
       name,
-      isSecret: true,
       kind: "secret",
       owner: "auth",
       ciphertext,
@@ -749,7 +708,6 @@ export async function findServerValueReferences(
   db: DB,
   server: McpServer,
   valueId: string,
-  valueName: string,
 ): Promise<ServerValueReference[]> {
   const references: ServerValueReference[] = [];
 
@@ -772,11 +730,7 @@ export async function findServerValueReferences(
     [...commonEntries.headers, ...commonEntries.query].some((entry) =>
       bindingReferencesValue(entry.value, valueId),
     );
-  const legacyCommonHit = templatesReferenceVariable(valueName, [
-    ...Object.values(server.defaultHeaders ?? {}),
-    ...Object.values(server.defaultQuery ?? {}),
-  ]);
-  if (commonHit || legacyCommonHit) {
+  if (commonHit) {
     references.push({ kind: "common", id: server.id, name: "Common values" });
   }
 
@@ -785,24 +739,12 @@ export async function findServerValueReferences(
       id: mcpTool.id,
       name: mcpTool.name,
       requestDefinition: mcpTool.requestDefinition,
-      pathTemplate: mcpTool.pathTemplate,
-      requestTemplate: mcpTool.requestTemplate,
     })
     .from(mcpTool)
     .where(eq(mcpTool.serverId, server.id));
 
   for (const tool of tools) {
-    const definitionHit = definitionReferencesValue(
-      tool.requestDefinition,
-      valueId,
-    );
-    const legacyHit = templatesReferenceVariable(valueName, [
-      tool.pathTemplate,
-      ...Object.values(tool.requestTemplate?.headers ?? {}),
-      ...Object.values(tool.requestTemplate?.query ?? {}),
-      ...(tool.requestTemplate?.body ? [tool.requestTemplate.body] : []),
-    ]);
-    if (definitionHit || legacyHit) {
+    if (definitionReferencesValue(tool.requestDefinition, valueId)) {
       references.push({ kind: "tool", id: tool.id, name: tool.name });
     }
   }
@@ -851,12 +793,7 @@ export async function isServerValueRuntimeEffective(
   const variable = await findVariableByName(db, server.id, valueName);
   if (!variable) return false;
 
-  const references = await findServerValueReferences(
-    db,
-    server,
-    variable.id,
-    variable.name,
-  );
+  const references = await findServerValueReferences(db, server, variable.id);
   if (references.length === 0) return false;
 
   const enabledTools = await db
@@ -889,41 +826,25 @@ function protectedAuthKeys(server: McpServer): {
   return { headers, query };
 }
 
-function assertNoProtectedAuthOverride(
-  server: McpServer,
-  headers: Record<string, string> | null | undefined,
-  query: Record<string, string> | null | undefined,
-): void {
-  const protectedKeys = protectedAuthKeys(server);
-  for (const key of Object.keys(headers ?? {})) {
-    if (protectedKeys.headers.has(key.toLowerCase())) {
-      throw appError({
-        appCode: APP_ERROR_CODES.MCP_COMPILE_INVALID,
-        message: `"${key}" is owned by authentication and cannot be set here.`,
-        status: 400,
-      });
-    }
-  }
-  for (const key of Object.keys(query ?? {})) {
-    if (protectedKeys.query.has(key)) {
-      throw appError({
-        appCode: APP_ERROR_CODES.MCP_COMPILE_INVALID,
-        message: `"${key}" is owned by authentication and cannot be set here.`,
-        status: 400,
-      });
-    }
-  }
+function parseCommonEntries(server: McpServer): McpCommonEntries {
+  if (!server.commonEntries) return { headers: [], query: [] };
+  const parsed = mcpCommonEntriesSchema.safeParse(server.commonEntries);
+  return parsed.success ? parsed.data : { headers: [], query: [] };
+}
+
+function parseAuthConfiguration(raw: unknown): McpAuthConfiguration | null {
+  if (!raw) return null;
+  const parsed = mcpAuthConfigurationSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
 }
 
 /**
  * Apply an auth recipe onto an already-loaded server row inside a transaction.
- * Persists an explicit `authConfiguration` referencing auth-owned secret ids
- * and dual-writes the legacy `defaultHeaders`/`defaultQuery` templates for
- * rollback compatibility. Secrets are always created/rotated with
- * `owner: "auth"`; a manual value with a colliding name is never reused,
- * overwritten, or deleted — auth picks a distinct name instead. `none`
- * clears every auth-owned binding (including Custom multi-key setups) but
- * never touches a manual value.
+ * Persists only the explicit `authConfiguration` referencing auth-owned secret
+ * ids. Secrets are always created/rotated with `owner: "auth"`; a manual value
+ * with a colliding name is never reused, overwritten, or deleted — auth picks
+ * a distinct name instead. `none` clears every auth-owned binding (including
+ * Custom multi-key setups) but never touches a manual value.
  */
 export async function applyAuthRecipe(
   db: DB,
@@ -944,32 +865,6 @@ export async function applyAuthRecipe(
   const previousAuthConfig =
     (server.authConfiguration as McpAuthConfigurationRow | null) ?? null;
 
-  // Ownership tracking prefers the explicit configuration. Servers that
-  // predate it (no `authConfiguration` row yet) fall back to the same
-  // name-based inference the legacy reader has always used, purely so
-  // rotating/clearing auth on those servers keeps working during migration.
-  const legacyInferred = previousAuthConfig
-    ? null
-    : inferServerAuth(server.defaultHeaders, server.defaultQuery);
-  const legacyOwnedKeys = legacyInferred
-    ? inferredAuthOwnedKeys(legacyInferred)
-    : null;
-  const legacyAllOwnedKeys =
-    !previousAuthConfig && recipe.type === "none"
-      ? allCredentialMappingKeys(server.defaultHeaders, server.defaultQuery)
-      : null;
-
-  const previousHeaderKeys = previousAuthConfig
-    ? previousAuthConfig.bindings
-        .filter((binding) => binding.location === "header")
-        .map((binding) => binding.key)
-    : (legacyAllOwnedKeys?.headerKeys ?? legacyOwnedKeys?.headerKeys ?? []);
-  const previousQueryKeys = previousAuthConfig
-    ? previousAuthConfig.bindings
-        .filter((binding) => binding.location === "query")
-        .map((binding) => binding.key)
-    : (legacyAllOwnedKeys?.queryKeys ?? legacyOwnedKeys?.queryKeys ?? []);
-
   const previousOwnedValueIds = new Set<string>();
   for (const binding of previousAuthConfig?.bindings ?? []) {
     previousOwnedValueIds.add(binding.serverValueId);
@@ -980,42 +875,26 @@ export async function applyAuthRecipe(
   if (previousAuthConfig?.basicPasswordValueId) {
     previousOwnedValueIds.add(previousAuthConfig.basicPasswordValueId);
   }
-  const previousOwnedVariableNames = new Set<string>();
-  if (!previousAuthConfig) {
-    for (const name of legacyAllOwnedKeys?.variableNames ??
-      (legacyOwnedKeys?.variableName ? [legacyOwnedKeys.variableName] : [])) {
-      previousOwnedVariableNames.add(name);
-    }
-  }
-
-  const nextHeaders: Record<string, string> = {
-    ...(server.defaultHeaders ?? {}),
-  };
-  const nextQuery: Record<string, string> = {
-    ...(server.defaultQuery ?? {}),
-  };
-  for (const key of previousHeaderKeys) delete nextHeaders[key];
-  for (const key of previousQueryKeys) delete nextQuery[key];
 
   let authConfiguration: McpAuthConfigurationRow | null = null;
   let ownedRowId: string | undefined;
 
   if (mapping.variableName && mapping.plaintext !== null) {
     const previousId = previousAuthConfig?.bindings[0]?.serverValueId;
-    const legacyPreviousName = !previousAuthConfig
-      ? (legacyOwnedKeys?.variableName ?? null)
-      : null;
 
     let previousRow: McpServerVariable | undefined;
     if (previousId) {
       previousRow = await db
         .select()
         .from(mcpServerVariable)
-        .where(eq(mcpServerVariable.id, previousId))
+        .where(
+          and(
+            eq(mcpServerVariable.id, previousId),
+            eq(mcpServerVariable.serverId, server.id),
+          ),
+        )
         .limit(1)
         .then((rows) => rows[0]);
-    } else if (legacyPreviousName) {
-      previousRow = await findVariableByName(db, server.id, legacyPreviousName);
     }
 
     // Rotate the same row only when it is still auth-owned *and* the recipe
@@ -1050,22 +929,12 @@ export async function applyAuthRecipe(
     );
     ownedRowId = ownedRow.id;
 
-    // Rebuild the injected value against the *final* resolved name — a
-    // collision-driven rename (manual value protection) must not leave the
-    // header/query template pointing at the originally desired name.
-    const authValueTemplate =
+    const prefix =
       recipe.type === "bearer"
-        ? `Bearer {{${variableName}}}`
+        ? "Bearer "
         : recipe.type === "basic"
-          ? `Basic {{${variableName}}}`
-          : `{{${variableName}}}`;
-    for (const headerKey of mapping.headerKeys) {
-      nextHeaders[headerKey] = authValueTemplate;
-    }
-    for (const queryKey of mapping.queryKeys) {
-      nextQuery[queryKey] = authValueTemplate;
-    }
-
+          ? "Basic "
+          : "";
     authConfiguration = {
       kind: recipe.type,
       bindings: [
@@ -1073,11 +942,13 @@ export async function applyAuthRecipe(
           location: "header" as const,
           key,
           serverValueId: ownedRow.id,
+          ...(prefix ? { prefix } : {}),
         })),
         ...mapping.queryKeys.map((key) => ({
           location: "query" as const,
           key,
           serverValueId: ownedRow.id,
+          ...(prefix ? { prefix } : {}),
         })),
       ],
       ...(recipe.type === "query" ? { queryExposureAcknowledged: true } : {}),
@@ -1087,42 +958,23 @@ export async function applyAuthRecipe(
   const [updated] = await db
     .update(mcpServer)
     .set({
-      defaultHeaders: Object.keys(nextHeaders).length > 0 ? nextHeaders : null,
-      defaultQuery: Object.keys(nextQuery).length > 0 ? nextQuery : null,
       authConfiguration,
       updatedAt: new Date(),
     })
     .where(eq(mcpServer.id, server.id))
     .returning();
 
-  const cleanupCandidates: Array<() => Promise<McpServerVariable | undefined>> =
-    previousOwnedValueIds.size > 0
-      ? [...previousOwnedValueIds]
-          .filter((id) => id !== ownedRowId)
-          .map((id) => async () => {
-            const [row] = await db
-              .select()
-              .from(mcpServerVariable)
-              .where(eq(mcpServerVariable.id, id))
-              .limit(1);
-            return row;
-          })
-      : [...previousOwnedVariableNames].map((name) => async () => {
-          const row = await findVariableByName(db, server.id, name);
-          return row?.id === ownedRowId ? undefined : row;
-        });
-
-  for (const loadCandidate of cleanupCandidates) {
-    const row = await loadCandidate();
+  for (const id of previousOwnedValueIds) {
+    if (id === ownedRowId) continue;
+    const [row] = await db
+      .select()
+      .from(mcpServerVariable)
+      .where(eq(mcpServerVariable.id, id))
+      .limit(1);
     if (!row || row.owner === "manual") continue;
-    const references = await findServerValueReferences(
-      db,
-      updated,
-      row.id,
-      row.name,
-    );
+    const references = await findServerValueReferences(db, updated, row.id);
     if (references.length > 0) continue;
-    if (row.isSecret) {
+    if (row.kind === "secret") {
       await assertActiveRevisionDoesNotReferenceSecret(
         db,
         updated,
@@ -1261,39 +1113,39 @@ export async function getServer(db: DB, userId: string, serverId: string) {
   const activeRevision = server.publishedRevisionId
     ? await loadRevisionSummary(db, server.id, server.publishedRevisionId)
     : null;
-  const publishedInputs = activeRevision
-    ? await loadPublishedToolInputs(db, activeRevision.id)
-    : new Map<
-        string,
-        Array<{
-          name: string;
-          type: string;
-          required: boolean;
-          sensitive: boolean;
-          description?: string;
-          minimum?: number;
-          maximum?: number;
-          minLength?: number;
-          maxLength?: number;
-          pattern?: string;
-        }>
-      >();
+
+  const publishedToolRows = server.publishedRevisionId
+    ? await db
+        .select({
+          sourceToolId: mcpServerRevisionTool.sourceToolId,
+          name: mcpServerRevisionTool.name,
+          title: mcpServerRevisionTool.title,
+          description: mcpServerRevisionTool.description,
+          method: mcpServerRevisionTool.method,
+          requestDefinition: mcpServerRevisionTool.requestDefinition,
+          allowMutation: mcpServerRevisionTool.allowMutation,
+          enabled: mcpServerRevisionTool.enabled,
+        })
+        .from(mcpServerRevisionTool)
+        .where(eq(mcpServerRevisionTool.revisionId, server.publishedRevisionId))
+    : [];
 
   return {
     ...withMeta,
     tools,
     variables,
     publishedRevisionNumber: activeRevision?.revisionNumber ?? null,
-    publishedTools:
-      activeRevision?.tools
-        .filter((entry) => entry.enabled)
-        .map((entry) => ({
-          id: entry.sourceToolId,
-          name: entry.name,
-          method: entry.method,
-          allowMutation: entry.allowMutation,
-          params: publishedInputs.get(entry.sourceToolId) ?? [],
-        })) ?? [],
+    publishedTools: publishedToolRows
+      .filter((entry) => entry.enabled)
+      .map((entry) => ({
+        id: entry.sourceToolId,
+        name: entry.name,
+        title: entry.title,
+        description: entry.description,
+        method: entry.method,
+        requestDefinition: entry.requestDefinition,
+        allowMutation: entry.allowMutation,
+      })),
     dirty: activeRevision
       ? activeRevision.candidateFingerprint !== candidate.candidateFingerprint
       : true,
@@ -1304,27 +1156,17 @@ export async function getServer(db: DB, userId: string, serverId: string) {
       description: server.description,
       baseUrl: server.baseUrl,
       allowedHosts: server.allowedHosts,
-      defaultHeaders: server.defaultHeaders,
-      defaultQuery: server.defaultQuery,
+      commonEntries: (server.commonEntries as McpCommonEntries | null) ?? null,
+      authConfiguration:
+        (server.authConfiguration as McpAuthConfigurationRow | null) ?? null,
       tools,
-      variables: variables.map(({ name, isSecret }) => ({ name, isSecret })),
+      variables: variables.map(({ name, kind, owner }) => ({
+        name,
+        kind,
+        owner,
+      })),
     }),
   };
-}
-
-/** Auth-ish headers must reference a variable; literal secrets are rejected. */
-export function assertNoPlaintextSecretHeaders(
-  headers: Record<string, string>,
-): void {
-  for (const [name, value] of Object.entries(headers)) {
-    if (isAuthHeaderName(name) && !value.includes("{{")) {
-      throw appError({
-        appCode: APP_ERROR_CODES.MCP_PLAINTEXT_SECRET,
-        message: `Header "${name}" looks auth-related. Store the secret in a secret variable and reference it with {{name}}.`,
-        status: 400,
-      });
-    }
-  }
 }
 
 export async function updateServer(
@@ -1341,30 +1183,6 @@ export async function updateServer(
     { userId, serverId, expectedRevision: input.expectedRevision },
     async (ctx) => {
       const server = ctx.server;
-      if (
-        (input.defaultHeaders !== undefined ||
-          input.defaultQuery !== undefined) &&
-        server.commonEntries
-      ) {
-        const serverValues = await loadCompileServerValueRefs(
-          ctx.tx,
-          server.id,
-        );
-        const projection = projectCommonEntriesToLegacy(
-          server.commonEntries as McpCommonEntries,
-          Object.fromEntries(
-            serverValues.map((value) => [value.id, value.name]),
-          ),
-        );
-        throw appError({
-          appCode: projection.projectable
-            ? APP_ERROR_CODES.MCP_LEGACY_DOWNGRADE_REJECTED
-            : APP_ERROR_CODES.MCP_LEGACY_PROJECTION_UNAVAILABLE,
-          message:
-            "This server already uses typed common entries; edit them through the typed common-values command.",
-          status: 409,
-        });
-      }
       const nextBaseUrl = input.baseUrl
         ? formatBaseUrl(parseBaseUrl(input.baseUrl))
         : server.baseUrl;
@@ -1373,20 +1191,6 @@ export async function updateServer(
         : input.baseUrl
           ? deriveAllowedHosts(nextBaseUrl, server.allowedHosts)
           : server.allowedHosts;
-
-      if (input.defaultHeaders) {
-        assertNoPlaintextSecretHeaders(input.defaultHeaders);
-      }
-      if (
-        input.defaultHeaders !== undefined ||
-        input.defaultQuery !== undefined
-      ) {
-        assertNoProtectedAuthOverride(
-          server,
-          input.defaultHeaders,
-          input.defaultQuery,
-        );
-      }
 
       const previousIconAssetId = server.iconAssetId ?? null;
       let nextIconAssetId = previousIconAssetId;
@@ -1416,14 +1220,6 @@ export async function updateServer(
           baseUrl: nextBaseUrl,
           allowedHosts,
           status: input.status ?? server.status,
-          defaultHeaders:
-            input.defaultHeaders === undefined
-              ? server.defaultHeaders
-              : input.defaultHeaders,
-          defaultQuery:
-            input.defaultQuery === undefined
-              ? server.defaultQuery
-              : input.defaultQuery,
         })
         .where(eq(mcpServer.id, server.id))
         .returning();
@@ -1448,19 +1244,7 @@ export async function getServerCommon(
   serverId: string,
 ) {
   const server = await requireOwnedServer(db, userId, serverId);
-  const serverValues = await loadCompileServerValueRefs(db, server.id);
-  const common: McpCommonEntries =
-    (server.commonEntries as McpCommonEntries | null) ??
-    resolveCommonEntriesForCompile(server, serverValues);
-  const names = Object.fromEntries(
-    serverValues.map((value) => [value.id, value.name]),
-  );
-  const projection = projectCommonEntriesToLegacy(common, names);
-  return {
-    common,
-    legacyProjectable: projection.projectable,
-    projectionIssues: projection.issues,
-  };
+  return { common: parseCommonEntries(server) };
 }
 
 /**
@@ -1496,9 +1280,6 @@ async function applyServerCommonWrite(
 ) {
   const serverValues = await loadCompileServerValueRefs(db, server.id);
   const serverValueById = new Map(serverValues.map((v) => [v.id, v]));
-  const names = Object.fromEntries(
-    serverValues.map((value) => [value.id, value.name]),
-  );
   const protectedKeys = protectedAuthKeys(server);
 
   const issues: McpCompileIssue[] = [];
@@ -1598,10 +1379,7 @@ async function applyServerCommonWrite(
     });
   }
 
-  const projection = projectCommonEntriesToLegacy(parsedCommon, names);
-  const authConfiguration =
-    (server.authConfiguration as unknown as McpAuthConfiguration | null) ??
-    null;
+  const authConfiguration = parseAuthConfiguration(server.authConfiguration);
   const basePath = (() => {
     try {
       return new URL(server.baseUrl).pathname || "/";
@@ -1632,16 +1410,10 @@ async function applyServerCommonWrite(
   }> = [];
 
   for (const tool of enabledTools) {
-    if (!tool.requestDefinition) {
-      if (!projection.projectable) {
-        toolFailures.push({ toolId: tool.id, name: tool.name });
-      }
-      continue;
-    }
-    const parsedDefinition = mcpRequestDefinitionSchema.safeParse(
-      tool.requestDefinition,
-    );
-    if (!parsedDefinition.success) {
+    const parsedDefinition = tool.requestDefinition
+      ? mcpRequestDefinitionSchema.safeParse(tool.requestDefinition)
+      : null;
+    if (!parsedDefinition?.success) {
       toolFailures.push({ toolId: tool.id, name: tool.name });
       continue;
     }
@@ -1684,19 +1456,6 @@ async function applyServerCommonWrite(
     });
   }
 
-  const legacyDefaultHeaders = { ...(projection.defaultHeaders ?? {}) };
-  for (const [key, value] of Object.entries(server.defaultHeaders ?? {})) {
-    if (protectedKeys.headers.has(key.toLowerCase())) {
-      legacyDefaultHeaders[key] = value;
-    }
-  }
-  const legacyDefaultQuery = { ...(projection.defaultQuery ?? {}) };
-  for (const [key, value] of Object.entries(server.defaultQuery ?? {})) {
-    if (protectedKeys.query.has(key)) {
-      legacyDefaultQuery[key] = value;
-    }
-  }
-
   await db
     .update(mcpServer)
     .set({
@@ -1704,12 +1463,6 @@ async function applyServerCommonWrite(
         headers: McpNamedEntryRow[];
         query: McpNamedEntryRow[];
       },
-      defaultHeaders: projection.projectable
-        ? legacyDefaultHeaders
-        : server.defaultHeaders,
-      defaultQuery: projection.projectable
-        ? legacyDefaultQuery
-        : server.defaultQuery,
     })
     .where(eq(mcpServer.id, server.id));
 
@@ -1727,8 +1480,6 @@ async function applyServerCommonWrite(
 
   return {
     common: parsedCommon,
-    legacyProjectable: projection.projectable,
-    projectionIssues: projection.issues,
     affectedToolCount: enabledTools.length,
   };
 }
@@ -1836,57 +1587,6 @@ function rethrowToolNameConflict(error: unknown): never {
   throw error;
 }
 
-async function listVariableNames(
-  db: DB,
-  serverId: string,
-): Promise<Set<string>> {
-  const rows = await db
-    .select({ name: mcpServerVariable.name })
-    .from(mcpServerVariable)
-    .where(eq(mcpServerVariable.serverId, serverId));
-  return new Set(rows.map((row) => row.name));
-}
-
-export function collectTemplateWarnings(input: {
-  pathTemplate: string;
-  requestTemplate: McpRequestTemplate;
-  params: McpToolParam[];
-  variableNames: Set<string>;
-}): TemplateWarning[] {
-  const placeholders = new Set<string>([
-    ...extractPlaceholders(input.pathTemplate),
-    ...Object.values(input.requestTemplate.query ?? {}).flatMap(
-      extractPlaceholders,
-    ),
-    ...Object.values(input.requestTemplate.headers ?? {}).flatMap(
-      extractPlaceholders,
-    ),
-    ...(input.requestTemplate.body
-      ? extractPlaceholders(input.requestTemplate.body)
-      : []),
-  ]);
-  const paramNames = new Set(input.params.map((param) => param.name));
-  const warnings: TemplateWarning[] = [];
-  for (const name of placeholders) {
-    if (!paramNames.has(name) && !input.variableNames.has(name)) {
-      warnings.push({ type: "placeholder_without_param", name });
-    }
-  }
-  for (const name of paramNames) {
-    if (!placeholders.has(name)) {
-      warnings.push({ type: "param_without_placeholder", name });
-    }
-  }
-  return warnings;
-}
-
-function validateToolTemplates(input: {
-  pathTemplate: string;
-  requestTemplate: McpRequestTemplate;
-}): void {
-  assertNoPlaintextSecretHeaders(input.requestTemplate.headers ?? {});
-}
-
 /**
  * Typed entries may bind a server value, but a literal credential-shaped value
  * must still reference a variable rather than embed a plaintext secret.
@@ -1920,7 +1620,7 @@ function collectPlaintextCredentialIssues(
 type CompiledToolPersistence = {
   requestDefinition: Record<string, unknown> | null;
   compiledPlan: Record<string, unknown> | null;
-  compileStatus: "valid" | "invalid" | "legacy";
+  compileStatus: "valid" | "invalid";
   compileIssues: Array<{
     path: string;
     id?: string;
@@ -1931,76 +1631,6 @@ type CompiledToolPersistence = {
   annotations: Record<string, unknown> | null;
   enabled: boolean;
 };
-
-async function compileLegacyToolForPersistence(
-  db: DB,
-  server: McpServer,
-  input: {
-    method: string;
-    pathTemplate: string;
-    requestTemplate: McpRequestTemplate;
-    params: McpToolParam[];
-    allowMutation: boolean;
-    enabled: boolean;
-  },
-): Promise<CompiledToolPersistence> {
-  const serverValues = await loadCompileServerValueRefs(db, server.id);
-  const analysis = analyzeLegacyTool({
-    method: input.method,
-    pathTemplate: input.pathTemplate,
-    requestTemplate: input.requestTemplate,
-    params: input.params,
-    serverValues,
-  });
-
-  if (!analysis.unambiguous || !analysis.definition) {
-    return {
-      requestDefinition: null,
-      compiledPlan: null,
-      compileStatus: "invalid",
-      compileIssues: analysis.issues,
-      annotations: null,
-      enabled: false,
-    };
-  }
-
-  const commonEntries = resolveCommonEntriesForCompile(server, serverValues);
-  const authConfiguration =
-    (server.authConfiguration as unknown as McpAuthConfiguration | null) ??
-    null;
-  const compileResult = compileToolDefinition({
-    method: input.method,
-    definition: analysis.definition,
-    common: commonEntries,
-    auth: authConfiguration,
-    serverValues,
-    basePath: (() => {
-      try {
-        return new URL(server.baseUrl).pathname || "/";
-      } catch {
-        return "/";
-      }
-    })(),
-    allowMutation: input.allowMutation,
-  });
-
-  const issues = [...analysis.issues, ...compileResult.issues];
-  const ok = compileResult.ok;
-  return {
-    requestDefinition: analysis.definition as unknown as Record<
-      string,
-      unknown
-    >,
-    compiledPlan:
-      (compileResult.plan as Record<string, unknown> | null) ?? null,
-    compileStatus: ok ? "valid" : "invalid",
-    compileIssues: issues,
-    annotations:
-      (compileResult.plan?.annotations as
-        Record<string, unknown> | undefined) ?? null,
-    enabled: ok ? input.enabled : false,
-  };
-}
 
 function throwTypedCompileInvalid(
   issues: CompiledToolPersistence["compileIssues"],
@@ -2026,20 +1656,12 @@ type TypedToolPersistence = CompiledToolPersistence & {
   ok: boolean;
   /** Compiled agent-visible contract, or null when compilation is not ready. */
   contract: McpAgentToolContract | null;
-  /** Legacy compatibility fields written only when the projection is lossless. */
-  compatibility: {
-    pathTemplate: string;
-    requestTemplate: McpRequestTemplate | null;
-    params: McpToolParam[] | null;
-    projectable: boolean;
-  };
 };
 
 /**
- * Validates server-value references against the selected server's catalog,
+ * Validates server-value references against the selected server's catalog and
  * compiles the typed definition with the candidate common entries and auth
- * configuration, and computes the lossless legacy compatibility projection.
- * Pure with respect to the tool row: performs no writes.
+ * configuration. Pure with respect to the tool row: performs no writes.
  */
 async function compileTypedToolForPersistence(
   db: DB,
@@ -2056,13 +1678,8 @@ async function compileTypedToolForPersistence(
   emitTelemetry?: CompileTelemetryEmitter,
 ): Promise<TypedToolPersistence> {
   const serverValues = await loadCompileServerValueRefs(db, server.id);
-  const serverValueNames = Object.fromEntries(
-    serverValues.map((value) => [value.id, value.name]),
-  );
-  const commonEntries = resolveCommonEntriesForCompile(server, serverValues);
-  const authConfiguration =
-    (server.authConfiguration as unknown as McpAuthConfiguration | null) ??
-    null;
+  const commonEntries = parseCommonEntries(server);
+  const authConfiguration = parseAuthConfiguration(server.authConfiguration);
   const basePath = (() => {
     try {
       return new URL(server.baseUrl).pathname || "/";
@@ -2089,15 +1706,6 @@ async function compileTypedToolForPersistence(
     ...compileResult.issues,
     ...plaintextSecretIssues,
   ];
-
-  const projection = projectDefinitionToLegacy(
-    input.definition,
-    input.method,
-    serverValueNames,
-  );
-  if (!projection.projectable) {
-    compileIssues.push(...projection.issues);
-  }
 
   const contractResult =
     compileResult.ok && compileResult.plan
@@ -2132,17 +1740,6 @@ async function compileTypedToolForPersistence(
         .slice(0, 10),
     });
   }
-  if (!projection.projectable) {
-    emit(MCP_TELEMETRY_EVENTS.definitionNotProjectable, {
-      serverId: server.id,
-      method: input.method,
-      issueCodes: projection.issues.map((issue) => issue.code).slice(0, 10),
-    });
-  }
-  const fallbackPathTemplate = projection.projectable
-    ? (projection.projection?.pathTemplate ?? "")
-    : renderDefinitionToLegacy(input.definition, input.method, serverValueNames)
-        .pathTemplate;
 
   return {
     requestDefinition: input.definition as unknown as Record<string, unknown>,
@@ -2156,16 +1753,6 @@ async function compileTypedToolForPersistence(
     enabled: ok && input.enabled,
     ok,
     contract: contractResult?.contract ?? null,
-    compatibility: {
-      pathTemplate: fallbackPathTemplate,
-      requestTemplate: projection.projectable
-        ? (projection.projection?.requestTemplate ?? null)
-        : null,
-      params: projection.projectable
-        ? (projection.projection?.params ?? null)
-        : null,
-      projectable: projection.projectable,
-    },
   };
 }
 
@@ -2228,9 +1815,6 @@ export async function createTool(
             title: input.title?.trim() || null,
             description: input.description?.trim() || null,
             method,
-            pathTemplate: compiled.compatibility.pathTemplate,
-            requestTemplate: compiled.compatibility.requestTemplate,
-            params: compiled.compatibility.params,
             requestDefinition: compiled.requestDefinition,
             compiledPlan: compiled.compiledPlan,
             compileStatus: compiled.compileStatus,
@@ -2244,9 +1828,7 @@ export async function createTool(
         await promoteServerIfReady(ctx.tx, server.id, server.status);
         return {
           ...created,
-          warnings: [],
           compileIssues: compiled.compileIssues,
-          compatibilityProjectable: compiled.compatibility.projectable,
         };
       } catch (error) {
         rethrowToolNameConflict(error);
@@ -2295,21 +1877,17 @@ export async function previewToolCompile(
     contract: compiled.contract
       ? toSerializableContract(compiled.contract)
       : null,
-    compatibilityProjectable: compiled.compatibility.projectable,
   };
 }
 
-/**
- * Loads a tool for editing. Typed tools return their canonical definition;
- * legacy-only tools return the backend conversion draft or blocking issues.
- */
+/** Loads a tool for editing from its canonical typed definition. */
 export async function getToolEditorState(
   db: DB,
   userId: string,
   serverId: string,
   toolId: string,
 ) {
-  const server = await requireOwnedServer(db, userId, serverId);
+  await requireOwnedServer(db, userId, serverId);
   const [tool] = await db
     .select()
     .from(mcpTool)
@@ -2325,48 +1903,21 @@ export async function getToolEditorState(
 
   const issueRows = (tool.compileIssues ??
     []) as CompiledToolPersistence["compileIssues"];
-  if (tool.requestDefinition) {
-    const parsed = mcpRequestDefinitionSchema.safeParse(tool.requestDefinition);
-    return {
-      toolId: tool.id,
-      typed: true,
-      definition: parsed.success ? parsed.data : null,
-      issues: issueRows,
-      conversionDraft: null,
-      conversionIssues: [],
-    };
-  }
-
-  const serverValues = await loadCompileServerValueRefs(db, server.id);
-  const analysis = analyzeLegacyTool({
-    method: tool.method,
-    pathTemplate: tool.pathTemplate,
-    requestTemplate: tool.requestTemplate,
-    params: tool.params,
-    serverValues,
-  });
-  captureMcpTelemetry(MCP_TELEMETRY_EVENTS.legacyConversion, {
-    db,
-    userId,
-    properties: {
-      serverId: server.id,
-      toolId: tool.id,
-      unambiguous: analysis.unambiguous,
-      issueCount: analysis.issues.length,
-    },
-  });
+  const parsed = tool.requestDefinition
+    ? mcpRequestDefinitionSchema.safeParse(tool.requestDefinition)
+    : null;
   return {
     toolId: tool.id,
-    typed: false,
-    definition: null,
-    issues: issueRows,
-    conversionDraft: analysis.definition,
-    conversionIssues: analysis.issues,
+    typed: parsed?.success === true,
+    definition: parsed?.success ? parsed.data : null,
+    method: tool.method,
+    name: tool.name,
+    title: tool.title,
+    description: tool.description,
+    enabled: tool.enabled,
+    allowMutation: tool.allowMutation,
+    compileIssues: issueRows,
   };
-}
-
-function isTypedToolRow(tool: { requestDefinition: unknown }): boolean {
-  return Boolean(tool.requestDefinition);
 }
 
 /** Canonical typed update; preserves definition-local ids from the payload. */
@@ -2417,9 +1968,8 @@ export async function updateTool(
         definition = parsed.data;
       } else {
         throw appError({
-          appCode: APP_ERROR_CODES.MCP_LEGACY_DOWNGRADE_REJECTED,
-          message:
-            "A typed definition is required to update this tool; submit a converted definition first.",
+          appCode: APP_ERROR_CODES.MCP_COMPILE_INVALID,
+          message: "This tool has no typed request definition.",
           status: 409,
         });
       }
@@ -2464,9 +2014,6 @@ export async function updateTool(
             title: nextTitle,
             description: nextDescription,
             method,
-            pathTemplate: compiled.compatibility.pathTemplate,
-            requestTemplate: compiled.compatibility.requestTemplate,
-            params: compiled.compatibility.params,
             requestDefinition: compiled.requestDefinition,
             compiledPlan: compiled.compiledPlan,
             compileStatus: compiled.compileStatus,
@@ -2480,9 +2027,7 @@ export async function updateTool(
         await promoteServerIfReady(ctx.tx, server.id, server.status);
         return {
           ...updated,
-          warnings: [],
           compileIssues: compiled.compileIssues,
-          compatibilityProjectable: compiled.compatibility.projectable,
         };
       } catch (error) {
         rethrowToolNameConflict(error);
@@ -2519,21 +2064,13 @@ export async function duplicateTool(
         });
       }
       await assertToolCapacity(ctx.tx, server.id);
-      if (!isTypedToolRow(existing) || !existing.requestDefinition) {
-        throw appError({
-          appCode: APP_ERROR_CODES.MCP_LEGACY_DOWNGRADE_REJECTED,
-          message:
-            "This tool has no typed definition; convert it before duplicating.",
-          status: 409,
-        });
-      }
-      const parsed = mcpRequestDefinitionSchema.safeParse(
-        existing.requestDefinition,
-      );
-      if (!parsed.success) {
+      const parsed = existing.requestDefinition
+        ? mcpRequestDefinitionSchema.safeParse(existing.requestDefinition)
+        : null;
+      if (!parsed?.success) {
         throw appError({
           appCode: APP_ERROR_CODES.MCP_COMPILE_INVALID,
-          message: "The stored request definition is invalid.",
+          message: "This tool has no valid typed request definition.",
           status: 409,
         });
       }
@@ -2582,9 +2119,6 @@ export async function duplicateTool(
             title: nextTitle,
             description: nextDescription,
             method,
-            pathTemplate: compiled.compatibility.pathTemplate,
-            requestTemplate: compiled.compatibility.requestTemplate,
-            params: compiled.compatibility.params,
             requestDefinition: compiled.requestDefinition,
             compiledPlan: compiled.compiledPlan,
             compileStatus: compiled.compileStatus,
@@ -2598,97 +2132,8 @@ export async function duplicateTool(
         await promoteServerIfReady(ctx.tx, server.id, server.status);
         return {
           ...created,
-          warnings: [],
           compileIssues: compiled.compileIssues,
-          compatibilityProjectable: compiled.compatibility.projectable,
         };
-      } catch (error) {
-        rethrowToolNameConflict(error);
-      }
-    },
-    { draftMutation: true },
-  );
-  return { ...result, revision };
-}
-
-export async function createLegacyTool(
-  db: DB,
-  userId: string,
-  serverId: string,
-  input: CreateLegacyToolInput,
-  source: McpToolSource = "manual",
-) {
-  const { result, revision } = await withOwnedServerWrite(
-    db,
-    { userId, serverId, expectedRevision: input.expectedRevision },
-    async (ctx) => {
-      const server = ctx.server;
-      await assertToolCapacity(ctx.tx, server.id);
-      const name = toMcpToolName(input.name);
-      const method = input.method.toUpperCase() as McpHttpMethod;
-      if (![...READ_METHODS, ...MUTATING_METHODS].includes(method)) {
-        throw appError({
-          appCode: APP_ERROR_CODES.INVALID_INPUT,
-          message: "Unsupported HTTP method.",
-          status: 400,
-        });
-      }
-      const flags = mutationDefaults(
-        method,
-        input.allowMutation,
-        input.enabled,
-      );
-      const pathTemplate = input.pathTemplate.startsWith("/")
-        ? input.pathTemplate
-        : `/${input.pathTemplate}`;
-      const requestTemplate = input.requestTemplate ?? {};
-      const params = input.params ?? [];
-      validateToolTemplates({ pathTemplate, requestTemplate });
-      const warnings = collectTemplateWarnings({
-        pathTemplate,
-        requestTemplate,
-        params,
-        variableNames: await listVariableNames(ctx.tx, server.id),
-      });
-      const compiled = await compileLegacyToolForPersistence(ctx.tx, server, {
-        method,
-        pathTemplate,
-        requestTemplate,
-        params,
-        allowMutation: flags.allowMutation,
-        enabled: flags.enabled,
-      });
-
-      try {
-        const [created] = await ctx.tx
-          .insert(mcpTool)
-          .values({
-            serverId: server.id,
-            name,
-            description: input.description?.trim() || null,
-            method,
-            pathTemplate,
-            requestTemplate,
-            params,
-            requestDefinition: compiled.requestDefinition,
-            compiledPlan: compiled.compiledPlan,
-            compileStatus: compiled.compileStatus,
-            compileIssues: compiled.compileIssues,
-            annotations: compiled.annotations,
-            allowMutation: flags.allowMutation,
-            enabled: compiled.enabled,
-            source,
-          })
-          .returning();
-        await promoteServerIfReady(ctx.tx, server.id, server.status);
-        ctx.onCommit(() => {
-          captureMcpTelemetry(MCP_TELEMETRY_EVENTS.legacyCompatWrite, {
-            db,
-            userId,
-            properties: { serverId: server.id, operation: "create" },
-          });
-        });
-        return { ...created, warnings, compileIssues: compiled.compileIssues };
       } catch (error) {
         rethrowToolNameConflict(error);
       }
@@ -2709,53 +2154,9 @@ async function loadCompileServerValueRefs(
   return rows.map((row) => ({
     id: row.id,
     name: row.name,
-    kind:
-      (row.kind as "config" | "secret" | null) ??
-      (row.isSecret ? "secret" : "config"),
-    owner: (row.owner as "manual" | "auth" | null) ?? "manual",
+    kind: row.kind as "config" | "secret",
+    owner: row.owner as "manual" | "auth",
   }));
-}
-
-/**
- * Legacy defaults may still carry auth-owned keys that are now injected
- * through `authConfiguration`; exclude them so the inferred common entries
- * match what the write validators accept.
- */
-function excludeAuthOwnedCommonEntries(
-  server: McpServer,
-  common: McpCommonEntries,
-): McpCommonEntries {
-  if (!server.authConfiguration) return common;
-  const protectedKeys = protectedAuthKeys(server);
-  return {
-    headers: common.headers.filter(
-      (entry) => !protectedKeys.headers.has(entry.name.toLowerCase()),
-    ),
-    query: common.query.filter((entry) => !protectedKeys.query.has(entry.name)),
-  };
-}
-
-/**
- * Prefer explicit commonEntries; otherwise compile unambiguous legacy
- * defaultHeaders/defaultQuery so unmigrated servers keep server-wide defaults
- * in the cached compiled plan.
- */
-function resolveCommonEntriesForCompile(
-  server: McpServer,
-  serverValues: CompileServerValueRef[],
-): McpCommonEntries {
-  if (server.commonEntries) {
-    return server.commonEntries as McpCommonEntries;
-  }
-  const analysis = analyzeLegacyCommonEntries({
-    defaultHeaders: server.defaultHeaders,
-    defaultQuery: server.defaultQuery,
-    serverValues,
-  });
-  if (analysis.unambiguous && analysis.commonEntries) {
-    return excludeAuthOwnedCommonEntries(server, analysis.commonEntries);
-  }
-  return { headers: [], query: [] };
 }
 
 /**
@@ -2769,10 +2170,8 @@ async function recompileEnabledToolsForServer(
   server: McpServer,
 ): Promise<void> {
   const serverValues = await loadCompileServerValueRefs(db, server.id);
-  const common = resolveCommonEntriesForCompile(server, serverValues);
-  const auth =
-    (server.authConfiguration as unknown as McpAuthConfiguration | null) ??
-    null;
+  const common = parseCommonEntries(server);
+  const auth = parseAuthConfiguration(server.authConfiguration);
   const basePath = (() => {
     try {
       return new URL(server.baseUrl).pathname || "/";
@@ -2919,14 +2318,10 @@ export async function confirmCurlImport(
       await assertToolCapacity(ctx.tx, server.id);
       const name = toMcpToolName(input.name ?? draft.suggestedName);
       const basePath = new URL(server.baseUrl).pathname;
-      const commonEntries: McpCommonEntries =
-        (server.commonEntries as McpCommonEntries | null) ?? {
-          headers: [],
-          query: [],
-        };
-      const authConfiguration =
-        (server.authConfiguration as unknown as McpAuthConfiguration | null) ??
-        null;
+      const commonEntries = parseCommonEntries(server);
+      const authConfiguration = parseAuthConfiguration(
+        server.authConfiguration,
+      );
 
       const compileResult = compileToolDefinition({
         method: draft.method,
@@ -2938,24 +2333,6 @@ export async function confirmCurlImport(
         allowMutation: false,
       });
 
-      const serverValueNamesById = Object.fromEntries(
-        serverValues.map((value) => [value.id, value.name]),
-      );
-      const projection = projectDefinitionToLegacy(
-        draft.requestDefinition,
-        draft.method,
-        serverValueNamesById,
-      );
-      const compileIssues = [
-        ...compileResult.issues,
-        ...(projection.projectable ? [] : projection.issues),
-      ];
-      const fallbackLegacy = renderDefinitionToLegacy(
-        draft.requestDefinition,
-        draft.method,
-        serverValueNamesById,
-      );
-
       try {
         const [row] = await ctx.tx
           .insert(mcpTool)
@@ -2964,11 +2341,6 @@ export async function confirmCurlImport(
             name,
             description: input.description?.trim() || null,
             method: draft.method,
-            pathTemplate:
-              projection.projection?.pathTemplate ??
-              fallbackLegacy.pathTemplate,
-            requestTemplate: projection.projection?.requestTemplate ?? null,
-            params: projection.projection?.params ?? null,
             requestDefinition: draft.requestDefinition as unknown as Record<
               string,
               unknown
@@ -2977,7 +2349,7 @@ export async function confirmCurlImport(
               ? (compileResult.plan as unknown as Record<string, unknown>)
               : null,
             compileStatus: compileResult.ok ? "valid" : "invalid",
-            compileIssues,
+            compileIssues: compileResult.issues,
             annotations: compileResult.ok
               ? (compileResult.plan?.annotations ?? null)
               : null,
@@ -3001,78 +2373,6 @@ export async function confirmCurlImport(
   return { ...result, revision };
 }
 
-/** Backward-compatible name for {@link confirmCurlImport}. */
-export const createToolFromCurl = confirmCurlImport;
-
-export type PreviewLegacyToolCompileInput = {
-  method: McpHttpMethod;
-  pathTemplate: string;
-  requestTemplate?: McpRequestTemplate;
-  params?: McpToolParam[];
-  allowMutation?: boolean;
-};
-
-/**
- * Explicit legacy compatibility preview retained during the migration window.
- * Analyzes the legacy `{{name}}` shape, then runs the publish-time compiler
- * against the server's current values, common entries, and auth configuration.
- * Never persists anything.
- */
-export async function previewLegacyToolCompile(
-  db: DB,
-  userId: string,
-  serverId: string,
-  input: PreviewLegacyToolCompileInput,
-) {
-  const server = await requireOwnedServer(db, userId, serverId);
-  captureMcpTelemetry(MCP_TELEMETRY_EVENTS.legacyCompatWrite, {
-    db,
-    userId,
-    properties: { serverId: server.id, operation: "preview" },
-  });
-  const serverValues = await loadCompileServerValueRefs(db, server.id);
-  const method = input.method.toUpperCase() as McpHttpMethod;
-  const pathTemplate = input.pathTemplate.startsWith("/")
-    ? input.pathTemplate
-    : `/${input.pathTemplate}`;
-  const requestTemplate = input.requestTemplate ?? {};
-  const params = input.params ?? [];
-
-  const analysis = analyzeLegacyTool({
-    method,
-    pathTemplate,
-    requestTemplate,
-    params,
-    serverValues,
-  });
-
-  if (!analysis.unambiguous || !analysis.definition) {
-    return { ok: false, issues: analysis.issues, plan: null };
-  }
-
-  const commonEntries = resolveCommonEntriesForCompile(server, serverValues);
-  const authConfiguration =
-    (server.authConfiguration as unknown as McpAuthConfiguration | null) ??
-    null;
-  const basePath = new URL(server.baseUrl).pathname;
-
-  const compileResult = compileToolDefinition({
-    method,
-    definition: analysis.definition,
-    common: commonEntries,
-    auth: authConfiguration,
-    serverValues,
-    basePath,
-    allowMutation: input.allowMutation ?? false,
-  });
-
-  return {
-    ok: compileResult.ok,
-    issues: [...analysis.issues, ...compileResult.issues],
-    plan: compileResult.plan as Record<string, unknown> | null,
-  };
-}
-
 const TEST_CONNECTION_TIMEOUT_MS = 5_000;
 
 export type TestConnectionResult = {
@@ -3082,9 +2382,35 @@ export type TestConnectionResult = {
   appCode?: string;
 };
 
+function renderCommonBinding(
+  binding: McpValueBinding,
+  serverValues: Map<string, { name: string; value: string; kind: string }>,
+): string {
+  if (binding.kind === "literal") {
+    return binding.value === null ? "" : String(binding.value);
+  }
+  if (binding.kind === "serverValue") {
+    const resolved = serverValues.get(binding.serverValueId);
+    if (!resolved) {
+      throw appError({
+        appCode: APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED,
+        message: "A referenced server value is no longer configured.",
+        status: 409,
+      });
+    }
+    return `${binding.prefix ?? ""}${resolved.value}${binding.suffix ?? ""}`;
+  }
+  throw appError({
+    appCode: APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED,
+    message: "Agent inputs are not valid in server common entries.",
+    status: 400,
+  });
+}
+
 /**
  * Connectivity probe: GET the baseUrl through the same SSRF guard and
- * allowlist as execution, with server defaults rendered. Any HTTP response
+ * allowlist as execution, rendering canonical common entries and the explicit
+ * auth configuration with secrets resolved at execution. Any HTTP response
  * (including 401) proves reachability. Never writes a call-log row.
  */
 export async function testConnection(
@@ -3111,28 +2437,40 @@ export async function testConnection(
       server.baseUrl,
       server.allowedHosts,
     );
-    const scope: RenderScope = {
-      args: {},
-      variables: await loadVariables(db, server.id, credentialSecret),
-      secretsUsed: new Set<string>(),
-    };
-
-    const queryParts: string[] = [];
-    for (const [key, valueTemplate] of Object.entries(
-      server.defaultQuery ?? {},
-    )) {
-      const rendered = renderTemplate(valueTemplate, "query", scope);
-      queryParts.push(`${encodeURIComponent(key)}=${rendered}`);
-    }
-    if (queryParts.length > 0) {
-      url.search = queryParts.join("&");
-    }
+    const serverValues = await loadServerValues(
+      db,
+      server.id,
+      credentialSecret,
+    );
+    const common = parseCommonEntries(server);
+    const auth = parseAuthConfiguration(server.authConfiguration);
 
     const headers = new Headers();
-    for (const [name, valueTemplate] of Object.entries(
-      server.defaultHeaders ?? {},
-    )) {
-      headers.set(name, renderTemplate(valueTemplate, "header", scope));
+    for (const entry of common.headers) {
+      headers.set(entry.name, renderCommonBinding(entry.value, serverValues));
+    }
+    const search = new URLSearchParams();
+    for (const entry of common.query) {
+      search.set(entry.name, renderCommonBinding(entry.value, serverValues));
+    }
+    for (const binding of auth?.bindings ?? []) {
+      const rendered = renderCommonBinding(
+        {
+          kind: "serverValue",
+          serverValueId: binding.serverValueId,
+          ...(binding.prefix !== undefined ? { prefix: binding.prefix } : {}),
+          ...(binding.suffix !== undefined ? { suffix: binding.suffix } : {}),
+        },
+        serverValues,
+      );
+      if (binding.location === "header") {
+        headers.set(binding.key, rendered);
+      } else {
+        search.set(binding.key, rendered);
+      }
+    }
+    if ([...search.keys()].length > 0) {
+      url.search = search.toString();
     }
 
     const controller = new AbortController();
@@ -3160,114 +2498,6 @@ export async function testConnection(
     }
     throw error;
   }
-}
-
-export async function updateLegacyTool(
-  db: DB,
-  userId: string,
-  serverId: string,
-  toolId: string,
-  input: UpdateLegacyToolInput,
-) {
-  const { result, revision } = await withOwnedServerWrite(
-    db,
-    { userId, serverId, expectedRevision: input.expectedRevision },
-    async (ctx) => {
-      const server = ctx.server;
-      const [existing] = await ctx.tx
-        .select()
-        .from(mcpTool)
-        .where(and(eq(mcpTool.id, toolId), eq(mcpTool.serverId, serverId)))
-        .limit(1);
-      if (!existing) {
-        throw appError({
-          appCode: APP_ERROR_CODES.MCP_TOOL_NOT_FOUND,
-          message: "MCP tool not found.",
-          status: 404,
-        });
-      }
-
-      // A typed record is authoritative: legacy-only writers cannot downgrade it.
-      if (existing.requestDefinition) {
-        throw appError({
-          appCode: APP_ERROR_CODES.MCP_LEGACY_DOWNGRADE_REJECTED,
-          message:
-            "This tool already has a typed request definition; legacy template updates are rejected.",
-          status: 409,
-        });
-      }
-
-      const method = (
-        input.method ?? existing.method
-      ).toUpperCase() as McpHttpMethod;
-      const flags = mutationDefaults(
-        method,
-        input.allowMutation ?? existing.allowMutation,
-        input.enabled ?? existing.enabled,
-      );
-      const pathTemplate = input.pathTemplate ?? existing.pathTemplate;
-      const requestTemplate =
-        input.requestTemplate ?? existing.requestTemplate ?? {};
-      const params = input.params ?? existing.params ?? [];
-      validateToolTemplates({ pathTemplate, requestTemplate });
-      const warnings = collectTemplateWarnings({
-        pathTemplate,
-        requestTemplate,
-        params,
-        variableNames: await listVariableNames(ctx.tx, serverId),
-      });
-      const compiled = await compileLegacyToolForPersistence(ctx.tx, server, {
-        method,
-        pathTemplate,
-        requestTemplate,
-        params,
-        allowMutation: flags.allowMutation,
-        enabled: flags.enabled,
-      });
-
-      try {
-        const [updated] = await ctx.tx
-          .update(mcpTool)
-          .set({
-            name: input.name ? toMcpToolName(input.name) : existing.name,
-            description:
-              input.description === undefined
-                ? existing.description
-                : input.description?.trim() || null,
-            method,
-            pathTemplate,
-            requestTemplate,
-            params,
-            requestDefinition: compiled.requestDefinition,
-            compiledPlan: compiled.compiledPlan,
-            compileStatus: compiled.compileStatus,
-            compileIssues: compiled.compileIssues,
-            annotations: compiled.annotations,
-            allowMutation: flags.allowMutation,
-            enabled: compiled.enabled,
-          })
-          .where(eq(mcpTool.id, existing.id))
-          .returning();
-        await promoteServerIfReady(ctx.tx, server.id, server.status);
-        ctx.onCommit(() => {
-          captureMcpTelemetry(MCP_TELEMETRY_EVENTS.legacyCompatWrite, {
-            db,
-            userId,
-            properties: {
-              serverId: server.id,
-              operation: "update",
-              toolId: existing.id,
-            },
-          });
-        });
-        return { ...updated, warnings, compileIssues: compiled.compileIssues };
-      } catch (error) {
-        rethrowToolNameConflict(error);
-      }
-    },
-    { draftMutation: true },
-  );
-  return { ...result, revision };
 }
 
 /** Historical call logs survive the tool with a null `toolId` (FK set null). */
@@ -3301,37 +2531,8 @@ export async function deleteTool(
   return { ...result, revision };
 }
 
-export async function listVariables(db: DB, userId: string, serverId: string) {
-  await requireOwnedServer(db, userId, serverId);
-  const rows = await db
-    .select()
-    .from(mcpServerVariable)
-    .where(eq(mcpServerVariable.serverId, serverId))
-    .orderBy(desc(mcpServerVariable.createdAt));
-  return rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    isSecret: row.isSecret,
-    /** "config" | "secret" — falls back to the legacy `isSecret` flag. */
-    kind:
-      (row.kind as "config" | "secret" | null) ??
-      (row.isSecret ? "secret" : "config"),
-    /** "manual" | "auth" — auth-owned values are protected in Studio editors. */
-    owner: (row.owner as "manual" | "auth" | null) ?? "manual",
-    description: row.description ?? null,
-    hasValue: row.isSecret ? Boolean(row.ciphertext) : row.value !== null,
-    ...(row.isSecret ? {} : { value: row.value }),
-  }));
-}
-
-export async function createVariable(
-  db: DB,
-  userId: string,
-  serverId: string,
-  input: SetVariableInput,
-  credentialSecret: string,
-) {
-  const name = input.name.trim();
+function validateVariableName(raw: string): string {
+  const name = raw.trim();
   if (!VARIABLE_NAME_PATTERN.test(name)) {
     throw appError({
       appCode: APP_ERROR_CODES.INVALID_INPUT,
@@ -3340,7 +2541,43 @@ export async function createVariable(
       status: 400,
     });
   }
+  return name;
+}
 
+function toVariableView(
+  row: McpServerVariable,
+  options: { includeValue?: boolean } = {},
+) {
+  const kind = row.kind as "config" | "secret";
+  return {
+    id: row.id,
+    name: row.name,
+    kind,
+    owner: row.owner as "manual" | "auth",
+    description: row.description ?? null,
+    hasValue: kind === "secret" ? Boolean(row.ciphertext) : row.value !== null,
+    ...(options.includeValue && kind === "config" ? { value: row.value } : {}),
+  };
+}
+
+export async function listVariables(db: DB, userId: string, serverId: string) {
+  await requireOwnedServer(db, userId, serverId);
+  const rows = await db
+    .select()
+    .from(mcpServerVariable)
+    .where(eq(mcpServerVariable.serverId, serverId))
+    .orderBy(desc(mcpServerVariable.createdAt));
+  return rows.map((row) => toVariableView(row, { includeValue: true }));
+}
+
+export async function createVariable(
+  db: DB,
+  userId: string,
+  serverId: string,
+  input: CreateVariableInput,
+  credentialSecret: string,
+) {
+  const name = validateVariableName(input.name);
   const { result, revision } = await withOwnedServerWrite(
     db,
     { userId, serverId, expectedRevision: input.expectedRevision },
@@ -3351,22 +2588,17 @@ export async function createVariable(
           .values({
             serverId,
             name,
-            isSecret: input.isSecret,
-            kind: input.isSecret ? "secret" : "config",
+            kind: input.kind,
             owner: "manual",
-            value: input.isSecret ? null : input.value,
-            ciphertext: input.isSecret
-              ? encryptCredential(input.value, credentialSecret)
-              : null,
+            description: input.description?.trim() || null,
+            value: input.kind === "config" ? input.value : null,
+            ciphertext:
+              input.kind === "secret"
+                ? encryptCredential(input.value, credentialSecret)
+                : null,
           })
           .returning();
-        return {
-          id: created.id,
-          name: created.name,
-          isSecret: created.isSecret,
-          hasValue: true,
-          ...(created.isSecret ? {} : { value: created.value }),
-        };
+        return toVariableView(created, { includeValue: true });
       } catch (error) {
         if (isUniqueViolation(error)) {
           throw appError({
@@ -3384,16 +2616,103 @@ export async function createVariable(
 }
 
 /**
- * Write-only value rotation; the stored value is never read back. Passing
- * `isSecret` also transitions the storage mode. A secret row requires a new
- * value. Flipping plaintext to secret may reuse the visible stored value.
+ * Applies a canonical value write to an existing row. `owner` is always
+ * preserved. Secret -> config requires a new value; config -> secret may reuse
+ * the current readable value.
  */
+async function mutateVariableRecord(
+  db: DB,
+  server: McpServer,
+  existing: McpServerVariable,
+  input: {
+    kind?: "config" | "secret";
+    value?: string;
+    description?: string | null;
+  },
+  credentialSecret: string,
+): Promise<{ updated: McpServerVariable; isPureSecretRotation: boolean }> {
+  const existingKind = existing.kind as "config" | "secret";
+  const nextKind = input.kind ?? existingKind;
+  const hasValue = input.value !== undefined;
+
+  if (existingKind === "secret" && nextKind === "config" && !hasValue) {
+    throw appError({
+      appCode: APP_ERROR_CODES.INVALID_INPUT,
+      message:
+        "A new value is required to convert a secret into a plaintext config value.",
+      status: 400,
+    });
+  }
+  if (
+    existingKind !== "secret" &&
+    nextKind === "secret" &&
+    !hasValue &&
+    existing.value === null
+  ) {
+    throw appError({
+      appCode: APP_ERROR_CODES.INVALID_INPUT,
+      message: "A value is required to store this variable as a secret.",
+      status: 400,
+    });
+  }
+
+  const isPureSecretRotation =
+    existingKind === "secret" && nextKind === "secret" && hasValue;
+
+  if (existingKind === "secret" && nextKind === "config") {
+    await assertActiveRevisionDoesNotReferenceSecret(
+      db,
+      server,
+      existing.id,
+      "converted",
+    );
+  }
+
+  let value: string | null = null;
+  let ciphertext: string | null = null;
+  if (nextKind === "secret") {
+    if (hasValue) {
+      ciphertext = encryptCredential(input.value!, credentialSecret);
+    } else if (existingKind === "secret") {
+      ciphertext = existing.ciphertext;
+    } else {
+      ciphertext = encryptCredential(existing.value ?? "", credentialSecret);
+    }
+  } else {
+    value = hasValue ? input.value! : existing.value;
+  }
+
+  const [updated] = await db
+    .update(mcpServerVariable)
+    .set({
+      kind: nextKind,
+      owner: existing.owner,
+      description:
+        input.description === undefined
+          ? existing.description
+          : input.description?.trim() || null,
+      value,
+      ciphertext,
+    })
+    .where(eq(mcpServerVariable.id, existing.id))
+    .returning();
+
+  // Value-only rotation keeps structural plans; a kind transition can change
+  // secret-required placements, so recompile the enabled closure.
+  if (nextKind !== existingKind) {
+    await recompileEnabledToolsForServer(db, server);
+  }
+
+  return { updated, isPureSecretRotation };
+}
+
+/** Write-only value rotation keyed by stable value id. */
 export async function updateVariable(
   db: DB,
   userId: string,
   serverId: string,
-  name: string,
-  input: { expectedRevision: number; value?: string; isSecret?: boolean },
+  valueId: string,
+  input: UpdateVariableInput,
   credentialSecret: string,
 ) {
   let isPureSecretRotation = false;
@@ -3407,7 +2726,7 @@ export async function updateVariable(
         .where(
           and(
             eq(mcpServerVariable.serverId, serverId),
-            eq(mcpServerVariable.name, name),
+            eq(mcpServerVariable.id, valueId),
           ),
         )
         .limit(1);
@@ -3419,60 +2738,21 @@ export async function updateVariable(
         });
       }
 
-      const nextIsSecret = input.isSecret ?? existing.isSecret;
-      const hasValue = input.value !== undefined;
-      if ((existing.isSecret || !nextIsSecret) && !hasValue) {
-        throw appError({
-          appCode: APP_ERROR_CODES.INVALID_INPUT,
-          message:
-            "A new value is required to rotate a secret or to store a variable as plaintext.",
-          status: 400,
-        });
-      }
-
-      isPureSecretRotation =
-        existing.isSecret === true &&
-        (input.isSecret === undefined || input.isSecret === true) &&
-        hasValue;
-
-      if (existing.isSecret === true && nextIsSecret === false) {
-        await assertActiveRevisionDoesNotReferenceSecret(
-          ctx.tx,
-          ctx.server,
-          existing.id,
-          "converted",
-        );
-      }
-
-      const nextValue = (hasValue ? input.value : existing.value) ?? "";
-      await ctx.tx
-        .update(mcpServerVariable)
-        .set(
-          nextIsSecret
-            ? {
-                isSecret: true,
-                kind: "secret",
-                owner: existing.owner ?? "manual",
-                value: null,
-                ciphertext: encryptCredential(nextValue, credentialSecret),
-              }
-            : {
-                isSecret: false,
-                kind: "config",
-                owner: existing.owner ?? "manual",
-                value: nextValue,
-                ciphertext: null,
-              },
-        )
-        .where(eq(mcpServerVariable.id, existing.id));
-
-      // Value-only rotation keeps structural plans; a kind transition can
-      // change secret-required placements, so recompile the enabled closure.
-      if (nextIsSecret !== existing.isSecret) {
-        await recompileEnabledToolsForServer(ctx.tx, ctx.server);
-      }
-
-      return { name: existing.name, isSecret: nextIsSecret, hasValue: true };
+      const mutated = await mutateVariableRecord(
+        ctx.tx,
+        ctx.server,
+        existing,
+        {
+          ...(input.kind !== undefined ? { kind: input.kind } : {}),
+          ...(input.value !== undefined ? { value: input.value } : {}),
+          ...(input.description !== undefined
+            ? { description: input.description }
+            : {}),
+        },
+        credentialSecret,
+      );
+      isPureSecretRotation = mutated.isPureSecretRotation;
+      return toVariableView(mutated.updated, { includeValue: true });
     },
     {
       get draftMutation() {
@@ -3483,7 +2763,7 @@ export async function updateVariable(
   return { ...result, revision };
 }
 
-/** Creates the variable or rotates its value when the name already exists. */
+/** Creates the variable or updates it when the name already exists. */
 export async function setVariable(
   db: DB,
   userId: string,
@@ -3491,16 +2771,7 @@ export async function setVariable(
   input: SetVariableInput,
   credentialSecret: string,
 ) {
-  const name = input.name.trim();
-  if (!VARIABLE_NAME_PATTERN.test(name)) {
-    throw appError({
-      appCode: APP_ERROR_CODES.INVALID_INPUT,
-      message:
-        "Variable name must start with a letter and use lowercase letters, numbers, or underscores.",
-      status: 400,
-    });
-  }
-
+  const name = validateVariableName(input.name);
   let isPureSecretRotation = false;
   const { result, revision } = await withOwnedServerWrite(
     db,
@@ -3518,42 +2789,21 @@ export async function setVariable(
         .limit(1);
 
       if (existing) {
-        const nextIsSecret = input.isSecret;
-        const nextValue = input.value;
-        isPureSecretRotation =
-          existing.isSecret === true && input.isSecret === true;
-        if (existing.isSecret === true && nextIsSecret === false) {
-          await assertActiveRevisionDoesNotReferenceSecret(
-            ctx.tx,
-            ctx.server,
-            existing.id,
-            "converted",
-          );
-        }
-        await ctx.tx
-          .update(mcpServerVariable)
-          .set(
-            nextIsSecret
-              ? {
-                  isSecret: true,
-                  kind: "secret",
-                  owner: existing.owner ?? "manual",
-                  value: null,
-                  ciphertext: encryptCredential(nextValue, credentialSecret),
-                }
-              : {
-                  isSecret: false,
-                  kind: "config",
-                  owner: existing.owner ?? "manual",
-                  value: nextValue,
-                  ciphertext: null,
-                },
-          )
-          .where(eq(mcpServerVariable.id, existing.id));
-        if (nextIsSecret !== existing.isSecret) {
-          await recompileEnabledToolsForServer(ctx.tx, ctx.server);
-        }
-        return { name: existing.name, isSecret: nextIsSecret, hasValue: true };
+        const mutated = await mutateVariableRecord(
+          ctx.tx,
+          ctx.server,
+          existing,
+          {
+            kind: input.kind,
+            value: input.value,
+            ...(input.description !== undefined
+              ? { description: input.description }
+              : {}),
+          },
+          credentialSecret,
+        );
+        isPureSecretRotation = mutated.isPureSecretRotation;
+        return toVariableView(mutated.updated, { includeValue: true });
       }
 
       try {
@@ -3562,22 +2812,17 @@ export async function setVariable(
           .values({
             serverId,
             name,
-            isSecret: input.isSecret,
-            kind: input.isSecret ? "secret" : "config",
+            kind: input.kind,
             owner: "manual",
-            value: input.isSecret ? null : input.value,
-            ciphertext: input.isSecret
-              ? encryptCredential(input.value, credentialSecret)
-              : null,
+            description: input.description?.trim() || null,
+            value: input.kind === "config" ? input.value : null,
+            ciphertext:
+              input.kind === "secret"
+                ? encryptCredential(input.value, credentialSecret)
+                : null,
           })
           .returning();
-        return {
-          id: created.id,
-          name: created.name,
-          isSecret: created.isSecret,
-          hasValue: true,
-          ...(created.isSecret ? {} : { value: created.value }),
-        };
+        return toVariableView(created, { includeValue: true });
       } catch (error) {
         if (isUniqueViolation(error)) {
           throw appError({
@@ -3602,7 +2847,7 @@ export async function deleteVariable(
   db: DB,
   userId: string,
   serverId: string,
-  name: string,
+  valueId: string,
   expectedRevision: number,
 ) {
   const { result, revision } = await withOwnedServerWrite(
@@ -3615,7 +2860,7 @@ export async function deleteVariable(
         .where(
           and(
             eq(mcpServerVariable.serverId, serverId),
-            eq(mcpServerVariable.name, name),
+            eq(mcpServerVariable.id, valueId),
           ),
         )
         .limit(1);
@@ -3631,12 +2876,11 @@ export async function deleteVariable(
         ctx.tx,
         ctx.server,
         variable.id,
-        variable.name,
       );
       if (references.length > 0) {
         throw appError({
           appCode: APP_ERROR_CODES.MCP_VALUE_IN_USE,
-          message: `"${name}" is still referenced and cannot be deleted.`,
+          message: `"${variable.name}" is still referenced and cannot be deleted.`,
           status: 409,
           details: { references },
         });
@@ -3646,10 +2890,7 @@ export async function deleteVariable(
       // operational dependency: deleting it would break live execution even
       // when the draft no longer references it. Config values are snapshotted
       // into the revision, so they remain deletable.
-      const isSecret =
-        (variable.kind ?? (variable.isSecret ? "secret" : "config")) ===
-        "secret";
-      if (isSecret) {
+      if ((variable.kind as "config" | "secret") === "secret") {
         await assertActiveRevisionDoesNotReferenceSecret(
           ctx.tx,
           ctx.server,
@@ -3661,7 +2902,7 @@ export async function deleteVariable(
       await ctx.tx
         .delete(mcpServerVariable)
         .where(eq(mcpServerVariable.id, variable.id));
-      return { name, deleted: true as const };
+      return { id: variable.id, name: variable.name, deleted: true as const };
     },
     { draftMutation: true },
   );

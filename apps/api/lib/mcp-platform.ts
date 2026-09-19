@@ -79,9 +79,9 @@ import {
   restoreRevisionToDraft,
 } from "../services/mcp-publishing-service.js";
 import {
+  confirmCurlImport,
   createServer,
   createTool,
-  createToolFromCurl,
   deleteServer,
   deleteTool,
   deleteVariable,
@@ -189,20 +189,17 @@ const toolSummaryResource = z.object({
 /** Authoring-definition read result for `get_tool_definition`. */
 const toolDefinitionResource = z.object({
   toolId: z.string(),
-  typed: z.boolean(),
   definition: z.unknown().nullable(),
   issues: z.unknown(),
-  conversionDraft: z.unknown().nullable(),
-  conversionIssues: z.unknown(),
 });
 
 const variableResource = z.object({
   id: z.string(),
   name: z.string(),
-  isSecret: z.boolean(),
-  hasValue: z.boolean(),
-  kind: z.string().optional(),
+  kind: z.string(),
   owner: z.string().optional(),
+  description: z.string().nullable().optional(),
+  hasValue: z.boolean(),
 });
 
 const callLogResource = z.object({
@@ -322,7 +319,6 @@ const revisionConfigResource = z.object({
   name: z.string().optional(),
   kind: z.string(),
   owner: z.string().nullable().optional(),
-  isSecret: z.boolean(),
   hasValue: z.boolean(),
 });
 
@@ -656,7 +652,7 @@ async function assertVisibleServerValueReferences(input: {
     input.serverId,
   );
   const visibleIds = new Set(
-    variables.filter((variable) => !variable.isSecret).map((v) => v.id),
+    variables.filter((variable) => variable.kind !== "secret").map((v) => v.id),
   );
   if (refs.some((ref) => !visibleIds.has(ref.id))) {
     throw unknownServerValueDenied();
@@ -789,14 +785,14 @@ function duplicateToolForPlatform(
   return duplicateTool(db, principal.userId, serverId, toolId, input);
 }
 
-function createToolFromCurlForPlatform(
+function confirmCurlImportForPlatform(
   principal: PlatformPrincipal,
   db: PlatformDb,
   serverId: string,
-  input: Parameters<typeof createToolFromCurl>[3],
+  input: Parameters<typeof confirmCurlImport>[3],
 ) {
   assertPlatformResourceAllowed(principal, serverId);
-  return createToolFromCurl(db, principal.userId, serverId, input, {
+  return confirmCurlImport(db, principal.userId, serverId, input, {
     rejectCredentials: true,
   });
 }
@@ -881,11 +877,17 @@ function deleteVariableForPlatform(
   principal: PlatformPrincipal,
   db: PlatformDb,
   serverId: string,
-  name: string,
+  valueId: string,
   expectedRevision: number,
 ) {
   assertPlatformResourceAllowed(principal, serverId);
-  return deleteVariable(db, principal.userId, serverId, name, expectedRevision);
+  return deleteVariable(
+    db,
+    principal.userId,
+    serverId,
+    valueId,
+    expectedRevision,
+  );
 }
 
 function previewPublishForPlatform(
@@ -967,14 +969,12 @@ function projectRevisionConfig(config: {
   name: string;
   kind: string;
   owner: string | null;
-  isSecret: boolean;
   hasValue: boolean;
 }) {
-  if (config.isSecret) {
+  if (config.kind === "secret") {
     return {
       kind: config.kind,
       ...(config.owner ? { owner: config.owner } : {}),
-      isSecret: true,
       hasValue: config.hasValue,
     };
   }
@@ -983,7 +983,6 @@ function projectRevisionConfig(config: {
     name: config.name,
     kind: config.kind,
     owner: config.owner,
-    isSecret: false,
     hasValue: config.hasValue,
   };
 }
@@ -1101,7 +1100,7 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
         args.serverId,
         args.toolId,
       );
-      const editable = state.definition ?? state.conversionDraft ?? null;
+      const editable = state.definition ?? null;
       if (editable) {
         await assertVisibleServerValueReferences({
           principal: ctx.principal,
@@ -1112,15 +1111,10 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
       }
       return {
         toolId: state.toolId,
-        typed: state.typed,
         definition: state.definition
           ? redactSensitiveExamples(state.definition)
           : null,
-        issues: state.issues,
-        conversionDraft: state.conversionDraft
-          ? redactSensitiveExamples(state.conversionDraft)
-          : null,
-        conversionIssues: state.conversionIssues,
+        issues: state.compileIssues,
       };
     },
   }),
@@ -1142,15 +1136,16 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
       );
       return variables
         .filter(
-          (variable) => !variable.isSecret || ctx.hasScope("secret_reference"),
+          (variable) =>
+            variable.kind !== "secret" || ctx.hasScope("secret_reference"),
         )
-        .map(({ id, name, isSecret, hasValue, kind, owner }) => ({
+        .map(({ id, name, kind, owner, description, hasValue }) => ({
           id,
           name,
-          isSecret,
-          hasValue,
-          ...(kind ? { kind } : {}),
+          kind,
           ...(owner ? { owner } : {}),
+          ...(description != null ? { description } : {}),
+          hasValue,
         }));
     },
   }),
@@ -1346,7 +1341,7 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
     name: "update_tool",
     title: "Update tool",
     description:
-      "Update a tool you own using a versioned typed request definition. Enabling a tool or modifying an enabled tool requires publish scope and is denied without writing otherwise. Legacy template fields are not accepted; mixed payloads are rejected.",
+      "Update a tool you own using a versioned typed request definition. Enabling a tool or modifying an enabled tool requires publish scope and is denied without writing otherwise. Template fields are not accepted; mixed payloads are rejected.",
     scopes: ["author"],
     input: updateToolCommandSchema,
     data: toolResource,
@@ -1419,7 +1414,6 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
       issues: z.array(z.unknown()),
       plan: z.unknown(),
       contract: z.unknown(),
-      compatibilityProjectable: z.boolean(),
     }),
     annotations: READ_ANNOTATIONS,
     run: async (ctx, args) => {
@@ -1450,8 +1444,15 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
         path: issue.path,
         ...(issue.id !== undefined ? { id: issue.id } : {}),
       }));
+      const base = {
+        ok: result.ok,
+        ready: result.ready,
+        issues: safeIssues,
+        plan: result.plan,
+        contract: result.contract,
+      };
       if (platformHasScope(ctx.principal, "secret_reference")) {
-        return { ...result, issues: safeIssues };
+        return base;
       }
       // Auth/common bindings are injected into the compiled plan; without
       // secret_reference authority their secret slot ids must not be returned.
@@ -1461,11 +1462,12 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
         args.serverId,
       );
       const visibleIds = new Set(
-        variables.filter((variable) => !variable.isSecret).map((v) => v.id),
+        variables
+          .filter((variable) => variable.kind !== "secret")
+          .map((v) => v.id),
       );
       return {
-        ...result,
-        issues: safeIssues,
+        ...base,
         plan: redactServerValueIds(result.plan, visibleIds),
       };
     },
@@ -1609,7 +1611,7 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
         );
         const visibleNames = new Set(
           variables
-            .filter((variable) => !variable.isSecret)
+            .filter((variable) => variable.kind !== "secret")
             .map((variable) => variable.name),
         );
         const denied = (args.markings ?? []).some(
@@ -1620,7 +1622,7 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
         if (denied) throw unknownServerValueDenied();
       }
       return redactToolRow(
-        await createToolFromCurlForPlatform(
+        await confirmCurlImportForPlatform(
           ctx.principal,
           ctx.db,
           args.serverId,
@@ -1655,7 +1657,8 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
       );
       if (
         variables.some(
-          (variable) => variable.name === args.name && variable.isSecret,
+          (variable) =>
+            variable.name === args.name && variable.kind === "secret",
         )
       ) {
         if (!ctx.hasScope("secret_reference")) {
@@ -1698,7 +1701,7 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
         {
           expectedRevision: args.expectedRevision,
           name: args.name,
-          isSecret: false,
+          kind: "config",
           value: args.value,
         },
         ctx.credentialSecret,
@@ -1938,12 +1941,25 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
     data: mutationAckResource,
     annotations: DESTRUCTIVE_ANNOTATIONS,
     run: async (ctx, args) => {
-      assertDestructiveConfirmation(args.confirm, args.name);
+      const variables = await listVariablesForPlatform(
+        ctx.principal,
+        ctx.db,
+        args.serverId,
+      );
+      const target = variables.find((variable) => variable.name === args.name);
+      if (!target) {
+        throw new AppError({
+          appCode: APP_ERROR_CODES.INVALID_INPUT,
+          message: "Server value not found.",
+          status: 404,
+        });
+      }
+      assertDestructiveConfirmation(args.confirm, target.name);
       const result = await deleteVariableForPlatform(
         ctx.principal,
         ctx.db,
         args.serverId,
-        args.name,
+        target.id,
         args.expectedRevision,
       );
       void recordPlatformSecurityEventBestEffort(ctx.db, {

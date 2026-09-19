@@ -3,13 +3,11 @@ import { z } from "zod";
 import { serverAuthRecipeSchema } from "../lib/mcp-auth-recipe.js";
 import { mcpCommonEntriesSchema } from "../lib/mcp-request-definition.js";
 import {
-  createLegacyToolCommandSchema,
   createPlatformPatCommandSchema,
   createToolCommandSchema,
   curlConfirmCommandSchema,
   duplicateToolCommandSchema,
   expectedRevisionSchema,
-  previewLegacyToolCompileCommandSchema,
   previewToolCompileCommandSchema,
   publishPreviewCommandSchema,
   publishServerCommandSchema,
@@ -18,7 +16,6 @@ import {
   revisionHistoryCommandSchema,
   revokePlatformPatCommandSchema,
   rotatePlatformPatCommandSchema,
-  updateLegacyToolCommandSchema,
   updateToolCommandSchema,
   verifyPlatformStepUpCommandSchema,
 } from "../lib/mcp-domain-commands.js";
@@ -28,11 +25,10 @@ import { protectedProcedure, router } from "../lib/trpc.js";
 import { reconcileServerIconAssetsWithEnv } from "../services/mcp-asset-service.js";
 import { executeMappedTool } from "../services/mcp-executor-service.js";
 import {
-  createLegacyTool,
+  confirmCurlImport,
   createServer,
   createServerToken,
   createTool,
-  createToolFromCurl,
   createVariable,
   deleteServer,
   deleteTool,
@@ -41,20 +37,17 @@ import {
   getConnectionSnippet,
   getServer,
   getServerCommon,
-  getToolEditorState,
   listCallLogs,
   listServerTokens,
   listServers,
   listTools,
   listVariables,
   previewCurlImport,
-  previewLegacyToolCompile,
   previewToolCompile,
   resolveApiOrigin,
   revokeServerToken,
   setServerAuth,
   testConnection,
-  updateLegacyTool,
   updateServer,
   updateServerCommon,
   updateTool,
@@ -82,8 +75,6 @@ import {
   listPlatformSecurityEvents,
   recordPlatformSecurityEventBestEffort,
 } from "../services/mcp-platform-security-event-service.js";
-
-const templateMapSchema = z.record(z.string(), z.string().max(8_000));
 
 const serverIdInput = z.object({ serverId: z.string().min(1) });
 
@@ -157,8 +148,6 @@ export const mcpRouter = router({
           baseUrl: z.url().optional(),
           status: z.enum(["draft", "live", "paused"]).optional(),
           allowedHosts: z.array(z.string().min(1)).optional(),
-          defaultHeaders: templateMapSchema.nullable().optional(),
-          defaultQuery: templateMapSchema.nullable().optional(),
         })
         .strict(),
     )
@@ -212,17 +201,10 @@ export const mcpRouter = router({
       createTool(ctx.dbDirect, ctx.user.id, input.serverId, input),
     ),
 
-  /** Explicit legacy compatibility path; first-party clients use `createTool`. */
-  createLegacyTool: protectedProcedure
-    .input(createLegacyToolCommandSchema)
-    .mutation(({ ctx, input }) =>
-      createLegacyTool(ctx.dbDirect, ctx.user.id, input.serverId, input),
-    ),
-
   createToolFromCurl: protectedProcedure
     .input(curlConfirmCommandSchema)
     .mutation(({ ctx, input }) =>
-      createToolFromCurl(ctx.dbDirect, ctx.user.id, input.serverId, input),
+      confirmCurlImport(ctx.dbDirect, ctx.user.id, input.serverId, input),
     ),
 
   parseCurlPreview: protectedProcedure
@@ -235,29 +217,10 @@ export const mcpRouter = router({
       previewCurlImport(ctx.db, ctx.user.id, input.serverId, input.curl),
     ),
 
-  toolEditorState: protectedProcedure
-    .input(serverIdInput.extend({ toolId: z.string().min(1) }))
-    .query(({ ctx, input }) =>
-      getToolEditorState(ctx.db, ctx.user.id, input.serverId, input.toolId),
-    ),
-
   updateTool: protectedProcedure
     .input(updateToolCommandSchema)
     .mutation(({ ctx, input }) =>
       updateTool(
-        ctx.dbDirect,
-        ctx.user.id,
-        input.serverId,
-        input.toolId,
-        input,
-      ),
-    ),
-
-  /** Explicit legacy compatibility path; rejects typed records. */
-  updateLegacyTool: protectedProcedure
-    .input(updateLegacyToolCommandSchema)
-    .mutation(({ ctx, input }) =>
-      updateLegacyTool(
         ctx.dbDirect,
         ctx.user.id,
         input.serverId,
@@ -308,19 +271,6 @@ export const mcpRouter = router({
       }),
     ),
 
-  /** Explicit legacy compatibility preview; first-party clients use the typed path. */
-  previewLegacyToolCompile: protectedProcedure
-    .input(previewLegacyToolCompileCommandSchema)
-    .mutation(({ ctx, input }) =>
-      previewLegacyToolCompile(ctx.db, ctx.user.id, input.serverId, {
-        method: input.method,
-        pathTemplate: input.pathTemplate,
-        requestTemplate: input.requestTemplate,
-        params: input.params,
-        allowMutation: input.allowMutation,
-      }),
-    ),
-
   serverCommon: protectedProcedure
     .input(serverIdInput)
     .query(({ ctx, input }) =>
@@ -352,8 +302,9 @@ export const mcpRouter = router({
       serverIdInput.extend({
         expectedRevision: expectedRevisionSchema,
         name: variableNameSchema,
-        isSecret: z.boolean(),
+        kind: z.enum(["config", "secret"]),
         value: z.string().max(8_000),
+        description: z.string().trim().max(2_000).optional(),
       }),
     )
     .mutation(({ ctx, input }) =>
@@ -364,8 +315,9 @@ export const mcpRouter = router({
         {
           expectedRevision: input.expectedRevision,
           name: input.name,
-          isSecret: input.isSecret,
+          kind: input.kind,
           value: input.value,
+          description: input.description,
         },
         ctx.env.MCP_CREDENTIAL_SECRET,
       ),
@@ -375,9 +327,10 @@ export const mcpRouter = router({
     .input(
       serverIdInput.extend({
         expectedRevision: expectedRevisionSchema,
-        name: variableNameSchema,
+        valueId: z.string().min(1),
         value: z.string().max(8_000).optional(),
-        isSecret: z.boolean().optional(),
+        kind: z.enum(["config", "secret"]).optional(),
+        description: z.string().trim().max(2_000).optional(),
       }),
     )
     .mutation(({ ctx, input }) =>
@@ -385,11 +338,12 @@ export const mcpRouter = router({
         ctx.dbDirect,
         ctx.user.id,
         input.serverId,
-        input.name,
+        input.valueId,
         {
           expectedRevision: input.expectedRevision,
           value: input.value,
-          isSecret: input.isSecret,
+          kind: input.kind,
+          description: input.description,
         },
         ctx.env.MCP_CREDENTIAL_SECRET,
       ),
@@ -399,7 +353,7 @@ export const mcpRouter = router({
     .input(
       serverIdInput.extend({
         expectedRevision: expectedRevisionSchema,
-        name: variableNameSchema,
+        valueId: z.string().min(1),
       }),
     )
     .mutation(({ ctx, input }) =>
@@ -407,7 +361,7 @@ export const mcpRouter = router({
         ctx.dbDirect,
         ctx.user.id,
         input.serverId,
-        input.name,
+        input.valueId,
         input.expectedRevision,
       ),
     ),

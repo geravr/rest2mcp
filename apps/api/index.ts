@@ -26,7 +26,6 @@ export type {
   McpToolSource,
   ServerValueReference,
   SetVariableInput,
-  TemplateWarning,
   TestConnectionResult,
   TrafficLight,
   UpdateServerInput,
@@ -39,10 +38,7 @@ export type {
   RotatePlatformPatInput,
 } from "./services/mcp-platform-token-service.js";
 export type { PlatformPrincipal } from "./lib/mcp-platform-principal.js";
-export type {
-  InferredServerAuth,
-  ServerAuthRecipe,
-} from "./lib/mcp-auth-recipe.js";
+export type { ServerAuthRecipe } from "./lib/mcp-auth-recipe.js";
 export type {
   CurlImportCredentialDiagnostic,
   CurlImportMarking,
