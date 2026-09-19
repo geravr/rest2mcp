@@ -120,6 +120,12 @@ export function extractDetailsFromTrpcCause(
   if (typeof source.serverId === "string") result.serverId = source.serverId;
   if (typeof source.retryable === "boolean")
     result.retryable = source.retryable;
+  if (typeof source.policyVersion === "number") {
+    result.policyVersion = source.policyVersion;
+  }
+  if (typeof source.resourceMode === "string") {
+    result.resourceMode = source.resourceMode;
+  }
   if (Array.isArray(source.references)) {
     result.references = source.references
       .filter(

@@ -4,16 +4,21 @@ import { serverAuthRecipeSchema } from "../lib/mcp-auth-recipe.js";
 import { mcpCommonEntriesSchema } from "../lib/mcp-request-definition.js";
 import {
   createLegacyToolCommandSchema,
-  createPlatformTokenCommandSchema,
+  createPlatformPatCommandSchema,
   createToolCommandSchema,
   curlConfirmCommandSchema,
   duplicateToolCommandSchema,
   expectedRevisionSchema,
   previewLegacyToolCompileCommandSchema,
   previewToolCompileCommandSchema,
+  revokePlatformPatCommandSchema,
+  rotatePlatformPatCommandSchema,
   updateLegacyToolCommandSchema,
   updateToolCommandSchema,
+  verifyPlatformStepUpCommandSchema,
 } from "../lib/mcp-domain-commands.js";
+import { APP_ERROR_CODES, appError } from "../lib/app-error.js";
+import { validatePlatformGrantRequest } from "../lib/mcp-platform-principal.js";
 import { protectedProcedure, router } from "../lib/trpc.js";
 import { reconcileServerIconAssetsWithEnv } from "../services/mcp-asset-service.js";
 import { executeMappedTool } from "../services/mcp-executor-service.js";
@@ -29,13 +34,10 @@ import {
   deleteVariable,
   duplicateTool,
   getConnectionSnippet,
-  getPlatformTokenMeta,
   getServer,
   getServerCommon,
   getToolEditorState,
-  createPlatformToken,
   listCallLogs,
-  listPlatformTokens,
   listServerTokens,
   listServers,
   listTools,
@@ -44,7 +46,6 @@ import {
   previewLegacyToolCompile,
   previewToolCompile,
   resolveApiOrigin,
-  revokePlatformToken,
   revokeServerToken,
   setServerAuth,
   testConnection,
@@ -54,6 +55,21 @@ import {
   updateTool,
   updateVariable,
 } from "../services/mcp-studio-service.js";
+import {
+  createPlatformPat,
+  listPlatformPats,
+  revokePlatformPat,
+  rotatePlatformPat,
+} from "../services/mcp-platform-token-service.js";
+import {
+  createPlatformStepUpGrant,
+  requestPlatformStepUpOtp,
+  verifyPlatformStepUpOtp,
+} from "../services/mcp-platform-step-up-service.js";
+import {
+  listPlatformSecurityEvents,
+  recordPlatformSecurityEventBestEffort,
+} from "../services/mcp-platform-security-event-service.js";
 
 const templateMapSchema = z.record(z.string(), z.string().max(8_000));
 
@@ -466,24 +482,87 @@ export const mcpRouter = router({
       listCallLogs(ctx.db, ctx.user.id, input.serverId, input),
     ),
 
-  platformToken: protectedProcedure.query(({ ctx }) =>
-    getPlatformTokenMeta(ctx.db, ctx.user.id),
-  ),
-
-  createPlatformToken: protectedProcedure
-    .input(createPlatformTokenCommandSchema.optional())
-    .mutation(({ ctx, input }) =>
-      createPlatformToken(ctx.dbDirect, ctx.user.id, input ?? {}),
+  platformTokens: protectedProcedure
+    .input(paginationInputSchema.optional())
+    .query(({ ctx, input }) =>
+      listPlatformPats(ctx.db, ctx.user.id, input ?? { page: 1, pageSize: 10 }),
     ),
 
-  platformTokens: protectedProcedure.query(({ ctx }) =>
-    listPlatformTokens(ctx.db, ctx.user.id),
-  ),
+  createPlatformToken: protectedProcedure
+    .input(createPlatformPatCommandSchema)
+    .mutation(({ ctx, input }) =>
+      createPlatformPat(ctx.dbDirect, ctx.user.id, {
+        ...input,
+        sessionId: ctx.session.id,
+      }),
+    ),
+
+  rotatePlatformToken: protectedProcedure
+    .input(rotatePlatformPatCommandSchema)
+    .mutation(({ ctx, input }) =>
+      rotatePlatformPat(ctx.dbDirect, ctx.user.id, {
+        ...input,
+        sessionId: ctx.session.id,
+      }),
+    ),
 
   revokePlatformToken: protectedProcedure
-    .input(z.object({ tokenId: z.string().min(1).optional() }).optional())
+    .input(revokePlatformPatCommandSchema)
     .mutation(({ ctx, input }) =>
-      revokePlatformToken(ctx.dbDirect, ctx.user.id, input?.tokenId),
+      revokePlatformPat(ctx.dbDirect, ctx.user.id, input.tokenId),
+    ),
+
+  requestPlatformStepUp: protectedProcedure.mutation(({ ctx }) => {
+    const ip =
+      ctx.req.headers.get("cf-connecting-ip")?.trim() ||
+      ctx.req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      null;
+    return requestPlatformStepUpOtp(ctx.dbDirect, ctx.env, {
+      userId: ctx.user.id,
+      email: ctx.user.email,
+      ip,
+    });
+  }),
+
+  verifyPlatformStepUp: protectedProcedure
+    .input(verifyPlatformStepUpCommandSchema)
+    .mutation(async ({ ctx, input }) => {
+      const grant = validatePlatformGrantRequest({
+        scopes: input.scopes,
+        resourceMode: input.resourceMode,
+        serverIds: input.serverIds,
+      });
+      const verified = await verifyPlatformStepUpOtp(ctx.dbDirect, {
+        userId: ctx.user.id,
+        otp: input.otp,
+      });
+      if (!verified) {
+        await recordPlatformSecurityEventBestEffort(ctx.dbDirect, {
+          userId: ctx.user.id,
+          eventType: "step_up_failed",
+          outcome: "failure",
+        });
+        throw appError({
+          appCode: APP_ERROR_CODES.OTP_VERIFY_FAILED,
+          message: "The verification code is invalid or expired.",
+          status: 400,
+        });
+      }
+      return createPlatformStepUpGrant(ctx.dbDirect, {
+        userId: ctx.user.id,
+        sessionId: ctx.session.id,
+        fingerprint: grant.fingerprint,
+      });
+    }),
+
+  platformSecurityEvents: protectedProcedure
+    .input(paginationInputSchema.optional())
+    .query(({ ctx, input }) =>
+      listPlatformSecurityEvents(
+        ctx.db,
+        ctx.user.id,
+        input ?? { page: 1, pageSize: 10 },
+      ),
     ),
 
   platformSnippet: protectedProcedure.query(({ ctx }) => {

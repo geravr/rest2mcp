@@ -18,7 +18,6 @@ export type { ExecuteMappedToolResult } from "./services/mcp-executor-service.js
 export type {
   ConfirmCurlImportInput,
   ConfirmCurlImportOptions,
-  CreatePlatformTokenInput,
   CreateServerInput,
   CreateTypedToolInput,
   McpHttpMethod,
@@ -33,6 +32,13 @@ export type {
   UpdateServerInput,
   UpdateTypedToolInput,
 } from "./services/mcp-studio-service.js";
+export type {
+  CreatePlatformPatInput,
+  CreatedPlatformPat,
+  PlatformPatSummary,
+  RotatePlatformPatInput,
+} from "./services/mcp-platform-token-service.js";
+export type { PlatformPrincipal } from "./lib/mcp-platform-principal.js";
 export type {
   InferredServerAuth,
   ServerAuthRecipe,

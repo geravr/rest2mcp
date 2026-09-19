@@ -16,16 +16,16 @@ vi.mock("./posthog.js", () => ({
   })),
 }));
 
-const authenticateAgentToken = vi.hoisted(() => vi.fn());
+const authenticateServerToken = vi.hoisted(() => vi.fn());
 const executeMappedTool = vi.hoisted(() => vi.fn());
 
-vi.mock("../services/mcp-studio-service.js", async () => {
+vi.mock("../services/mcp-agent-auth-service.js", async () => {
   const actual = await vi.importActual<
-    typeof import("../services/mcp-studio-service.js")
-  >("../services/mcp-studio-service.js");
+    typeof import("../services/mcp-agent-auth-service.js")
+  >("../services/mcp-agent-auth-service.js");
   return {
     ...actual,
-    authenticateAgentToken,
+    authenticateServerToken,
   };
 });
 
@@ -155,11 +155,11 @@ describe("product MCP gateway: transport guards", () => {
     await expect(response.json()).resolves.toMatchObject({
       code: APP_ERROR_CODES.MCP_AGENT_TOKEN_INVALID,
     });
-    expect(authenticateAgentToken).not.toHaveBeenCalled();
+    expect(authenticateServerToken).not.toHaveBeenCalled();
   });
 
   it("rejects a token issued for another server", async () => {
-    authenticateAgentToken.mockRejectedValue(
+    authenticateServerToken.mockRejectedValue(
       appError({
         appCode: APP_ERROR_CODES.MCP_AGENT_TOKEN_INVALID,
         message: "Agent token is invalid.",
@@ -176,10 +176,10 @@ describe("product MCP gateway: transport guards", () => {
     await expect(response.json()).resolves.toMatchObject({
       code: APP_ERROR_CODES.MCP_AGENT_TOKEN_INVALID,
     });
-    expect(authenticateAgentToken).toHaveBeenCalledWith(
+    expect(authenticateServerToken).toHaveBeenCalledWith(
       expect.anything(),
       "other-server-token",
-      { kind: "server", serverId: "mcs_b" },
+      "mcs_b",
     );
   });
 
@@ -196,7 +196,7 @@ describe("product MCP gateway: transport guards", () => {
     await expect(response.json()).resolves.toMatchObject({
       code: APP_ERROR_CODES.MCP_ORIGIN_INVALID,
     });
-    expect(authenticateAgentToken).not.toHaveBeenCalled();
+    expect(authenticateServerToken).not.toHaveBeenCalled();
   });
 
   it("allows a trusted Origin to proceed to authentication", async () => {
@@ -233,7 +233,7 @@ describe("MCP round-trip", () => {
     serverRow: typeof SERVER_ROW | null = SERVER_ROW,
     toolRows: typeof TOOL_ROWS = TOOL_ROWS,
   ) {
-    authenticateAgentToken.mockResolvedValue({
+    authenticateServerToken.mockResolvedValue({
       id: "mtk_1",
       kind: "server",
       serverId: "mcs_1",

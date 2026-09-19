@@ -13,7 +13,7 @@ vi.mock("./posthog.js", () => ({
   })),
 }));
 
-const authenticateAgentToken = vi.hoisted(() => vi.fn());
+const authenticatePlatformPat = vi.hoisted(() => vi.fn());
 const setVariable = vi.hoisted(() => vi.fn());
 const createServer = vi.hoisted(() => vi.fn());
 const createToolFromCurl = vi.hoisted(() => vi.fn());
@@ -22,15 +22,19 @@ const updateTool = vi.hoisted(() => vi.fn());
 const duplicateTool = vi.hoisted(() => vi.fn());
 const previewToolCompile = vi.hoisted(() => vi.fn());
 const getToolEditorState = vi.hoisted(() => vi.fn());
+const getToolEnabledState = vi.hoisted(() => vi.fn());
+const isServerValueRuntimeEffective = vi.hoisted(() => vi.fn());
 const listVariables = vi.hoisted(() => vi.fn());
 const deleteVariable = vi.hoisted(() => vi.fn());
 const deleteServer = vi.hoisted(() => vi.fn());
 const deleteTool = vi.hoisted(() => vi.fn());
 const getServerName = vi.hoisted(() => vi.fn());
 const getToolName = vi.hoisted(() => vi.fn());
+const getToolMethod = vi.hoisted(() => vi.fn());
 const listServers = vi.hoisted(() => vi.fn());
 const listTools = vi.hoisted(() => vi.fn());
 const executeMappedTool = vi.hoisted(() => vi.fn());
+const handleMcpHttpRequest = vi.hoisted(() => vi.fn());
 
 vi.mock("../services/mcp-studio-service.js", async () => {
   const actual = await vi.importActual<
@@ -38,7 +42,6 @@ vi.mock("../services/mcp-studio-service.js", async () => {
   >("../services/mcp-studio-service.js");
   return {
     ...actual,
-    authenticateAgentToken,
     setVariable,
     createServer,
     createToolFromCurl,
@@ -47,15 +50,25 @@ vi.mock("../services/mcp-studio-service.js", async () => {
     duplicateTool,
     previewToolCompile,
     getToolEditorState,
+    getToolEnabledState,
+    isServerValueRuntimeEffective,
     listVariables,
     deleteVariable,
     deleteServer,
     deleteTool,
     getServerName,
     getToolName,
+    getToolMethod,
     listServers,
     listTools,
   };
+});
+
+vi.mock("../services/mcp-platform-token-service.js", async () => {
+  const actual = await vi.importActual<
+    typeof import("../services/mcp-platform-token-service.js")
+  >("../services/mcp-platform-token-service.js");
+  return { ...actual, authenticatePlatformPat };
 });
 
 vi.mock("../services/mcp-executor-service.js", async () => {
@@ -65,9 +78,18 @@ vi.mock("../services/mcp-executor-service.js", async () => {
   return { ...actual, executeMappedTool };
 });
 
+vi.mock("./mcp-http.js", async () => {
+  const actual =
+    await vi.importActual<typeof import("./mcp-http.js")>("./mcp-http.js");
+  handleMcpHttpRequest.mockImplementation(actual.handleMcpHttpRequest);
+  return { ...actual, handleMcpHttpRequest };
+});
+
 import { buildConnectionSnippet } from "../services/mcp-studio-service.js";
 import { createPlatformMcpRoutes } from "./mcp-platform.js";
 import { errorHandler } from "./middleware.js";
+import { resetRateLimitState } from "./mcp-rate-limit.js";
+import { MCP_GATEWAY_REQUEST_SIZE_LIMIT } from "./mcp-policy.js";
 
 function createApp() {
   const app = new Hono<AppContext>();
@@ -87,23 +109,39 @@ function createApp() {
 
 afterEach(() => {
   vi.clearAllMocks();
+  resetRateLimitState();
 });
 
 const ALL_SCOPES = [
   "read",
+  "observe",
   "author",
+  "publish",
   "invoke",
+  "invoke_mutation",
   "secret_reference",
   "destructive",
 ];
 
-async function connectClient(scopes: string[] = ALL_SCOPES) {
-  authenticateAgentToken.mockResolvedValue({
-    id: "mtk_1",
-    kind: "platform",
+async function connectClient(
+  scopes: string[] = ALL_SCOPES,
+  resourceMode: "account" | "selected" = "account",
+) {
+  authenticatePlatformPat.mockResolvedValue({
+    tokenId: "mtk_1",
     userId: "usr_1",
+    tokenName: "Test PAT",
+    tokenPrefix: "rmcp_test",
+    policyVersion: 1,
     scopes,
+    resourceMode,
+    allowedServerIds: resourceMode === "selected" ? ["mcs_1"] : [],
+    expiresAt: null,
   });
+  getToolMethod.mockResolvedValue("GET");
+  getToolName.mockResolvedValue("tool_name");
+  getToolEnabledState.mockResolvedValue(false);
+  isServerValueRuntimeEffective.mockResolvedValue(false);
   const app = createApp();
   const transport = new StreamableHTTPClientTransport(
     new URL("http://test.local/api/platform-mcp"),
@@ -132,7 +170,7 @@ describe("platform MCP", () => {
   });
 
   it("rejects a server-scoped token", async () => {
-    authenticateAgentToken.mockRejectedValue(
+    authenticatePlatformPat.mockRejectedValue(
       appError({
         appCode: APP_ERROR_CODES.MCP_AGENT_TOKEN_INVALID,
         message: "Agent token is invalid.",
@@ -149,10 +187,9 @@ describe("platform MCP", () => {
     await expect(response.json()).resolves.toMatchObject({
       code: APP_ERROR_CODES.MCP_AGENT_TOKEN_INVALID,
     });
-    expect(authenticateAgentToken).toHaveBeenCalledWith(
+    expect(authenticatePlatformPat).toHaveBeenCalledWith(
       expect.anything(),
       "server-token",
-      { kind: "platform" },
     );
   });
 
@@ -179,6 +216,7 @@ describe("platform MCP", () => {
             "delete_variable",
             "duplicate_tool",
             "get_connection_snippet",
+            "get_tool_definition",
             "list_recent_calls",
             "list_servers",
             "list_tools",
@@ -209,7 +247,6 @@ describe("platform MCP", () => {
         expect(names).toEqual(
           [
             "get_connection_snippet",
-            "list_recent_calls",
             "list_servers",
             "list_tools",
             "list_variables",
@@ -220,14 +257,122 @@ describe("platform MCP", () => {
       }
     });
 
-    it("a read-only token cannot call test_tool", async () => {
+    it("omits stored authoring definitions from list_tools", async () => {
+      listTools.mockResolvedValue({
+        items: [
+          {
+            id: "mct_1",
+            name: "get_contact",
+            title: null,
+            description: null,
+            method: "GET",
+            requestDefinition: {
+              version: 1,
+              headers: [
+                {
+                  id: "hdr_1",
+                  name: "X-Token",
+                  value: { kind: "serverValue", serverValueId: "msv_secret" },
+                },
+              ],
+            },
+            compileStatus: "valid",
+            compileIssues: [],
+            annotations: null,
+            allowMutation: false,
+            enabled: true,
+            source: "manual",
+          },
+        ],
+        page: 1,
+        pageSize: 10,
+        total: 1,
+      });
       const client = await connectClient(["read"]);
       try {
         const result = await client.callTool({
-          name: "test_tool",
-          arguments: { serverId: "mcs_1", toolId: "mct_1" },
+          name: "list_tools",
+          arguments: { serverId: "mcs_1" },
         });
-        expect(result.isError).toBe(true);
+        expect(result.isError).toBeFalsy();
+        const text = (
+          result.content as Array<{ type: string; text: string }>
+        )[0].text;
+        expect(text).not.toContain("requestDefinition");
+        expect(text).not.toContain("msv_secret");
+        const data = (
+          result.structuredContent as {
+            data: { items: Array<Record<string, unknown>> };
+          }
+        ).data;
+        expect(data.items[0]).not.toHaveProperty("requestDefinition");
+        expect(data.items[0]).toMatchObject({
+          id: "mct_1",
+          name: "get_contact",
+          enabled: true,
+        });
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("challenges a direct call missing a static scope with HTTP 403", async () => {
+      authenticatePlatformPat.mockResolvedValue({
+        tokenId: "mtk_1",
+        userId: "usr_1",
+        tokenName: "Test PAT",
+        tokenPrefix: "rmcp_test",
+        policyVersion: 1,
+        scopes: ["read"],
+        resourceMode: "account",
+        allowedServerIds: [],
+        expiresAt: null,
+      });
+      const response = await createApp().request("/api/platform-mcp", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer platform-token",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "test_tool",
+            arguments: { serverId: "mcs_1", toolId: "mct_1" },
+          },
+        }),
+      });
+      expect(response.status).toBe(403);
+      const challenge = response.headers.get("WWW-Authenticate") ?? "";
+      expect(challenge).toContain('error="insufficient_scope"');
+      expect(challenge).toContain('scope="invoke"');
+      await expect(response.json()).resolves.toMatchObject({
+        code: APP_ERROR_CODES.MCP_SCOPE_DENIED,
+      });
+      expect(executeMappedTool).not.toHaveBeenCalled();
+    });
+
+    it("call logs require observe scope", async () => {
+      const client = await connectClient(["read"]);
+      try {
+        const { tools } = await client.listTools();
+        expect(tools.map((t) => t.name)).not.toContain("list_recent_calls");
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("a read-only token cannot call test_tool", async () => {
+      const client = await connectClient(["read"]);
+      try {
+        await expect(
+          client.callTool({
+            name: "test_tool",
+            arguments: { serverId: "mcs_1", toolId: "mct_1" },
+          }),
+        ).rejects.toThrow(/MCP_SCOPE_DENIED/);
         expect(executeMappedTool).not.toHaveBeenCalled();
       } finally {
         await client.close();
@@ -637,6 +782,203 @@ describe("platform MCP", () => {
       }
     });
 
+    it("forces a disabled draft when creating without publish scope", async () => {
+      createTool.mockResolvedValue({
+        id: "mct_1",
+        name: "get_contact",
+        method: "GET",
+        requestDefinition: { version: 1 },
+        compileStatus: "valid",
+        compileIssues: [],
+        annotations: null,
+        allowMutation: false,
+        enabled: false,
+        source: "manual",
+      });
+      listVariables.mockResolvedValue([]);
+      const client = await connectClient(["author"]);
+      try {
+        const result = await client.callTool({
+          name: "create_tool",
+          arguments: {
+            expectedRevision: 1,
+            serverId: "mcs_1",
+            name: "get_contact",
+            method: "GET",
+            enabled: true,
+            requestDefinition: {
+              version: 1,
+              pathSegments: [],
+              query: [],
+              headers: [],
+              body: { bodyType: "none" },
+              agentInputs: [],
+            },
+          },
+        });
+        expect(result.isError).toBeFalsy();
+        expect(createTool).toHaveBeenCalledWith(
+          expect.anything(),
+          "usr_1",
+          "mcs_1",
+          expect.objectContaining({ enabled: false }),
+        );
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("denies updating an enabled tool without publish scope", async () => {
+      listVariables.mockResolvedValue([]);
+      getToolEnabledState.mockResolvedValueOnce(true);
+      const client = await connectClient(["author"]);
+      try {
+        const result = await client.callTool({
+          name: "update_tool",
+          arguments: {
+            expectedRevision: 1,
+            serverId: "mcs_1",
+            toolId: "mct_1",
+            name: "get_contact",
+            method: "GET",
+            requestDefinition: {
+              version: 1,
+              pathSegments: [],
+              query: [],
+              headers: [],
+              body: { bodyType: "none" },
+              agentInputs: [],
+            },
+          },
+        });
+        expect(result.isError).toBe(true);
+        const text = (
+          result.content as Array<{ type: string; text: string }>
+        )[0].text;
+        expect(text).toContain(APP_ERROR_CODES.MCP_SCOPE_DENIED);
+        expect(updateTool).not.toHaveBeenCalled();
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("denies changing a value used by an enabled tool without publish scope", async () => {
+      listVariables.mockResolvedValue([
+        { id: "msv_2", name: "region", isSecret: false, hasValue: true },
+      ]);
+      isServerValueRuntimeEffective.mockResolvedValueOnce(true);
+      const client = await connectClient(["author"]);
+      try {
+        const result = await client.callTool({
+          name: "set_variable",
+          arguments: {
+            expectedRevision: 1,
+            serverId: "mcs_1",
+            name: "region",
+            kind: "config",
+            value: "mx",
+          },
+        });
+        expect(result.isError).toBe(true);
+        const text = (
+          result.content as Array<{ type: string; text: string }>
+        )[0].text;
+        expect(text).toContain(APP_ERROR_CODES.MCP_SCOPE_DENIED);
+        expect(setVariable).not.toHaveBeenCalled();
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("denies get_tool_definition for a secret binding without secret_reference", async () => {
+      getToolEditorState.mockResolvedValue({
+        toolId: "mct_1",
+        typed: true,
+        definition: {
+          version: 1,
+          pathSegments: [],
+          query: [],
+          headers: [
+            {
+              id: "hdr_1",
+              name: "X-Token",
+              value: { kind: "serverValue", serverValueId: "msv_secret" },
+            },
+          ],
+          body: { bodyType: "none" },
+          agentInputs: [],
+        },
+        issues: [],
+        conversionDraft: null,
+        conversionIssues: [],
+      });
+      listVariables.mockResolvedValue([
+        {
+          id: "msv_secret",
+          name: "api_token",
+          isSecret: true,
+          hasValue: true,
+        },
+      ]);
+      const client = await connectClient(["author"]);
+      try {
+        const result = await client.callTool({
+          name: "get_tool_definition",
+          arguments: { serverId: "mcs_1", toolId: "mct_1" },
+        });
+        expect(result.isError).toBe(true);
+        const text = (
+          result.content as Array<{ type: string; text: string }>
+        )[0].text;
+        expect(text).toContain(APP_ERROR_CODES.MCP_SCOPE_DENIED);
+        expect(text).not.toContain("msv_secret");
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("returns a secret-bound definition with secret_reference without values", async () => {
+      getToolEditorState.mockResolvedValue({
+        toolId: "mct_1",
+        typed: true,
+        definition: {
+          version: 1,
+          pathSegments: [],
+          query: [],
+          headers: [
+            {
+              id: "hdr_1",
+              name: "X-Token",
+              value: { kind: "serverValue", serverValueId: "msv_secret" },
+            },
+          ],
+          body: { bodyType: "none" },
+          agentInputs: [],
+        },
+        issues: [],
+        conversionDraft: null,
+        conversionIssues: [],
+      });
+      const client = await connectClient(["author", "secret_reference"]);
+      try {
+        const result = await client.callTool({
+          name: "get_tool_definition",
+          arguments: { serverId: "mcs_1", toolId: "mct_1" },
+        });
+        expect(result.isError).toBeFalsy();
+        const data = (
+          result.structuredContent as { data: { definition: unknown } }
+        ).data;
+        expect(data.definition).toBeTruthy();
+        const text = (
+          result.content as Array<{ type: string; text: string }>
+        )[0].text;
+        expect(text).not.toContain("ciphertext");
+      } finally {
+        await client.close();
+      }
+    });
+
     it("previews and duplicates through the typed services", async () => {
       previewToolCompile.mockResolvedValue({
         ok: false,
@@ -869,7 +1211,10 @@ describe("platform MCP", () => {
         const text = (
           result.content as Array<{ type: string; text: string }>
         )[0].text;
-        expect(text).toContain(APP_ERROR_CODES.MCP_PLAINTEXT_SECRET);
+        // Generic non-disclosure denial: the response must not confirm that a
+        // same-named secret exists (no secret-specific code or message).
+        expect(text).toContain(APP_ERROR_CODES.MCP_SCOPE_DENIED);
+        expect(text).not.toContain(APP_ERROR_CODES.MCP_PLAINTEXT_SECRET);
         expect(setVariable).not.toHaveBeenCalled();
       } finally {
         listVariables.mockResolvedValue([]);
@@ -1145,6 +1490,173 @@ describe("platform MCP", () => {
       } finally {
         await client.close();
       }
+    });
+  });
+
+  describe("transport hardening", () => {
+    function platformPrincipal(scopes: string[]) {
+      return {
+        tokenId: "mtk_1",
+        userId: "usr_1",
+        tokenName: "Test PAT",
+        tokenPrefix: "rmcp_test",
+        policyVersion: 1,
+        scopes,
+        resourceMode: "account" as const,
+        allowedServerIds: [],
+        expiresAt: null,
+      };
+    }
+
+    function trackedBody(chunks: Uint8Array[]) {
+      let pulls = 0;
+      let cancelled = false;
+      let index = 0;
+      const stream = new ReadableStream<Uint8Array>(
+        {
+          pull(controller) {
+            pulls += 1;
+            if (index < chunks.length) {
+              controller.enqueue(chunks[index]);
+              index += 1;
+              return;
+            }
+            controller.close();
+          },
+          cancel() {
+            cancelled = true;
+          },
+        },
+        { highWaterMark: 0 },
+      );
+      return { stream, pulls: () => pulls, cancelled: () => cancelled };
+    }
+
+    function streamingRequest(
+      stream: ReadableStream<Uint8Array>,
+      headers: Record<string, string>,
+    ) {
+      return new Request("http://test.local/api/platform-mcp", {
+        method: "POST",
+        headers,
+        body: stream,
+        duplex: "half",
+      } as RequestInit);
+    }
+
+    it("does not read an unauthenticated streaming body", async () => {
+      authenticatePlatformPat.mockRejectedValue(
+        appError({
+          appCode: APP_ERROR_CODES.MCP_AGENT_TOKEN_INVALID,
+          message: "Agent token is invalid.",
+          status: 401,
+        }),
+      );
+      const body = trackedBody([
+        new TextEncoder().encode(
+          JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+        ),
+      ]);
+      const request = streamingRequest(body.stream, {
+        Authorization: "Bearer revoked-token",
+        "Content-Type": "application/json",
+      });
+
+      const pullsBefore = body.pulls();
+      const response = await createApp().fetch(request);
+
+      expect(response.status).toBe(401);
+      expect(response.headers.get("WWW-Authenticate")).toBe(
+        'Bearer realm="platform-mcp", error="invalid_token"',
+      );
+      await expect(response.json()).resolves.toMatchObject({
+        code: APP_ERROR_CODES.MCP_AGENT_TOKEN_INVALID,
+      });
+      expect(body.pulls()).toBe(pullsBefore);
+      expect(body.cancelled()).toBe(false);
+      expect(handleMcpHttpRequest).not.toHaveBeenCalled();
+    });
+
+    it("cancels an oversized chunked body instead of buffering it", async () => {
+      authenticatePlatformPat.mockResolvedValue(platformPrincipal(["read"]));
+      const body = trackedBody([
+        new Uint8Array(MCP_GATEWAY_REQUEST_SIZE_LIMIT + 1),
+      ]);
+      const request = streamingRequest(body.stream, {
+        Authorization: "Bearer platform-token",
+      });
+
+      const response = await createApp().fetch(request);
+
+      expect(response.status).toBe(413);
+      await expect(response.json()).resolves.toMatchObject({
+        code: APP_ERROR_CODES.MCP_REQUEST_TOO_LARGE,
+      });
+      expect(body.cancelled()).toBe(true);
+      expect(handleMcpHttpRequest).not.toHaveBeenCalled();
+    });
+
+    it("rejects a declared oversized content-length before reading the body", async () => {
+      const body = trackedBody([new Uint8Array(32)]);
+      const request = streamingRequest(body.stream, {
+        Authorization: "Bearer platform-token",
+        "Content-Length": String(MCP_GATEWAY_REQUEST_SIZE_LIMIT + 1),
+      });
+
+      const response = await createApp().fetch(request);
+
+      expect(response.status).toBe(413);
+      await expect(response.json()).resolves.toMatchObject({
+        code: APP_ERROR_CODES.MCP_REQUEST_TOO_LARGE,
+      });
+      expect(authenticatePlatformPat).not.toHaveBeenCalled();
+      expect(body.pulls()).toBe(0);
+      expect(body.cancelled()).toBe(false);
+      expect(handleMcpHttpRequest).not.toHaveBeenCalled();
+    });
+
+    it("denies a statically under-scoped tools/call without constructing handlers", async () => {
+      authenticatePlatformPat.mockResolvedValue(platformPrincipal(["read"]));
+
+      const response = await createApp().request("/api/platform-mcp", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer platform-token",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "test_tool",
+            arguments: { serverId: "mcs_1", toolId: "mct_1" },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(403);
+      expect(response.headers.get("WWW-Authenticate")).toBe(
+        'Bearer realm="platform-mcp", error="insufficient_scope", scope="invoke"',
+      );
+      await expect(response.json()).resolves.toMatchObject({
+        code: APP_ERROR_CODES.MCP_SCOPE_DENIED,
+      });
+      expect(handleMcpHttpRequest).not.toHaveBeenCalled();
+      expect(getToolMethod).not.toHaveBeenCalled();
+      expect(executeMappedTool).not.toHaveBeenCalled();
+    });
+
+    it("does not expose OAuth protected-resource discovery", async () => {
+      const response = await createApp().request(
+        "/api/platform-mcp/.well-known/oauth-protected-resource",
+        { method: "GET" },
+      );
+
+      expect(response.status).toBe(404);
+      expect(response.headers.get("WWW-Authenticate")).toBeNull();
+      expect(handleMcpHttpRequest).not.toHaveBeenCalled();
+      expect(authenticatePlatformPat).not.toHaveBeenCalled();
     });
   });
 });

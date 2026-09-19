@@ -242,15 +242,33 @@ describe("platform contract fixtures", () => {
     expect(new Set(names).size).toBe(names.length);
     const allowed = new Set([
       "read",
+      "observe",
       "author",
+      "publish",
       "invoke",
+      "invoke_mutation",
       "secret_reference",
+      "destructive",
+    ]);
+    const riskTiers = new Set([
+      "read",
+      "observe",
+      "author",
+      "publish",
+      "invoke",
+      "invoke_mutation",
       "destructive",
     ]);
     for (const tool of PLATFORM_REGISTRY) {
       for (const scope of tool.scopes) {
         expect(allowed.has(scope)).toBe(true);
       }
+      // Registry completeness: every tool carries authorization metadata.
+      expect(tool.scopes.length).toBeGreaterThan(0);
+      expect(riskTiers.has(tool.risk)).toBe(true);
+      expect(
+        tool.resourceArg === null || typeof tool.resourceArg === "string",
+      ).toBe(true);
     }
     const listServers = PLATFORM_REGISTRY.find(
       (tool) => tool.name === "list_servers",
@@ -276,6 +294,7 @@ describe("platform contract fixtures", () => {
       "delete_variable",
       "duplicate_tool",
       "get_connection_snippet",
+      "get_tool_definition",
       "list_recent_calls",
       "list_servers",
       "list_tools",

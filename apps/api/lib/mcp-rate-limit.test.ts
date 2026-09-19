@@ -1,17 +1,248 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  clearPlatformRateLimitState,
+  releasePlatformRequest,
   releaseServerSlot,
   resetRateLimitState,
+  sweepIdlePlatformRateLimitState,
+  tryAcquirePlatformRequest,
+  tryAcquirePlatformWrite,
   tryAcquireInvocation,
 } from "./mcp-rate-limit.js";
 import {
+  MCP_PLATFORM_CONCURRENCY_LIMIT,
+  MCP_PLATFORM_REQUEST_CAPACITY,
+  MCP_PLATFORM_REQUEST_REFILL_PER_SEC,
+  MCP_PLATFORM_WRITE_CAPACITY,
   MCP_RATE_LIMIT_MUTATION_CAPACITY,
   MCP_RATE_LIMIT_TOKEN_CAPACITY,
+  MCP_RATE_LIMIT_TOKEN_REFILL_PER_SEC,
   MCP_SERVER_CONCURRENCY_LIMIT,
 } from "./mcp-policy.js";
 
 afterEach(() => {
   resetRateLimitState();
+  vi.useRealTimers();
+});
+
+describe("platform control-plane budgets", () => {
+  it("caps concurrent requests per PAT and refunds on release", () => {
+    for (let i = 0; i < MCP_PLATFORM_CONCURRENCY_LIMIT; i += 1) {
+      expect(tryAcquirePlatformRequest("mtk_a").ok).toBe(true);
+    }
+    expect(tryAcquirePlatformRequest("mtk_a").ok).toBe(false);
+
+    releasePlatformRequest("mtk_a");
+    expect(tryAcquirePlatformRequest("mtk_a").ok).toBe(true);
+    for (let i = 0; i < MCP_PLATFORM_CONCURRENCY_LIMIT; i += 1) {
+      releasePlatformRequest("mtk_a");
+    }
+  });
+
+  it("isolates budgets per token", () => {
+    for (let i = 0; i < MCP_PLATFORM_CONCURRENCY_LIMIT; i += 1) {
+      tryAcquirePlatformRequest("mtk_a");
+    }
+    expect(tryAcquirePlatformRequest("mtk_a").ok).toBe(false);
+    expect(tryAcquirePlatformRequest("mtk_b").ok).toBe(true);
+  });
+
+  it("caps writes more strictly than requests", () => {
+    for (let i = 0; i < MCP_PLATFORM_WRITE_CAPACITY; i += 1) {
+      expect(tryAcquirePlatformWrite("mtk_a").ok).toBe(true);
+    }
+    expect(tryAcquirePlatformWrite("mtk_a").ok).toBe(false);
+    // Request capacity is larger and untouched by write consumption.
+    expect(MCP_PLATFORM_REQUEST_CAPACITY).toBeGreaterThan(
+      MCP_PLATFORM_WRITE_CAPACITY,
+    );
+  });
+
+  it("clears state on revocation and sweeps idle buckets", () => {
+    tryAcquirePlatformRequest("mtk_revoked");
+    clearPlatformRateLimitState("mtk_revoked");
+    expect(tryAcquirePlatformRequest("mtk_revoked").ok).toBe(true);
+    releasePlatformRequest("mtk_revoked");
+
+    tryAcquirePlatformRequest("mtk_idle");
+    releasePlatformRequest("mtk_idle");
+    expect(sweepIdlePlatformRateLimitState(0)).toBeGreaterThanOrEqual(1);
+  });
+
+  it("refills the request bucket over time after exhaustion", () => {
+    vi.useFakeTimers();
+    const token = "mtk_refill";
+
+    for (let i = 0; i < MCP_PLATFORM_REQUEST_CAPACITY; i += 1) {
+      expect(tryAcquirePlatformRequest(token).ok).toBe(true);
+      releasePlatformRequest(token);
+    }
+    expect(tryAcquirePlatformRequest(token).ok).toBe(false);
+
+    const refillWindowMs = Math.ceil(
+      (1 / MCP_PLATFORM_REQUEST_REFILL_PER_SEC) * 1000,
+    );
+
+    vi.advanceTimersByTime(refillWindowMs - 100);
+    expect(tryAcquirePlatformRequest(token).ok).toBe(false);
+
+    vi.advanceTimersByTime(200);
+    expect(tryAcquirePlatformRequest(token).ok).toBe(true);
+    releasePlatformRequest(token);
+  });
+
+  it("caps writes independently per token without requiring a refund", () => {
+    const tokenA = "mtk_write_a";
+    const tokenB = "mtk_write_b";
+
+    for (let i = 0; i < MCP_PLATFORM_WRITE_CAPACITY; i += 1) {
+      expect(tryAcquirePlatformWrite(tokenA).ok).toBe(true);
+    }
+    expect(tryAcquirePlatformWrite(tokenA).ok).toBe(false);
+
+    // Write buckets are per token: exhausting one leaves the other untouched.
+    expect(tryAcquirePlatformWrite(tokenB).ok).toBe(true);
+
+    // No release API exists for writes; request activity neither refunds nor
+    // further consumes the already exhausted write bucket.
+    for (let i = 0; i < MCP_PLATFORM_REQUEST_CAPACITY; i += 1) {
+      tryAcquirePlatformRequest(tokenA);
+      releasePlatformRequest(tokenA);
+    }
+    expect(tryAcquirePlatformRequest(tokenA).ok).toBe(false);
+    expect(tryAcquirePlatformWrite(tokenA).ok).toBe(false);
+  });
+
+  it("refunds a concurrency slot exactly once and never goes negative", () => {
+    const token = "mtk_concurrency";
+
+    expect(tryAcquirePlatformRequest(token).ok).toBe(true);
+    releasePlatformRequest(token);
+    releasePlatformRequest(token);
+
+    // Exactly MCP_PLATFORM_CONCURRENCY_LIMIT slots are available: a negative
+    // counter would have granted extra concurrency.
+    for (let i = 0; i < MCP_PLATFORM_CONCURRENCY_LIMIT; i += 1) {
+      expect(tryAcquirePlatformRequest(token).ok).toBe(true);
+    }
+    expect(tryAcquirePlatformRequest(token).ok).toBe(false);
+
+    for (let i = 0; i < MCP_PLATFORM_CONCURRENCY_LIMIT; i += 1) {
+      releasePlatformRequest(token);
+    }
+    expect(tryAcquirePlatformRequest(token).ok).toBe(true);
+    releasePlatformRequest(token);
+  });
+
+  it("drops request, write, and concurrency state on revocation", () => {
+    const token = "mtk_revoked";
+
+    for (let i = 0; i < MCP_PLATFORM_REQUEST_CAPACITY; i += 1) {
+      tryAcquirePlatformRequest(token);
+      releasePlatformRequest(token);
+    }
+    for (let i = 0; i < MCP_PLATFORM_WRITE_CAPACITY; i += 1) {
+      tryAcquirePlatformWrite(token);
+    }
+    expect(tryAcquirePlatformRequest(token).ok).toBe(false);
+    expect(tryAcquirePlatformWrite(token).ok).toBe(false);
+
+    clearPlatformRateLimitState(token);
+
+    expect(tryAcquirePlatformRequest(token).ok).toBe(true);
+    releasePlatformRequest(token);
+    expect(tryAcquirePlatformWrite(token).ok).toBe(true);
+
+    for (let i = 0; i < MCP_PLATFORM_CONCURRENCY_LIMIT; i += 1) {
+      expect(tryAcquirePlatformRequest(token).ok).toBe(true);
+    }
+    expect(tryAcquirePlatformRequest(token).ok).toBe(false);
+  });
+
+  it("sweeps idle tokens but preserves tokens with in-flight concurrency", () => {
+    vi.useFakeTimers();
+    const idle = "mtk_idle";
+    const busy = "mtk_busy";
+
+    for (let i = 0; i < MCP_PLATFORM_WRITE_CAPACITY; i += 1) {
+      tryAcquirePlatformWrite(idle);
+      tryAcquirePlatformWrite(busy);
+    }
+    expect(tryAcquirePlatformWrite(idle).ok).toBe(false);
+    expect(tryAcquirePlatformWrite(busy).ok).toBe(false);
+
+    expect(tryAcquirePlatformRequest(busy).ok).toBe(true);
+
+    vi.advanceTimersByTime(1_000);
+    expect(sweepIdlePlatformRateLimitState(500)).toBe(1);
+
+    // Cleared token starts with a full write bucket.
+    expect(tryAcquirePlatformWrite(idle).ok).toBe(true);
+    // In-flight token keeps its still-depleted bucket across the idle window.
+    expect(tryAcquirePlatformWrite(busy).ok).toBe(false);
+
+    releasePlatformRequest(busy);
+  });
+
+  it("keeps Platform and invocation buckets from interfering", () => {
+    vi.useFakeTimers();
+    const token = "tok_shared";
+    const server = "srv_shared";
+
+    for (let i = 0; i < MCP_PLATFORM_REQUEST_CAPACITY; i += 1) {
+      tryAcquirePlatformRequest(token);
+      releasePlatformRequest(token);
+    }
+    expect(tryAcquirePlatformRequest(token).ok).toBe(false);
+
+    // Exhausted Platform budget does not touch the invocation budget.
+    expect(
+      tryAcquireInvocation({
+        tokenId: token,
+        serverId: server,
+        mutating: false,
+      }).ok,
+    ).toBe(true);
+    releaseServerSlot(server);
+
+    for (let i = 1; i < MCP_RATE_LIMIT_TOKEN_CAPACITY; i += 1) {
+      expect(
+        tryAcquireInvocation({
+          tokenId: token,
+          serverId: server,
+          mutating: false,
+        }).ok,
+      ).toBe(true);
+      releaseServerSlot(server);
+    }
+    expect(
+      tryAcquireInvocation({
+        tokenId: token,
+        serverId: server,
+        mutating: false,
+      }).ok,
+    ).toBe(false);
+
+    // Advance to where only the faster Platform bucket has refilled.
+    const requestWindowMs = Math.ceil(
+      (1 / MCP_PLATFORM_REQUEST_REFILL_PER_SEC) * 1000,
+    );
+    const invocationWindowMs = Math.ceil(
+      (1 / MCP_RATE_LIMIT_TOKEN_REFILL_PER_SEC) * 1000,
+    );
+    expect(requestWindowMs).toBeLessThan(invocationWindowMs);
+    vi.advanceTimersByTime(requestWindowMs + 1);
+
+    expect(tryAcquirePlatformRequest(token).ok).toBe(true);
+    releasePlatformRequest(token);
+    expect(
+      tryAcquireInvocation({
+        tokenId: token,
+        serverId: server,
+        mutating: false,
+      }).ok,
+    ).toBe(false);
+  });
 });
 
 describe("tryAcquireInvocation: per-token bucket", () => {

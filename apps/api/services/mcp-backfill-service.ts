@@ -24,7 +24,6 @@ import type {
   McpAuthConfiguration,
   McpCommonEntries,
 } from "../lib/mcp-request-definition.js";
-import { revokeUnscopedPlatformTokens } from "./mcp-studio-service.js";
 
 type DB = PostgresJsDatabase<Record<string, unknown>>;
 
@@ -34,7 +33,6 @@ export type BackfillSummary = {
   toolsInvalidDisabled: number;
   toolsSkipped: number;
   serversCommonBackfilled: number;
-  platformTokensRevoked: number;
 };
 
 function toServerValueRefs(
@@ -199,7 +197,6 @@ export async function backfillMcpExecutionBoundary(
     toolsInvalidDisabled: 0,
     toolsSkipped: 0,
     serversCommonBackfilled: 0,
-    platformTokensRevoked: 0,
   };
 
   const servers = options.userId
@@ -241,11 +238,5 @@ export async function backfillMcpExecutionBoundary(
     }
   }
 
-  summary.platformTokensRevoked = await revokeUnscopedPlatformTokens(db);
   return summary;
-}
-
-/** Convenience for scripts that only need unscoped token revocation. */
-export async function revokeLegacyPlatformTokens(db: DB): Promise<number> {
-  return revokeUnscopedPlatformTokens(db);
 }

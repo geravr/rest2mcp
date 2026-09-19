@@ -6,6 +6,11 @@
  * deployment (see `openspec/changes/harden-mcp-execution-boundary/design.md`).
  */
 import {
+  MCP_PLATFORM_CONCURRENCY_LIMIT,
+  MCP_PLATFORM_REQUEST_CAPACITY,
+  MCP_PLATFORM_REQUEST_REFILL_PER_SEC,
+  MCP_PLATFORM_WRITE_CAPACITY,
+  MCP_PLATFORM_WRITE_REFILL_PER_SEC,
   MCP_RATE_LIMIT_MUTATION_CAPACITY,
   MCP_RATE_LIMIT_MUTATION_REFILL_PER_SEC,
   MCP_RATE_LIMIT_TOKEN_CAPACITY,
@@ -144,9 +149,107 @@ export function releaseServerSlot(serverId: string): void {
   }
 }
 
+/**
+ * Per-PAT Platform control-plane budgets. A request bucket caps all Platform
+ * MCP traffic, a stricter write bucket caps control-plane writes, and a
+ * per-token counter caps concurrent in-flight requests. State is process-local
+ * (documented single-process deployment limitation) and swept when idle.
+ */
+const platformRequestBuckets = new Map<string, TokenBucket>();
+const platformWriteBuckets = new Map<string, TokenBucket>();
+const platformConcurrency = new Map<string, number>();
+const platformLastSeen = new Map<string, number>();
+
+const PLATFORM_LIMIT_IDLE_MS = 30 * 60 * 1000;
+
+function touchPlatformState(tokenId: string, now: number): void {
+  platformLastSeen.set(tokenId, now);
+}
+
+/**
+ * Acquires authenticated control-plane capacity before the body is read.
+ * Caller MUST call `releasePlatformRequest` exactly once on success.
+ */
+export function tryAcquirePlatformRequest(tokenId: string): {
+  ok: boolean;
+  retryAfterSeconds?: number;
+} {
+  const now = Date.now();
+  touchPlatformState(tokenId, now);
+
+  const inFlight = platformConcurrency.get(tokenId) ?? 0;
+  if (inFlight >= MCP_PLATFORM_CONCURRENCY_LIMIT) {
+    return { ok: false, retryAfterSeconds: 1 };
+  }
+
+  const bucket = getOrCreateBucket(
+    platformRequestBuckets,
+    tokenId,
+    MCP_PLATFORM_REQUEST_CAPACITY,
+    MCP_PLATFORM_REQUEST_REFILL_PER_SEC,
+  );
+  const consumed = tryConsume(bucket, now);
+  if (!consumed.ok) return consumed;
+
+  platformConcurrency.set(tokenId, inFlight + 1);
+  return { ok: true };
+}
+
+export function releasePlatformRequest(tokenId: string): void {
+  const current = platformConcurrency.get(tokenId) ?? 0;
+  if (current <= 1) {
+    platformConcurrency.delete(tokenId);
+  } else {
+    platformConcurrency.set(tokenId, current - 1);
+  }
+}
+
+/** Consumes one control-plane write token; returns false when exhausted. */
+export function tryAcquirePlatformWrite(tokenId: string): {
+  ok: boolean;
+  retryAfterSeconds?: number;
+} {
+  const now = Date.now();
+  touchPlatformState(tokenId, now);
+  const bucket = getOrCreateBucket(
+    platformWriteBuckets,
+    tokenId,
+    MCP_PLATFORM_WRITE_CAPACITY,
+    MCP_PLATFORM_WRITE_REFILL_PER_SEC,
+  );
+  return tryConsume(bucket, now);
+}
+
+/** Drops all limiter state for a revoked/expired PAT. */
+export function clearPlatformRateLimitState(tokenId: string): void {
+  platformRequestBuckets.delete(tokenId);
+  platformWriteBuckets.delete(tokenId);
+  platformConcurrency.delete(tokenId);
+  platformLastSeen.delete(tokenId);
+}
+
+/** Bounds idle-bucket retention to prevent unbounded memory growth. */
+export function sweepIdlePlatformRateLimitState(
+  maxIdleMs: number = PLATFORM_LIMIT_IDLE_MS,
+): number {
+  const cutoff = Date.now() - maxIdleMs;
+  let removed = 0;
+  for (const [tokenId, lastSeen] of platformLastSeen) {
+    if (lastSeen > cutoff) continue;
+    if ((platformConcurrency.get(tokenId) ?? 0) > 0) continue;
+    clearPlatformRateLimitState(tokenId);
+    removed += 1;
+  }
+  return removed;
+}
+
 /** Test-only: clears all bucket and concurrency state. */
 export function resetRateLimitState(): void {
   invocationBuckets.clear();
   mutationBuckets.clear();
   serverConcurrency.clear();
+  platformRequestBuckets.clear();
+  platformWriteBuckets.clear();
+  platformConcurrency.clear();
+  platformLastSeen.clear();
 }

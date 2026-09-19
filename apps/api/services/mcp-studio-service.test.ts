@@ -87,9 +87,7 @@ import {
 } from "@repo/db";
 import { appError } from "../lib/app-error.js";
 import {
-  authenticateAgentToken,
   createLegacyTool,
-  createPlatformToken,
   createServer,
   createTool,
   createToolFromCurl,
@@ -105,7 +103,6 @@ import {
   listVariables,
   mutationDefaults,
   previewCurlImport,
-  revokeUnscopedPlatformTokens,
   setServerAuth,
   setVariable,
   testConnection,
@@ -373,79 +370,6 @@ describe("mcp-studio ownership", () => {
       lastCallAt: lastCall,
       trafficLight: "green",
     });
-  });
-
-  it("rejects tokens belonging to a suspended account", async () => {
-    isUserBanned.mockResolvedValueOnce(true);
-    const db = makeDb([
-      [
-        {
-          id: "mtk_1",
-          kind: "platform",
-          serverId: null,
-          userId: "usr_1",
-          revokedAt: null,
-          expiresAt: null,
-          scopes: ["read"],
-        },
-      ],
-    ]);
-
-    await expect(
-      authenticateAgentToken(db as never, "rmcp_test", { kind: "platform" }),
-    ).rejects.toSatisfy(
-      (error: unknown) =>
-        error instanceof AppError &&
-        error.appCode === APP_ERROR_CODES.ACCOUNT_SUSPENDED,
-    );
-    expect(db.update).not.toHaveBeenCalled();
-  });
-
-  it("rejects legacy unscoped platform tokens as invalid", async () => {
-    const db = makeDb([
-      [
-        {
-          id: "mtk_1",
-          kind: "platform",
-          serverId: null,
-          userId: "usr_1",
-          revokedAt: null,
-          expiresAt: null,
-          scopes: null,
-        },
-      ],
-    ]);
-
-    await expect(
-      authenticateAgentToken(db as never, "rmcp_test", { kind: "platform" }),
-    ).rejects.toSatisfy(
-      (error: unknown) =>
-        error instanceof AppError &&
-        error.appCode === APP_ERROR_CODES.MCP_AGENT_TOKEN_INVALID,
-    );
-    expect(db.update).not.toHaveBeenCalled();
-  });
-
-  it("rejects a server token when a platform token is required", async () => {
-    const db = makeDb([
-      [
-        {
-          id: "mtk_1",
-          kind: "server",
-          serverId: "mcs_1",
-          revokedAt: null,
-          expiresAt: null,
-        },
-      ],
-    ]);
-
-    await expect(
-      authenticateAgentToken(db as never, "rmcp_test", { kind: "platform" }),
-    ).rejects.toSatisfy(
-      (error: unknown) =>
-        error instanceof AppError &&
-        error.appCode === APP_ERROR_CODES.MCP_AGENT_TOKEN_INVALID,
-    );
   });
 
   it("maps unique slug violations to MCP_SERVER_SLUG_CONFLICT", async () => {
@@ -2646,171 +2570,5 @@ describe("mcp-studio testConnection", () => {
         error instanceof AppError &&
         error.appCode === APP_ERROR_CODES.MCP_SERVER_NOT_FOUND,
     );
-  });
-});
-
-describe("mcp-studio createPlatformToken", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("creates a new PAT with default scopes without revoking others", async () => {
-    const db = makeDb([
-      [], // user lock
-      [], // revoke expired platform tokens
-      [{ count: 0 }], // active count
-      [
-        {
-          id: "mtk_1",
-          name: "Platform token",
-          prefix: "rmcp_abc",
-          expiresAt: new Date(),
-          createdAt: new Date(),
-        },
-      ],
-    ]);
-
-    const result = await createPlatformToken(db as never, "user-a");
-
-    expect(result.scopes).toEqual([
-      "read",
-      "author",
-      "invoke",
-      "secret_reference",
-    ]);
-    expect(db.transaction).toHaveBeenCalledTimes(1);
-    expect(typeof result.token).toBe("string");
-    // Added rather than replaced: no successor lineage is set.
-    expect(db.insertedValues).toHaveLength(1);
-    expect(
-      (db.insertedValues[0] as Record<string, unknown>).replacedByTokenId ??
-        null,
-    ).toBeNull();
-  });
-
-  it("accepts explicit scopes and a custom expiry window", async () => {
-    const db = makeDb([
-      [],
-      [], // revoke expired platform tokens
-      [{ count: 0 }],
-      [
-        {
-          id: "mtk_1",
-          name: "Read only",
-          prefix: "rmcp_abc",
-          expiresAt: new Date(),
-          createdAt: new Date(),
-        },
-      ],
-    ]);
-
-    await createPlatformToken(db as never, "user-a", {
-      name: "Read only",
-      scopes: ["read"],
-      expiresInDays: 7,
-    });
-
-    const insertPayload = db.insertedValues[0] as Record<string, unknown>;
-    expect(insertPayload.scopes).toEqual(["read"]);
-    expect(insertPayload.kind).toBe("platform");
-  });
-
-  it("rotates the observed token and couples revoke with insert in one transaction", async () => {
-    const observed = {
-      id: "mtk_old",
-      userId: "user-a",
-      kind: "platform",
-      revokedAt: null,
-      expiresAt: null,
-    };
-    const update = vi.fn(() => ({
-      set: () => ({ where: () => Promise.resolve([]) }),
-    }));
-    let selectIndex = 0;
-    const db = {
-      select: vi.fn(() => {
-        const rows =
-          [[{ id: "usr_1" }], [observed], [{ count: 0 }]][selectIndex++] ?? [];
-        return {
-          from: () => ({
-            where: () => {
-              const promise = Promise.resolve(rows);
-              return Object.assign(promise, {
-                limit: () => Promise.resolve(rows),
-                for: () => ({ limit: () => Promise.resolve(rows) }),
-              });
-            },
-          }),
-        };
-      }),
-      update,
-      insert: vi.fn(() => ({
-        values: () => ({
-          returning: async () => {
-            throw new Error("insert failed");
-          },
-        }),
-      })),
-      transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
-        fn(db),
-      ),
-    };
-
-    await expect(
-      createPlatformToken(db as never, "user-a", {
-        replacesTokenId: "mtk_old",
-      }),
-    ).rejects.toThrow("insert failed");
-    expect(db.transaction).toHaveBeenCalledTimes(1);
-    // Expired-token cleanup + revoke of the observed token.
-    expect(update).toHaveBeenCalledTimes(2);
-  });
-
-  it("rejects rotating a token that is no longer active", async () => {
-    const db = makeDb([
-      [], // user lock
-      [], // revoke expired platform tokens
-      [
-        {
-          id: "mtk_old",
-          userId: "user-a",
-          kind: "platform",
-          revokedAt: new Date(),
-          expiresAt: null,
-        },
-      ],
-    ]);
-
-    await expect(
-      createPlatformToken(db as never, "user-a", {
-        replacesTokenId: "mtk_old",
-      }),
-    ).rejects.toMatchObject({
-      appCode: APP_ERROR_CODES.MCP_WRITE_CONFLICT,
-    });
-    expect(db.insert).not.toHaveBeenCalled();
-  });
-});
-
-describe("mcp-studio revokeUnscopedPlatformTokens", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("revokes only unscoped, active platform tokens", async () => {
-    const db = makeDb([[{ id: "mtk_1" }, { id: "mtk_2" }]]);
-
-    const count = await revokeUnscopedPlatformTokens(db as never);
-
-    expect(count).toBe(2);
-    expect(db.update).toHaveBeenCalledTimes(1);
-  });
-
-  it("never touches server-scoped agent tokens", async () => {
-    const db = makeDb([[]]);
-    await revokeUnscopedPlatformTokens(db as never);
-    // The where() call always filters on kind === "platform"; server tokens
-    // are a different `kind` and are structurally excluded from the update.
-    expect(db.update).toHaveBeenCalledTimes(1);
   });
 });

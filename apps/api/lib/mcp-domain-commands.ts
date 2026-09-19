@@ -3,7 +3,11 @@
  * Keep field/payload limits identical across both transports.
  */
 import { z } from "zod";
-import { MCP_DEFAULT_PLATFORM_SCOPES, MCP_PLATFORM_SCOPES } from "@repo/core";
+import {
+  MCP_DEFAULT_PLATFORM_SCOPES,
+  MCP_PLATFORM_RESOURCE_MODES,
+  MCP_PLATFORM_SCOPES,
+} from "@repo/core";
 import {
   MCP_FIELD_LIMITS,
   mcpAgentInputSchema,
@@ -296,20 +300,44 @@ export const curlConfirmCommandSchema = z.strictObject({
     .default([]),
 });
 
-export const createPlatformTokenCommandSchema = z.object({
-  name: z.string().trim().min(1).max(MCP_FIELD_LIMITS.name).optional(),
+/** Grant fields shared by creation, rotation, and step-up approval. */
+export const platformPatGrantInputSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(MCP_FIELD_LIMITS.name)
+    .describe("Required human-readable token name."),
   scopes: z
     .array(z.enum(MCP_PLATFORM_SCOPES))
     .min(1)
     .default([...MCP_DEFAULT_PLATFORM_SCOPES]),
-  expiresInDays: z.number().int().min(1).max(365).optional(),
-  /** Rotate this observed active PAT instead of adding another. */
-  replacesTokenId: z
-    .string()
-    .min(1)
+  resourceMode: z.enum(MCP_PLATFORM_RESOURCE_MODES),
+  serverIds: z
+    .array(z.string().min(1))
+    .max(50)
     .optional()
-    .describe("Observed active Platform token id to rotate."),
+    .describe("Owned server ids for selected resource mode."),
+  expiresInDays: z.number().int().min(1).max(365).optional(),
 });
+
+export const createPlatformPatCommandSchema = platformPatGrantInputSchema;
+
+export const rotatePlatformPatCommandSchema =
+  platformPatGrantInputSchema.extend({
+    tokenId: z.string().min(1).describe("Active Platform token id to rotate."),
+  });
+
+export const revokePlatformPatCommandSchema = z.object({
+  tokenId: z.string().min(1),
+});
+
+/** Verifies a step-up OTP and binds it to the exact requested grant. */
+export const verifyPlatformStepUpCommandSchema = platformPatGrantInputSchema
+  .omit({ name: true, expiresInDays: true })
+  .extend({
+    otp: z.string().regex(/^\d{6}$/),
+  });
 
 /** Dry-run compile preview: same typed definition the Studio tool form builds, no persistence. */
 export const previewToolCompileCommandSchema = z.strictObject({

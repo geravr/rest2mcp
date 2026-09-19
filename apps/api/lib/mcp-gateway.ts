@@ -36,7 +36,7 @@ import {
   loadExecutionSnapshot,
   MUTATING_METHODS,
 } from "../services/mcp-executor-service.js";
-import { authenticateAgentToken } from "../services/mcp-studio-service.js";
+import { authenticateServerToken } from "../services/mcp-agent-auth-service.js";
 
 function isTrustedOrigin(origin: string, appOrigin: string): boolean {
   try {
@@ -118,10 +118,7 @@ export function createMcpGatewayRoutes() {
 
     let token;
     try {
-      token = await authenticateAgentToken(db, rawToken, {
-        kind: "server",
-        serverId,
-      });
+      token = await authenticateServerToken(db, rawToken, serverId);
     } catch (error) {
       if (error instanceof AppError) {
         return c.json(

@@ -22,6 +22,14 @@ export const MCP_TELEMETRY_EVENTS = {
   aggregateConflict: "mcp_aggregate_conflict",
   /** A fully-rolled-back transient failure was retried. */
   aggregateRetry: "mcp_aggregate_retry",
+  /** A Platform security event could not be persisted (runtime paths only). */
+  securityEventPersistFailed: "mcp_platform_security_event_persist_failed",
+  /** A Platform scope/resource denial occurred, counted without resource ids. */
+  platformDenial: "mcp_platform_denial",
+  /** A high-risk Platform grant was issued. */
+  platformHighRiskGrant: "mcp_platform_high_risk_grant",
+  /** Active Platform PAT inventory snapshot (counts only). */
+  platformTokenInventory: "mcp_platform_token_inventory",
 } as const;
 
 export type McpTelemetryEvent =

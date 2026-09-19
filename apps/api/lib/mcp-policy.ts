@@ -61,18 +61,46 @@ export const MCP_LOG_PREVIEW_BYTE_LIMIT = 8 * 1024;
 /** Bounded in-process audit queue depth before drops are counted. */
 export const MCP_AUDIT_QUEUE_CAPACITY = 256;
 
-/** Default Platform MCP token lifetime. */
-export const MCP_PLATFORM_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000;
-
-/** Max concurrently active Platform PATs for one user. */
-export const MCP_MAX_PLATFORM_TOKENS = 20;
-
 export const MCP_REQUEST_DEFINITION_VERSION = 1 as const;
 
 export {
+  canonicalPlatformGrant,
+  defaultPlatformTtlDays,
+  isHighRiskPlatformGrant,
+  isMcpPlatformResourceMode,
+  isMcpPlatformScope,
+  maxPlatformTtlDays,
   MCP_DEFAULT_PLATFORM_SCOPES,
+  MCP_MAX_ACTIVE_PLATFORM_TOKENS,
+  MCP_PLATFORM_CONCURRENCY_LIMIT,
+  MCP_PLATFORM_HIGH_RISK_SCOPES,
+  MCP_PLATFORM_HIGH_RISK_TTL_DEFAULT_DAYS,
+  MCP_PLATFORM_HIGH_RISK_TTL_MAX_DAYS,
+  MCP_PLATFORM_LOW_RISK_TTL_DEFAULT_DAYS,
+  MCP_PLATFORM_LOW_RISK_TTL_MAX_DAYS,
+  MCP_PLATFORM_POLICY_VERSION,
+  MCP_PLATFORM_PRESETS,
+  MCP_PLATFORM_PRESET_IDS,
+  MCP_PLATFORM_READ_SCOPE,
+  MCP_PLATFORM_REQUEST_CAPACITY,
+  MCP_PLATFORM_REQUEST_REFILL_PER_SEC,
+  MCP_PLATFORM_RESOURCE_MODES,
+  MCP_PLATFORM_SCOPE_DEPENDENCIES,
   MCP_PLATFORM_SCOPES,
-  type McpPlatformScope,
+  MCP_PLATFORM_SECURITY_EVENT_RETENTION_DAYS,
+  MCP_PLATFORM_STEP_UP_TTL_MS,
+  MCP_PLATFORM_SUPPORTED_POLICY_VERSIONS,
+  MCP_PLATFORM_WRITE_CAPACITY,
+  MCP_PLATFORM_WRITE_REFILL_PER_SEC,
+  sortPlatformScopes,
+  validatePlatformScopes,
+} from "@repo/core";
+export type {
+  McpPlatformPreset,
+  McpPlatformResourceMode,
+  McpPlatformScope,
+  PlatformGrantFingerprintInput,
+  PlatformScopeValidationFailure,
 } from "@repo/core";
 
 /**

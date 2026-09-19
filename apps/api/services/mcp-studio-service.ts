@@ -8,27 +8,14 @@ import {
   mcpServer,
   mcpServerVariable,
   mcpTool,
-  user,
   type McpAuthConfigurationRow,
   type McpNamedEntryRow,
-  type McpPlatformScopeRow,
   type McpRequestTemplate,
   type McpServer,
   type McpServerVariable,
   type McpToolParam,
 } from "@repo/db";
-import {
-  and,
-  count,
-  desc,
-  eq,
-  gt,
-  inArray,
-  isNotNull,
-  isNull,
-  lt,
-  or,
-} from "drizzle-orm";
+import { and, count, desc, eq, inArray } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import {
   APP_ERROR_CODES,
@@ -46,7 +33,7 @@ import {
   templatesReferenceVariable,
   type ServerAuthRecipe,
 } from "../lib/mcp-auth-recipe.js";
-import { generateAgentToken, hashAgentToken } from "../lib/mcp-agent-token.js";
+import { generateAgentToken } from "../lib/mcp-agent-token.js";
 import type { CompileServerValueRef } from "../lib/mcp-compiler.js";
 import { compileToolDefinition } from "../lib/mcp-compiler.js";
 import {
@@ -69,11 +56,6 @@ import {
   projectDefinitionToLegacy,
   renderDefinitionToLegacy,
 } from "../lib/mcp-legacy-migrate.js";
-import {
-  MCP_DEFAULT_PLATFORM_SCOPES,
-  MCP_MAX_PLATFORM_TOKENS,
-  MCP_PLATFORM_TOKEN_TTL_MS,
-} from "../lib/mcp-policy.js";
 import { isForbiddenTransportHeaderName } from "../lib/mcp-policy.js";
 import { MCP_MAX_TOOLS_PER_SERVER } from "../lib/mcp-redact.js";
 import {
@@ -99,10 +81,8 @@ import {
   type RenderScope,
 } from "../lib/mcp-template.js";
 import { paginate } from "../lib/paginate.js";
-import { isUserBanned } from "../lib/user-access.js";
 import {
   isUniqueViolation,
-  translateWriteError,
   withOwnedServerWrite,
 } from "./mcp-server-command.js";
 import {
@@ -497,8 +477,20 @@ export async function listServers(
   db: DB,
   userId: string,
   input: PaginationInput,
+  options: { allowedServerIds?: readonly string[] } = {},
 ): Promise<Paginated<McpServerWithMeta>> {
-  const where = eq(mcpServer.userId, userId);
+  if (options.allowedServerIds && options.allowedServerIds.length === 0) {
+    return { items: [], page: input.page, pageSize: input.pageSize, total: 0 };
+  }
+  // Selected-server principals constrain both the page query and the count so
+  // pagination totals never leak ungranted servers.
+  const where =
+    options.allowedServerIds === undefined
+      ? eq(mcpServer.userId, userId)
+      : and(
+          eq(mcpServer.userId, userId),
+          inArray(mcpServer.id, [...options.allowedServerIds]),
+        );
   const page = await paginate({
     page: input.page,
     pageSize: input.pageSize,
@@ -757,6 +749,70 @@ export async function findServerValueReferences(
   }
 
   return references;
+}
+
+/**
+ * Whether a tool is currently persisted as enabled. Used by Platform publish
+ * classification to decide if a candidate update is runtime-effective.
+ */
+export async function getToolEnabledState(
+  db: DB,
+  userId: string,
+  serverId: string,
+  toolId: string,
+): Promise<boolean> {
+  await requireOwnedServer(db, userId, serverId);
+  const [tool] = await db
+    .select({ enabled: mcpTool.enabled })
+    .from(mcpTool)
+    .where(and(eq(mcpTool.id, toolId), eq(mcpTool.serverId, serverId)))
+    .limit(1);
+  if (!tool) {
+    throw appError({
+      appCode: APP_ERROR_CODES.MCP_TOOL_NOT_FOUND,
+      message: "MCP tool not found.",
+      status: 404,
+    });
+  }
+  return tool.enabled;
+}
+
+/**
+ * Whether changing a named server value would alter runtime behavior: the
+ * value is referenced by a tool that is currently enabled (a compiled plan), or
+ * by server common/auth configuration consumed by an enabled tool.
+ */
+export async function isServerValueRuntimeEffective(
+  db: DB,
+  userId: string,
+  serverId: string,
+  valueName: string,
+): Promise<boolean> {
+  const server = await requireOwnedServer(db, userId, serverId);
+  const variable = await findVariableByName(db, server.id, valueName);
+  if (!variable) return false;
+
+  const references = await findServerValueReferences(
+    db,
+    server,
+    variable.id,
+    variable.name,
+  );
+  if (references.length === 0) return false;
+
+  const enabledTools = await db
+    .select({ id: mcpTool.id })
+    .from(mcpTool)
+    .where(and(eq(mcpTool.serverId, server.id), eq(mcpTool.enabled, true)));
+  if (enabledTools.length === 0) return false;
+
+  const enabledIds = new Set(enabledTools.map((tool) => tool.id));
+  return references.some((reference) =>
+    reference.kind === "tool"
+      ? enabledIds.has(reference.id)
+      : // Common/auth references are compiled into every enabled tool.
+        true,
+  );
 }
 
 /** Header/query keys currently owned by authentication; never overridable elsewhere. */
@@ -1094,6 +1150,32 @@ export async function getToolName(
     });
   }
   return tool.name;
+}
+
+/**
+ * Authoritative compiled HTTP method for a tool, used to classify invocation
+ * authority independently of caller-provided annotations.
+ */
+export async function getToolMethod(
+  db: DB,
+  userId: string,
+  serverId: string,
+  toolId: string,
+): Promise<string> {
+  await requireOwnedServer(db, userId, serverId);
+  const [tool] = await db
+    .select({ method: mcpTool.method })
+    .from(mcpTool)
+    .where(and(eq(mcpTool.id, toolId), eq(mcpTool.serverId, serverId)))
+    .limit(1);
+  if (!tool) {
+    throw appError({
+      appCode: APP_ERROR_CODES.MCP_TOOL_NOT_FOUND,
+      message: "MCP tool not found.",
+      status: 404,
+    });
+  }
+  return tool.method;
 }
 
 export async function getServer(db: DB, userId: string, serverId: string) {
@@ -3534,286 +3616,6 @@ export async function revokeServerToken(
   return { ...result, revision };
 }
 
-export type CreatePlatformTokenInput = {
-  name?: string;
-  scopes?: McpPlatformScopeRow[];
-  expiresInDays?: number;
-  /**
-   * Rotate this previously observed active PAT instead of adding another.
-   * Uses a user-row lock plus compare-and-swap so concurrent rotations of the
-   * same token have exactly one winner.
-   */
-  replacesTokenId?: string;
-};
-
-/**
- * Creates a Platform PAT, optionally rotating one observed active token. The
- * user row is locked first so selected-token rotation is serialized; the
- * observed token is verified still active before revoking it, and unrelated
- * active PATs are never modified. One-time plaintext is returned only here and
- * never persisted.
- */
-export async function createPlatformToken(
-  db: DB,
-  userId: string,
-  input: CreatePlatformTokenInput | string = {},
-) {
-  const normalized: CreatePlatformTokenInput =
-    typeof input === "string" ? { name: input } : input;
-  const scopes = normalized.scopes ?? [...MCP_DEFAULT_PLATFORM_SCOPES];
-  const expiresAt = new Date(
-    Date.now() +
-      (normalized.expiresInDays
-        ? normalized.expiresInDays * 24 * 60 * 60 * 1000
-        : MCP_PLATFORM_TOKEN_TTL_MS),
-  );
-
-  const generated = generateAgentToken();
-  let created;
-  try {
-    created = await db.transaction(async (tx) => {
-      // Serialize all PAT writes for this owner.
-      await tx
-        .select({ id: user.id })
-        .from(user)
-        .where(eq(user.id, userId))
-        .for("update")
-        .limit(1);
-
-      // Retire this owner's expired platform tokens first so an expired name
-      // slot cannot permanently block creating or rotating a PAT.
-      await tx
-        .update(mcpAgentToken)
-        .set({ revokedAt: new Date() })
-        .where(
-          and(
-            eq(mcpAgentToken.userId, userId),
-            eq(mcpAgentToken.kind, "platform"),
-            isNull(mcpAgentToken.revokedAt),
-            isNotNull(mcpAgentToken.expiresAt),
-            lt(mcpAgentToken.expiresAt, new Date()),
-          ),
-        );
-
-      let replacedId: string | null = null;
-      if (normalized.replacesTokenId) {
-        const [observed] = await tx
-          .select()
-          .from(mcpAgentToken)
-          .where(
-            and(
-              eq(mcpAgentToken.id, normalized.replacesTokenId),
-              eq(mcpAgentToken.userId, userId),
-              eq(mcpAgentToken.kind, "platform"),
-            ),
-          )
-          .limit(1);
-        const isActive =
-          observed &&
-          !observed.revokedAt &&
-          (!observed.expiresAt || observed.expiresAt.getTime() > Date.now());
-        if (!isActive) {
-          throw appError({
-            appCode: APP_ERROR_CODES.MCP_WRITE_CONFLICT,
-            message:
-              "The selected platform token is no longer active. Reload and retry.",
-            status: 409,
-            details: { retryable: false },
-          });
-        }
-        replacedId = observed.id;
-        await tx
-          .update(mcpAgentToken)
-          .set({
-            revokedAt: new Date(),
-            rotationMeta: { operation: "rotated" },
-          })
-          .where(eq(mcpAgentToken.id, observed.id));
-      }
-
-      const [activeCount] = await tx
-        .select({ count: count() })
-        .from(mcpAgentToken)
-        .where(
-          and(
-            eq(mcpAgentToken.userId, userId),
-            eq(mcpAgentToken.kind, "platform"),
-            isNull(mcpAgentToken.revokedAt),
-            or(
-              isNull(mcpAgentToken.expiresAt),
-              gt(mcpAgentToken.expiresAt, new Date()),
-            ),
-          ),
-        );
-      if ((activeCount?.count ?? 0) >= MCP_MAX_PLATFORM_TOKENS) {
-        throw appError({
-          appCode: APP_ERROR_CODES.INVALID_INPUT,
-          message: `A user cannot have more than ${MCP_MAX_PLATFORM_TOKENS} active platform tokens.`,
-          status: 400,
-        });
-      }
-
-      const [row] = await tx
-        .insert(mcpAgentToken)
-        .values({
-          userId,
-          serverId: null,
-          kind: "platform",
-          name: normalized.name?.trim() || "Platform token",
-          tokenHash: generated.hash,
-          prefix: generated.prefix,
-          scopes,
-          expiresAt,
-          rotationMeta: replacedId ? { operation: "rotation" } : null,
-        })
-        .returning();
-
-      if (replacedId) {
-        await tx
-          .update(mcpAgentToken)
-          .set({ replacedByTokenId: row.id })
-          .where(eq(mcpAgentToken.id, replacedId));
-      }
-      return row;
-    });
-  } catch (error) {
-    if (isUniqueViolation(error)) {
-      throw appError({
-        appCode: APP_ERROR_CODES.MCP_WRITE_CONFLICT,
-        message:
-          "An active platform token with this name already exists. Choose another name.",
-        status: 409,
-        cause: error,
-        details: { retryable: false },
-      });
-    }
-    throw translateWriteError(error);
-  }
-
-  return {
-    id: created.id,
-    name: created.name,
-    prefix: created.prefix,
-    scopes,
-    expiresAt: created.expiresAt,
-    token: generated.raw,
-    createdAt: created.createdAt,
-  };
-}
-
-/**
- * Migration helper: legacy platform tokens issued before scoping existed
- * (`scopes IS NULL`) are treated as invalid and revoked here. Call this once
- * from a migration/seed step; owners must recreate a scoped token afterward.
- * Server-scoped agent tokens are never touched.
- */
-export async function revokeUnscopedPlatformTokens(db: DB): Promise<number> {
-  const revoked = await db
-    .update(mcpAgentToken)
-    .set({ revokedAt: new Date() })
-    .where(
-      and(
-        eq(mcpAgentToken.kind, "platform"),
-        isNull(mcpAgentToken.scopes),
-        isNull(mcpAgentToken.revokedAt),
-      ),
-    )
-    .returning({ id: mcpAgentToken.id });
-  return revoked.length;
-}
-
-export async function getPlatformTokenMeta(db: DB, userId: string) {
-  const [token] = await db
-    .select({
-      id: mcpAgentToken.id,
-      name: mcpAgentToken.name,
-      prefix: mcpAgentToken.prefix,
-      createdAt: mcpAgentToken.createdAt,
-      lastUsedAt: mcpAgentToken.lastUsedAt,
-      revokedAt: mcpAgentToken.revokedAt,
-      scopes: mcpAgentToken.scopes,
-      expiresAt: mcpAgentToken.expiresAt,
-    })
-    .from(mcpAgentToken)
-    .where(
-      and(
-        eq(mcpAgentToken.userId, userId),
-        eq(mcpAgentToken.kind, "platform"),
-        isNull(mcpAgentToken.revokedAt),
-        or(
-          isNull(mcpAgentToken.expiresAt),
-          gt(mcpAgentToken.expiresAt, new Date()),
-        ),
-      ),
-    )
-    .orderBy(desc(mcpAgentToken.createdAt))
-    .limit(1);
-
-  return token ?? null;
-}
-
-export async function listPlatformTokens(db: DB, userId: string) {
-  return db
-    .select({
-      id: mcpAgentToken.id,
-      name: mcpAgentToken.name,
-      prefix: mcpAgentToken.prefix,
-      scopes: mcpAgentToken.scopes,
-      createdAt: mcpAgentToken.createdAt,
-      lastUsedAt: mcpAgentToken.lastUsedAt,
-      expiresAt: mcpAgentToken.expiresAt,
-    })
-    .from(mcpAgentToken)
-    .where(
-      and(
-        eq(mcpAgentToken.userId, userId),
-        eq(mcpAgentToken.kind, "platform"),
-        isNull(mcpAgentToken.revokedAt),
-        or(
-          isNull(mcpAgentToken.expiresAt),
-          gt(mcpAgentToken.expiresAt, new Date()),
-        ),
-      ),
-    )
-    .orderBy(desc(mcpAgentToken.createdAt));
-}
-
-/**
- * Revokes one named active Platform PAT, or every active PAT when no id is
- * given. Server-scoped agent tokens are never affected.
- */
-export async function revokePlatformToken(
-  db: DB,
-  userId: string,
-  tokenId?: string,
-) {
-  const where = tokenId
-    ? and(
-        eq(mcpAgentToken.userId, userId),
-        eq(mcpAgentToken.kind, "platform"),
-        eq(mcpAgentToken.id, tokenId),
-        isNull(mcpAgentToken.revokedAt),
-      )
-    : and(
-        eq(mcpAgentToken.userId, userId),
-        eq(mcpAgentToken.kind, "platform"),
-        isNull(mcpAgentToken.revokedAt),
-      );
-  const revoked = await db
-    .update(mcpAgentToken)
-    .set({ revokedAt: new Date() })
-    .where(where)
-    .returning({ id: mcpAgentToken.id });
-  if (tokenId && revoked.length === 0) {
-    throw appError({
-      appCode: APP_ERROR_CODES.MCP_AGENT_TOKEN_INVALID,
-      message: "Platform token not found.",
-      status: 404,
-    });
-  }
-  return { revoked: true, count: revoked.length };
-}
-
 export async function listCallLogs(
   db: DB,
   userId: string,
@@ -3852,51 +3654,6 @@ export async function listCallLogs(
       return row?.count ?? 0;
     },
   });
-}
-
-export async function authenticateAgentToken(
-  db: DB,
-  rawToken: string,
-  expected: { kind: "server"; serverId: string } | { kind: "platform" },
-) {
-  const tokenHash = hashAgentToken(rawToken);
-  const [token] = await db
-    .select()
-    .from(mcpAgentToken)
-    .where(eq(mcpAgentToken.tokenHash, tokenHash))
-    .limit(1);
-
-  const reject = (): never => {
-    throw appError({
-      appCode: APP_ERROR_CODES.MCP_AGENT_TOKEN_INVALID,
-      message: "Agent token is invalid.",
-      status: 401,
-    });
-  };
-
-  if (!token || token.revokedAt) reject();
-  if (token.expiresAt && token.expiresAt.getTime() < Date.now()) reject();
-  if (token.kind !== expected.kind) reject();
-  if (expected.kind === "server" && token.serverId !== expected.serverId) {
-    reject();
-  }
-  // Legacy platform tokens issued before scoping are treated as invalid;
-  // owners must recreate a scoped token.
-  if (expected.kind === "platform" && !token.scopes) reject();
-  if (await isUserBanned(db, token.userId)) {
-    throw appError({
-      appCode: APP_ERROR_CODES.ACCOUNT_SUSPENDED,
-      message: "Your account has been suspended.",
-      status: 403,
-    });
-  }
-
-  await db
-    .update(mcpAgentToken)
-    .set({ lastUsedAt: new Date() })
-    .where(eq(mcpAgentToken.id, token.id));
-
-  return token;
 }
 
 export function resolveApiOrigin(req: Request, apiOrigin?: string): string {
