@@ -46,7 +46,6 @@ const detailFixture = {
       name: "api_token",
       kind: "secret",
       owner: "auth",
-      isSecret: true,
       hasValue: false,
       available: true,
     },

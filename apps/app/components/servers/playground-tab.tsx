@@ -2,6 +2,10 @@ import { SettingsFormSkeleton } from "@/components/loading";
 import { useInvokeMcpTool, useMcpTools } from "@/hooks/use-mcp";
 import { useTranslations } from "@/i18n/use-translations";
 import { resolveErrorMessage } from "@/lib/errors";
+import {
+  isClientRequestDefinition,
+  type ClientRequestDefinition,
+} from "@/lib/request-definition";
 import { cn } from "@repo/ui";
 import {
   Button,
@@ -24,6 +28,39 @@ type ParamValue = string | boolean;
 
 type PlaygroundMode = "published" | "draft";
 
+type PlaygroundParam = {
+  name: string;
+  type: string;
+  required: boolean;
+  sensitive: boolean;
+  description?: string;
+  minimum?: number;
+  maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+};
+
+/** Agent-facing inputs derived from a canonical typed request definition. */
+function definitionToPlaygroundParams(
+  definition: ClientRequestDefinition,
+): PlaygroundParam[] {
+  return definition.agentInputs.map((input) => ({
+    name: input.name,
+    type: input.type === "integer" ? "number" : input.type,
+    required: input.required,
+    sensitive: input.sensitive,
+    ...(input.description !== undefined
+      ? { description: input.description }
+      : {}),
+    ...(input.minimum !== undefined ? { minimum: input.minimum } : {}),
+    ...(input.maximum !== undefined ? { maximum: input.maximum } : {}),
+    ...(input.minLength !== undefined ? { minLength: input.minLength } : {}),
+    ...(input.maxLength !== undefined ? { maxLength: input.maxLength } : {}),
+    ...(input.pattern !== undefined ? { pattern: input.pattern } : {}),
+  }));
+}
+
 export function ServerPlaygroundTab({
   serverId,
   serverStatus,
@@ -40,18 +77,7 @@ export function ServerPlaygroundTab({
     name: string;
     method: string;
     allowMutation: boolean;
-    params: Array<{
-      name: string;
-      type: string;
-      required: boolean;
-      sensitive: boolean;
-      description?: string;
-      minimum?: number;
-      maximum?: number;
-      minLength?: number;
-      maxLength?: number;
-      pattern?: string;
-    }>;
+    requestDefinition?: Record<string, unknown> | null;
   }>;
 }) {
   const { t } = useTranslations();
@@ -92,13 +118,16 @@ export function ServerPlaygroundTab({
               allowMutation: published.allowMutation,
               enabled: true,
               // Published mode advertises the active revision's input schema.
-              params: published.params,
+              requestDefinition: published.requestDefinition,
             },
           ];
         })
       : (tools.data?.items ?? []);
   const tool = visibleTools.find((item) => item.id === toolId) ?? null;
-  const params = tool?.params ?? [];
+  const params =
+    tool && isClientRequestDefinition(tool.requestDefinition)
+      ? definitionToPlaygroundParams(tool.requestDefinition)
+      : [];
 
   const invokeBlockedReason = (() => {
     if (mode === "published" && publishedRevisionNumber === null) {
@@ -286,7 +315,11 @@ export function ServerPlaygroundTab({
             setToolId(next);
             const nextTool = visibleTools.find((item) => item.id === next);
             const defaults: Record<string, ParamValue> = {};
-            for (const param of nextTool?.params ?? []) {
+            const nextParams =
+              nextTool && isClientRequestDefinition(nextTool.requestDefinition)
+                ? definitionToPlaygroundParams(nextTool.requestDefinition)
+                : [];
+            for (const param of nextParams) {
               if (param.type === "boolean") defaults[param.name] = false;
             }
             setValues(defaults);

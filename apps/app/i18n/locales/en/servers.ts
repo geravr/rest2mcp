@@ -47,7 +47,8 @@ export const enServers = {
     toolTitle: "Title",
     toolTitlePlaceholder: "Get contact",
     method: "Method",
-    pathTemplate: "Path",
+    path: "Path",
+    toolPathSummary: "Path",
     pathPlaceholder: "/contacts/",
     allowMutation: "Allow mutation",
     enabled: "Enabled",
@@ -86,6 +87,7 @@ export const enServers = {
     variableSecretBadge: "Secret",
     variableConfigBadge: "Config",
     variableAuthOwnedBadge: "Managed by Authentication",
+    variableManualOwnerBadge: "Manual",
     variableHasValue: "Value stored",
     variableNoValue: "No value stored",
     addVariable: "Add variable",
@@ -100,10 +102,10 @@ export const enServers = {
       "Enter the current value to store it in plain text.",
     deleteVariableTitle: "Delete variable",
     deleteVariableDescription: "This permanently deletes {name}.",
-    deleteVariableReferencedDefaultHeader:
-      "May be used in default header {key}. Calls may fail until you edit that row.",
-    deleteVariableReferencedDefaultQuery:
-      "May be used in default query param {key}. Calls may fail until you edit that row.",
+    deleteVariableReferencedCommonHeader:
+      "May be used in common header {key}. Calls may fail until you edit that row.",
+    deleteVariableReferencedCommonQuery:
+      "May be used in common query param {key}. Calls may fail until you edit that row.",
     deleteVariableReferencedTools:
       "May be used in tools on this page: {names}.",
     originFixed: "Fixed",
@@ -127,7 +129,7 @@ export const enServers = {
     emptyHeaderRows: "No headers yet.",
     emptyFormRows: "No body fields yet.",
     agentParamTitle: "Agent param",
-    agentParamNameSaved: "Agent argument {name} (from saved template)",
+    agentParamNameSaved: "Agent argument {name}",
     discardToolTitle: "Discard this tool?",
     discardToolDescription:
       "Your changes will be lost if you close without saving.",
@@ -138,11 +140,12 @@ export const enServers = {
     requestPartBody: "Body",
     toolDialogDescription:
       "Name the tool and build the request the agent will call.",
-    defaultsTitle: "Request defaults",
-    defaultsDescription: "Sent on every tool call. Use a variable for secrets.",
-    defaultHeaders: "Default headers",
-    defaultQuery: "Default query params",
-    saveDefaults: "Save defaults",
+    defaultsTitle: "Common values",
+    defaultsDescription:
+      "Sent on every tool call. Use a server value for secrets.",
+    commonHeaders: "Common headers",
+    commonQuery: "Common query params",
+    saveDefaults: "Save common values",
     savingDefaults: "Saving…",
     defaultsUnsaved: "Unsaved changes",
     snippetTitle: "Connection snippet",
@@ -256,15 +259,9 @@ export const enServers = {
     allowMutationHelp:
       "Off: the tool stays read-only even for POST, PUT, PATCH, or DELETE.",
     enabledHelp: "Disabled tools are hidden from agents.",
-    paramsTitle: "Params",
-    paramsDescription:
-      "Placeholders found in this request. Each becomes an argument the agent must fill.",
-    paramsEmpty:
-      "No placeholders yet. Use {{name}} in the path, query, headers, or body.",
     paramDescriptionPlaceholder: "What is this value? Shown to the agent.",
     paramDescription: "Param description",
     paramRequired: "Required",
-    paramRemove: "Remove param",
     paramType: "Param type",
     paramTypes: {
       string: "Text",
@@ -282,8 +279,6 @@ export const enServers = {
       uuid: "UUID",
     },
     paramSensitive: "Sensitive",
-    paramSensitiveHelp:
-      "Never logged or previewed; masked as a password field in the playground.",
     paramConstraints: "Constraints",
     paramMinLength: "Min length",
     paramMaxLength: "Max length",
@@ -293,10 +288,6 @@ export const enServers = {
     paramMaximum: "Maximum",
     paramExamples: "Examples",
     paramExamplesPlaceholder: "value1, value2",
-    warningPlaceholderWithoutParam:
-      "{{name}} is used but has no declared param or variable.",
-    warningParamWithoutPlaceholder:
-      "{name} is declared but never used in the request.",
     kvKeyPlaceholder: "Key",
     kvValuePlaceholder: "Value",
     kvAddRow: "Add row",
@@ -354,13 +345,8 @@ export const enServers = {
     previewContractAnnotations: "Annotations",
     previewSavedIssues:
       "This tool has {count} unresolved compile issue(s) from the last save. Run Preview to see details.",
-    loadingToolDefinition: "Loading tool definition…",
-    conversionLoadFailed:
-      "Could not load this tool's conversion draft. Close the dialog and try again.",
     advancedJsonInvalid:
       "The advanced JSON body is not valid JSON. Fix it before previewing or saving.",
-    conversionBlocked:
-      "This legacy tool has {count} ambiguous binding(s). Resolve each source before enabling it; the proposed typed draft is shown so you can adjust it.",
     compileInvalidShort: "Fix compile issues to enable",
     annotationReadOnly: "Read-only",
     annotationDestructive: "Destructive",

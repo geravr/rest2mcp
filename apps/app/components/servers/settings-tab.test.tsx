@@ -14,7 +14,16 @@ vi.mock("@/lib/storage", () => ({ uploadFileToStorage }));
 
 vi.mock("@/hooks/use-mcp", () => ({
   useMcpVariables: () => ({
-    data: [{ id: "msv_1", name: "api_version", isSecret: false, value: "v1" }],
+    data: [
+      {
+        id: "msv_1",
+        name: "api_version",
+        kind: "config",
+        owner: "manual",
+        hasValue: true,
+        value: "v1",
+      },
+    ],
     isLoading: false,
     isError: false,
     error: null,
@@ -22,8 +31,6 @@ vi.mock("@/hooks/use-mcp", () => ({
   useMcpServerCommon: () => ({
     data: {
       common: { headers: [], query: [] },
-      legacyProjectable: true,
-      projectionIssues: [],
     },
     isLoading: false,
     isError: false,
@@ -89,33 +96,19 @@ describe("ServerSettingsTab", () => {
   });
 
   it("keeps identity and defaults save disabled until the form is dirty", () => {
-    render(
-      <ServerSettingsTab
-        server={server}
-        defaultHeaders={null}
-        defaultQuery={null}
-        auth={noneAuth}
-      />,
-    );
+    render(<ServerSettingsTab server={server} auth={noneAuth} />);
 
     expect(
       screen.getByRole("button", { name: /save changes/i }),
     ).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: /save defaults/i }),
+      screen.getByRole("button", { name: /save common values/i }),
     ).toBeDisabled();
   });
 
   it("rejects an invalid variable name before calling create", async () => {
     const user = userEvent.setup();
-    render(
-      <ServerSettingsTab
-        server={server}
-        defaultHeaders={null}
-        defaultQuery={null}
-        auth={noneAuth}
-      />,
-    );
+    render(<ServerSettingsTab server={server} auth={noneAuth} />);
 
     await user.type(screen.getByLabelText(/variable name/i), "ApiToken");
     await user.type(screen.getByLabelText(/^value$/i), "secret");
@@ -129,14 +122,7 @@ describe("ServerSettingsTab", () => {
 
   it("saves identity when the name changes", async () => {
     const user = userEvent.setup();
-    render(
-      <ServerSettingsTab
-        server={server}
-        defaultHeaders={null}
-        defaultQuery={null}
-        auth={noneAuth}
-      />,
-    );
+    render(<ServerSettingsTab server={server} auth={noneAuth} />);
 
     const nameInput = screen.getByLabelText(/^name$/i);
     await user.clear(nameInput);
@@ -154,14 +140,7 @@ describe("ServerSettingsTab", () => {
   });
 
   it("shows stored variable values on all screen sizes", () => {
-    render(
-      <ServerSettingsTab
-        server={server}
-        defaultHeaders={null}
-        defaultQuery={null}
-        auth={noneAuth}
-      />,
-    );
+    render(<ServerSettingsTab server={server} auth={noneAuth} />);
 
     expect(screen.getByText("v1")).toBeInTheDocument();
     expect(screen.getByText("v1").className).not.toMatch(/hidden/);
@@ -169,14 +148,7 @@ describe("ServerSettingsTab", () => {
 
   it("compiles a default header from a Variable origin", async () => {
     const user = userEvent.setup();
-    render(
-      <ServerSettingsTab
-        server={server}
-        defaultHeaders={null}
-        defaultQuery={null}
-        auth={noneAuth}
-      />,
-    );
+    render(<ServerSettingsTab server={server} auth={noneAuth} />);
 
     const addButtons = screen.getAllByRole("button", { name: /add row/i });
     await user.click(addButtons[0] as HTMLElement);
@@ -185,7 +157,9 @@ describe("ServerSettingsTab", () => {
     await user.click(screen.getByRole("option", { name: /^variable$/i }));
     await user.click(screen.getByRole("button", { name: /select variable/i }));
     await user.click(screen.getByRole("menuitem", { name: "api_version" }));
-    await user.click(screen.getByRole("button", { name: /save defaults/i }));
+    await user.click(
+      screen.getByRole("button", { name: /save common values/i }),
+    );
 
     expect(updateCommonMutate).toHaveBeenCalledWith({
       serverId: "mcs_1",
@@ -206,8 +180,6 @@ describe("ServerSettingsTab", () => {
     render(
       <ServerSettingsTab
         server={server}
-        defaultHeaders={{ Authorization: "Bearer {{api_token}}" }}
-        defaultQuery={null}
         auth={{ type: "bearer", variableName: "api_token" }}
       />,
     );
@@ -224,8 +196,6 @@ describe("ServerSettingsTab", () => {
     render(
       <ServerSettingsTab
         server={server}
-        defaultHeaders={{ Authorization: "Bearer {{api_token}}" }}
-        defaultQuery={null}
         auth={{ type: "bearer", variableName: "api_token" }}
       />,
     );
@@ -248,8 +218,6 @@ describe("ServerSettingsTab", () => {
     render(
       <ServerSettingsTab
         server={server}
-        defaultHeaders={{ Authorization: "Bearer {{api_token}}" }}
-        defaultQuery={null}
         auth={{ type: "bearer", variableName: "api_token" }}
       />,
     );
@@ -259,17 +227,7 @@ describe("ServerSettingsTab", () => {
   });
 
   it("shows Custom without enabling a typed recipe save", () => {
-    render(
-      <ServerSettingsTab
-        server={server}
-        defaultHeaders={{
-          Authorization: "Bearer {{api_token}}",
-          "X-Partner-Key": "{{partner}}",
-        }}
-        defaultQuery={null}
-        auth={{ type: "custom" }}
-      />,
-    );
+    render(<ServerSettingsTab server={server} auth={{ type: "custom" }} />);
 
     expect(screen.getByText(/custom auth setup/i)).toBeInTheDocument();
     expect(
@@ -280,12 +238,7 @@ describe("ServerSettingsTab", () => {
   it("sends the advanced revision after the aggregate reloads", async () => {
     const user = userEvent.setup();
     const { rerender } = render(
-      <ServerSettingsTab
-        server={server}
-        defaultHeaders={null}
-        defaultQuery={null}
-        auth={noneAuth}
-      />,
+      <ServerSettingsTab server={server} auth={noneAuth} />,
     );
     const nameInput = screen.getByLabelText(/^name$/i);
     await user.clear(nameInput);
@@ -298,8 +251,6 @@ describe("ServerSettingsTab", () => {
     rerender(
       <ServerSettingsTab
         server={{ ...server, name: "Billing", configRevision: 2 }}
-        defaultHeaders={null}
-        defaultQuery={null}
         auth={noneAuth}
       />,
     );
@@ -314,14 +265,7 @@ describe("ServerSettingsTab", () => {
 
   it("keeps unsaved input available for resubmission", async () => {
     const user = userEvent.setup();
-    render(
-      <ServerSettingsTab
-        server={server}
-        defaultHeaders={null}
-        defaultQuery={null}
-        auth={noneAuth}
-      />,
-    );
+    render(<ServerSettingsTab server={server} auth={noneAuth} />);
     const nameInput = screen.getByLabelText(/^name$/i);
     await user.clear(nameInput);
     await user.type(nameInput, "Unsaved");
@@ -333,14 +277,7 @@ describe("ServerSettingsTab", () => {
 
   it("does not attach an icon when the upload fails", async () => {
     uploadFileToStorage.mockRejectedValueOnce(new Error("upload failed"));
-    render(
-      <ServerSettingsTab
-        server={server}
-        defaultHeaders={null}
-        defaultQuery={null}
-        auth={noneAuth}
-      />,
-    );
+    render(<ServerSettingsTab server={server} auth={noneAuth} />);
     const file = new File(["x"], "icon.png", { type: "image/png" });
     fireEvent.change(screen.getByLabelText(/upload icon/i), {
       target: { files: [file] },

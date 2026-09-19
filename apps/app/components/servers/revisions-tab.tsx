@@ -171,12 +171,12 @@ function RevisionDetailDialog({
                     >
                       <span className="text-sm">{config.name}</span>
                       <div className="flex items-center gap-2">
-                        {config.isSecret ? (
+                        {config.kind === "secret" ? (
                           <Badge variant="secondary">
                             {t.servers.variableSecretBadge}
                           </Badge>
                         ) : null}
-                        {config.isSecret && !config.available ? (
+                        {config.kind === "secret" && !config.available ? (
                           <Badge variant="destructive">
                             {t.servers.revisionSecretUnavailable}
                           </Badge>

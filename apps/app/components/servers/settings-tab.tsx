@@ -1,7 +1,10 @@
 import { SettingsFormSkeleton } from "@/components/loading";
 import { DeleteServerDialog } from "@/components/servers/delete-server-dialog";
 import { DeleteVariableDialog } from "@/components/servers/delete-variable-dialog";
-import { EditVariableDialog } from "@/components/servers/edit-variable-dialog";
+import {
+  EditVariableDialog,
+  type EditableVariable,
+} from "@/components/servers/edit-variable-dialog";
 import {
   authResetKey,
   ServerAuthCard,
@@ -22,7 +25,7 @@ import {
   definitionToSourceRows,
   type ClientCommonEntries,
 } from "@/lib/request-definition";
-import { inferDefaultMapRows, type SourceRow } from "@/lib/value-origin";
+import type { SourceRow } from "@/lib/value-origin";
 import { useTranslations } from "@/i18n/use-translations";
 import { resolveErrorMessage } from "@/lib/errors";
 import { ServerIcon } from "@/components/servers/server-icon";
@@ -60,8 +63,6 @@ function ServerDefaultsCard({
   variableKinds,
   serverValues,
   common,
-  defaultHeaders,
-  defaultQuery,
   pending,
   onSave,
 }: {
@@ -69,8 +70,6 @@ function ServerDefaultsCard({
   variableKinds?: Record<string, "config" | "secret">;
   serverValues: Array<{ id: string; name: string }>;
   common: ClientCommonEntries;
-  defaultHeaders: Record<string, string> | null;
-  defaultQuery: Record<string, string> | null;
   pending: boolean;
   onSave: (common: ClientCommonEntries) => void;
 }) {
@@ -79,16 +78,11 @@ function ServerDefaultsCard({
     () => buildServerValueLookup(serverValues),
     [serverValues],
   );
-  const hasCommon = common.headers.length > 0 || common.query.length > 0;
   const [headersDraft, setHeadersDraft] = useState<SourceRow[]>(() =>
-    hasCommon
-      ? definitionToSourceRows(common.headers, lookup, new Map())
-      : inferDefaultMapRows(defaultHeaders, variableNames),
+    definitionToSourceRows(common.headers, lookup, new Map()),
   );
   const [queryDraft, setQueryDraft] = useState<SourceRow[]>(() =>
-    hasCommon
-      ? definitionToSourceRows(common.query, lookup, new Map())
-      : inferDefaultMapRows(defaultQuery, variableNames),
+    definitionToSourceRows(common.query, lookup, new Map()),
   );
   const initialDraftsRef = useRef({ headersDraft, queryDraft });
   const defaultsDirty =
@@ -117,7 +111,7 @@ function ServerDefaultsCard({
         >
           <div className="grid gap-6 xl:grid-cols-2">
             <Field>
-              <Label>{t.servers.defaultHeaders}</Label>
+              <Label>{t.servers.commonHeaders}</Label>
               <SourceRowEditor
                 rows={headersDraft}
                 onChange={setHeadersDraft}
@@ -128,7 +122,7 @@ function ServerDefaultsCard({
               />
             </Field>
             <Field>
-              <Label>{t.servers.defaultQuery}</Label>
+              <Label>{t.servers.commonQuery}</Label>
               <SourceRowEditor
                 rows={queryDraft}
                 onChange={setQueryDraft}
@@ -158,16 +152,12 @@ function ServerDefaultsCard({
   );
 }
 
-/** Server-owned configuration: identity, auth, variables, and request defaults. */
+/** Server-owned configuration: identity, auth, variables, and common values. */
 export function ServerSettingsTab({
   server,
-  defaultHeaders,
-  defaultQuery,
   auth,
 }: {
   server: ServerIdentity;
-  defaultHeaders: Record<string, string> | null;
-  defaultQuery: Record<string, string> | null;
   auth: InferredAuth;
 }) {
   const { t } = useTranslations();
@@ -181,14 +171,13 @@ export function ServerSettingsTab({
   const [iconUploadPending, setIconUploadPending] = useState(false);
   const [iconRemovePending, setIconRemovePending] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [editVariable, setEditVariable] = useState<{
-    name: string;
-    isSecret: boolean;
-    value?: string;
-  } | null>(null);
-  const [deleteVariableName, setDeleteVariableName] = useState<string | null>(
+  const [editVariable, setEditVariable] = useState<EditableVariable | null>(
     null,
   );
+  const [deleteVariable, setDeleteVariable] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
 
   const [name, setName] = useState(server.name);
   const [baseUrl, setBaseUrl] = useState(server.baseUrl);
@@ -196,7 +185,9 @@ export function ServerSettingsTab({
 
   const [variableName, setVariableName] = useState("");
   const [variableValue, setVariableValue] = useState("");
-  const [variableSecret, setVariableSecret] = useState(true);
+  const [variableKind, setVariableKind] = useState<"config" | "secret">(
+    "secret",
+  );
 
   const variableNames = (variables.data ?? []).map((variable) => variable.name);
   const variableKinds = Object.fromEntries(
@@ -453,10 +444,12 @@ export function ServerSettingsTab({
                         {variable.name}
                       </code>
                       <Badge
-                        variant={variable.isSecret ? "secondary" : "outline"}
+                        variant={
+                          variable.kind === "secret" ? "secondary" : "outline"
+                        }
                         className="shrink-0"
                       >
-                        {variable.isSecret
+                        {variable.kind === "secret"
                           ? t.servers.variableSecretBadge
                           : t.servers.variableConfigBadge}
                       </Badge>
@@ -476,13 +469,7 @@ export function ServerSettingsTab({
                         className="shrink-0"
                         disabled={authOwned}
                         aria-label={t.servers.editVariable}
-                        onClick={() =>
-                          setEditVariable({
-                            name: variable.name,
-                            isSecret: variable.isSecret,
-                            value: variable.value ?? undefined,
-                          })
-                        }
+                        onClick={() => setEditVariable(variable)}
                       >
                         <Pencil className="h-4 w-4" />
                       </Button>
@@ -493,13 +480,18 @@ export function ServerSettingsTab({
                         className="shrink-0 text-muted-foreground hover:text-destructive"
                         disabled={authOwned}
                         aria-label={t.servers.deleteVariable}
-                        onClick={() => setDeleteVariableName(variable.name)}
+                        onClick={() =>
+                          setDeleteVariable({
+                            id: variable.id,
+                            name: variable.name,
+                          })
+                        }
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                     <p className="mt-1 truncate text-xs text-muted-foreground">
-                      {variable.isSecret
+                      {variable.kind === "secret"
                         ? variable.hasValue
                           ? t.servers.variableHasValue
                           : t.servers.variableNoValue
@@ -521,14 +513,14 @@ export function ServerSettingsTab({
                   serverId: server.id,
                   expectedRevision: server.configRevision,
                   name: trimmedVariableName,
-                  isSecret: variableSecret,
+                  kind: variableKind,
                   value: variableValue,
                 },
                 {
                   onSuccess: () => {
                     setVariableName("");
                     setVariableValue("");
-                    setVariableSecret(true);
+                    setVariableKind("secret");
                   },
                 },
               );
@@ -554,7 +546,7 @@ export function ServerSettingsTab({
                 <Label htmlFor="var-value">{t.servers.variableValue}</Label>
                 <Input
                   id="var-value"
-                  type={variableSecret ? "password" : "text"}
+                  type={variableKind === "secret" ? "password" : "text"}
                   value={variableValue}
                   onChange={(event) => setVariableValue(event.target.value)}
                   autoComplete="off"
@@ -564,8 +556,10 @@ export function ServerSettingsTab({
               <div className="flex h-9 items-center gap-2">
                 <Switch
                   id="var-secret"
-                  checked={variableSecret}
-                  onCheckedChange={setVariableSecret}
+                  checked={variableKind === "secret"}
+                  onCheckedChange={(checked) =>
+                    setVariableKind(checked ? "secret" : "config")
+                  }
                 />
                 <Label htmlFor="var-secret">{t.servers.variableSecret}</Label>
               </div>
@@ -588,7 +582,7 @@ export function ServerSettingsTab({
             >
               {variableNameInvalid
                 ? t.servers.variableInvalidName
-                : variableSecret
+                : variableKind === "secret"
                   ? t.servers.variableSecretHelp
                   : t.servers.variableNameHint}
             </p>
@@ -605,8 +599,6 @@ export function ServerSettingsTab({
           name: variable.name,
         }))}
         common={serverCommon.data?.common ?? { headers: [], query: [] }}
-        defaultHeaders={defaultHeaders}
-        defaultQuery={defaultQuery}
         pending={updateServerCommon.isPending}
         onSave={(common) =>
           updateServerCommon.mutate({
@@ -658,15 +650,15 @@ export function ServerSettingsTab({
           onClose={() => setEditVariable(null)}
         />
       ) : null}
-      {deleteVariableName ? (
+      {deleteVariable ? (
         <DeleteVariableDialog
           serverId={server.id}
           configRevision={server.configRevision}
-          name={deleteVariableName}
+          valueId={deleteVariable.id}
+          name={deleteVariable.name}
           tools={tools.data?.items ?? []}
-          defaultHeaders={defaultHeaders}
-          defaultQuery={defaultQuery}
-          onClose={() => setDeleteVariableName(null)}
+          common={serverCommon.data?.common ?? { headers: [], query: [] }}
+          onClose={() => setDeleteVariable(null)}
         />
       ) : null}
     </div>

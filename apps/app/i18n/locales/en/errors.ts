@@ -81,7 +81,7 @@ export const enErrors = {
       [APP_ERROR_CODES.MCP_SERVER_SLUG_CONFLICT]:
         "A server with this slug already exists on your account.",
       [APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED]:
-        "Template placeholder {name} has no matching argument or variable.",
+        "A request binding has no matching server value or agent input.",
       [APP_ERROR_CODES.MCP_VARIABLE_NAME_CONFLICT]:
         "A variable with this name already exists on the server.",
       [APP_ERROR_CODES.MCP_PLAINTEXT_SECRET]:
@@ -115,10 +115,6 @@ export const enErrors = {
         "The mutation may have completed, but the final upstream outcome is unknown.",
       [APP_ERROR_CODES.MCP_BINARY_UNSUPPORTED]:
         "Binary upstream responses are not returned as text.",
-      [APP_ERROR_CODES.MCP_LEGACY_PROJECTION_UNAVAILABLE]:
-        "This definition uses typed semantics that cannot be represented with legacy templates; it stays typed and cannot be rolled back to template fields.",
-      [APP_ERROR_CODES.MCP_LEGACY_DOWNGRADE_REJECTED]:
-        "This tool or server already uses typed request bindings; legacy template updates are rejected.",
       [APP_ERROR_CODES.MCP_WRITE_CONFLICT]:
         "This server changed elsewhere. Reload the latest configuration and try again.",
       [APP_ERROR_CODES.MCP_TRANSIENT_WRITE_FAILURE]:

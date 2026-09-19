@@ -91,7 +91,7 @@ export const esErrors = {
       [APP_ERROR_CODES.MCP_SERVER_SLUG_CONFLICT]:
         "Ya existe un servidor con este slug en tu cuenta.",
       [APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED]:
-        "El placeholder {name} de la plantilla no tiene argumento ni variable correspondiente.",
+        "Un enlace de la petición no tiene un valor de servidor ni una entrada de agente correspondiente.",
       [APP_ERROR_CODES.MCP_VARIABLE_NAME_CONFLICT]:
         "Ya existe una variable con este nombre en el servidor.",
       [APP_ERROR_CODES.MCP_PLAINTEXT_SECRET]:
@@ -128,10 +128,6 @@ export const esErrors = {
         "La mutación pudo haberse completado, pero el resultado final del origen es desconocido.",
       [APP_ERROR_CODES.MCP_BINARY_UNSUPPORTED]:
         "Las respuestas binarias del origen no se devuelven como texto.",
-      [APP_ERROR_CODES.MCP_LEGACY_PROJECTION_UNAVAILABLE]:
-        "Esta definición usa semántica tipada que no puede representarse con plantillas heredadas; permanece tipada y no puede revertirse a campos de plantilla.",
-      [APP_ERROR_CODES.MCP_LEGACY_DOWNGRADE_REJECTED]:
-        "Esta herramienta o servidor ya usa enlaces tipados; se rechazan las actualizaciones con plantillas heredadas.",
       [APP_ERROR_CODES.MCP_WRITE_CONFLICT]:
         "Este servidor cambio en otro lugar. Recarga la configuracion mas reciente e intentalo de nuevo.",
       [APP_ERROR_CODES.MCP_TRANSIENT_WRITE_FAILURE]:

@@ -14,6 +14,10 @@ import {
 import { useTranslations } from "@/i18n/use-translations";
 import { resolveErrorMessage } from "@/lib/errors";
 import { MCP_MAX_TOOLS } from "@/lib/mcp-limits";
+import {
+  isClientRequestDefinition,
+  summarizeDefinitionPath,
+} from "@/lib/request-definition";
 import type { PageSize } from "@repo/core";
 import {
   Alert,
@@ -71,6 +75,9 @@ export function ServerToolsTab({
   const [curlOpen, setCurlOpen] = useState(false);
   const atCap = (data?.total ?? 0) >= MCP_MAX_TOOLS;
   const variableNames = (variables.data ?? []).map((variable) => variable.name);
+  const serverValueNameById = Object.fromEntries(
+    (variables.data ?? []).map((variable) => [variable.id, variable.name]),
+  );
   const variableRefs = (variables.data ?? []).map((variable) => ({
     id: variable.id,
     name: variable.name,
@@ -116,7 +123,7 @@ export function ServerToolsTab({
             <TableRow>
               <TableHead>{t.servers.toolName}</TableHead>
               <TableHead>{t.servers.method}</TableHead>
-              <TableHead>{t.servers.pathTemplate}</TableHead>
+              <TableHead>{t.servers.toolPathSummary}</TableHead>
               <TableHead>{t.servers.enabled}</TableHead>
               <TableHead>{t.servers.allowMutation}</TableHead>
               <TableHead className="w-10" />
@@ -130,7 +137,12 @@ export function ServerToolsTab({
                   <Badge variant="outline">{tool.method}</Badge>
                 </TableCell>
                 <TableCell className="font-mono text-xs">
-                  {tool.pathTemplate}
+                  {isClientRequestDefinition(tool.requestDefinition)
+                    ? summarizeDefinitionPath(
+                        tool.requestDefinition,
+                        serverValueNameById,
+                      )
+                    : ""}
                 </TableCell>
                 <TableCell>
                   <div className="flex flex-col gap-1">

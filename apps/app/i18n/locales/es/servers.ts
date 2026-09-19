@@ -47,7 +47,8 @@ export const esServers = {
     toolTitle: "Título",
     toolTitlePlaceholder: "Obtener contacto",
     method: "Método",
-    pathTemplate: "Ruta",
+    path: "Ruta",
+    toolPathSummary: "Ruta",
     pathPlaceholder: "/contacts/",
     allowMutation: "Permitir mutación",
     enabled: "Activa",
@@ -87,6 +88,7 @@ export const esServers = {
     variableSecretBadge: "Secreta",
     variableConfigBadge: "Configuración",
     variableAuthOwnedBadge: "Gestionado por Autenticación",
+    variableManualOwnerBadge: "Manual",
     variableHasValue: "Valor guardado",
     variableNoValue: "Sin valor",
     addVariable: "Añadir variable",
@@ -101,10 +103,10 @@ export const esServers = {
       "Escribe el valor actual para guardarlo en texto plano.",
     deleteVariableTitle: "Eliminar variable",
     deleteVariableDescription: "Esto elimina {name} de forma permanente.",
-    deleteVariableReferencedDefaultHeader:
-      "Puede usarse en el header por defecto {key}. Las llamadas pueden fallar hasta que edites esa fila.",
-    deleteVariableReferencedDefaultQuery:
-      "Puede usarse en el query param por defecto {key}. Las llamadas pueden fallar hasta que edites esa fila.",
+    deleteVariableReferencedCommonHeader:
+      "Puede usarse en el header común {key}. Las llamadas pueden fallar hasta que edites esa fila.",
+    deleteVariableReferencedCommonQuery:
+      "Puede usarse en el query param común {key}. Las llamadas pueden fallar hasta que edites esa fila.",
     deleteVariableReferencedTools:
       "Puede usarse en herramientas de esta página: {names}.",
     originFixed: "Fijo",
@@ -129,7 +131,7 @@ export const esServers = {
     emptyHeaderRows: "Aún no hay headers.",
     emptyFormRows: "Aún no hay campos de body.",
     agentParamTitle: "Parámetro del agente",
-    agentParamNameSaved: "Argumento del agente {name} (plantilla guardada)",
+    agentParamNameSaved: "Argumento del agente {name}",
     discardToolTitle: "¿Descartar esta herramienta?",
     discardToolDescription: "Perderás los cambios si cierras sin guardar.",
     discardToolConfirm: "Descartar",
@@ -139,12 +141,12 @@ export const esServers = {
     requestPartBody: "Body",
     toolDialogDescription:
       "Nombra la herramienta y arma la petición que llamará el agente.",
-    defaultsTitle: "Valores por defecto",
+    defaultsTitle: "Valores comunes",
     defaultsDescription:
-      "Se envían en cada llamada. Usa una variable para secretos.",
-    defaultHeaders: "Headers por defecto",
-    defaultQuery: "Query params por defecto",
-    saveDefaults: "Guardar valores",
+      "Se envían en cada llamada. Usa un valor del servidor para secretos.",
+    commonHeaders: "Headers comunes",
+    commonQuery: "Query params comunes",
+    saveDefaults: "Guardar valores comunes",
     savingDefaults: "Guardando…",
     defaultsUnsaved: "Cambios sin guardar",
     snippetTitle: "Snippet de conexión",
@@ -263,15 +265,9 @@ export const esServers = {
     allowMutationHelp:
       "Desactivado: la herramienta permanece de solo lectura incluso para POST, PUT, PATCH o DELETE.",
     enabledHelp: "Las herramientas desactivadas se ocultan a los agentes.",
-    paramsTitle: "Parámetros",
-    paramsDescription:
-      "Placeholders encontrados en esta petición. Cada uno se convierte en un argumento que el agente debe rellenar.",
-    paramsEmpty:
-      "Sin placeholders aún. Usa {{name}} en la ruta, query, headers o body.",
     paramDescriptionPlaceholder: "¿Qué es este valor? Se muestra al agente.",
     paramDescription: "Descripción del parámetro",
     paramRequired: "Requerido",
-    paramRemove: "Eliminar parámetro",
     paramType: "Tipo de parámetro",
     paramTypes: {
       string: "Texto",
@@ -289,8 +285,6 @@ export const esServers = {
       uuid: "UUID",
     },
     paramSensitive: "Sensible",
-    paramSensitiveHelp:
-      "Nunca se registra ni se muestra; se enmascara como contraseña en el playground.",
     paramConstraints: "Restricciones",
     paramMinLength: "Longitud mínima",
     paramMaxLength: "Longitud máxima",
@@ -300,10 +294,6 @@ export const esServers = {
     paramMaximum: "Máximo",
     paramExamples: "Ejemplos",
     paramExamplesPlaceholder: "valor1, valor2",
-    warningPlaceholderWithoutParam:
-      "{{name}} se usa pero no tiene parámetro ni variable declarada.",
-    warningParamWithoutPlaceholder:
-      "{name} está declarado pero no se usa en la petición.",
     kvKeyPlaceholder: "Clave",
     kvValuePlaceholder: "Valor",
     kvAddRow: "Añadir fila",
@@ -361,13 +351,8 @@ export const esServers = {
     previewContractAnnotations: "Anotaciones",
     previewSavedIssues:
       "Esta herramienta tiene {count} problema(s) de compilación sin resolver desde el último guardado. Ejecuta la vista previa para ver los detalles.",
-    loadingToolDefinition: "Cargando la definición de la herramienta…",
-    conversionLoadFailed:
-      "No se pudo cargar el borrador de conversión de esta herramienta. Cierra el diálogo e inténtalo de nuevo.",
     advancedJsonInvalid:
       "El cuerpo JSON avanzado no es JSON válido. Corrígelo antes de previsualizar o guardar.",
-    conversionBlocked:
-      "Esta herramienta heredada tiene {count} enlace(s) ambiguo(s). Resuelve cada origen antes de habilitarla; se muestra el borrador tipado propuesto para que lo ajustes.",
     compileInvalidShort: "Corrige la compilación para habilitar",
     annotationReadOnly: "Solo lectura",
     annotationDestructive: "Destructiva",

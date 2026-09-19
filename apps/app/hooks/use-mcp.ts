@@ -24,15 +24,6 @@ export type McpToolEditorIssue = {
   severity: "error" | "warning";
 };
 
-export type McpToolEditorState = {
-  toolId: string;
-  typed: boolean;
-  definition: unknown;
-  issues: McpToolEditorIssue[];
-  conversionDraft: unknown;
-  conversionIssues: McpToolEditorIssue[];
-};
-
 export type McpToolPreviewCompileInput = {
   serverId: string;
   name?: string;
@@ -49,7 +40,6 @@ export type McpToolPreviewCompileResult = {
   issues: McpToolEditorIssue[];
   plan: unknown;
   contract: unknown;
-  compatibilityProjectable: boolean;
 };
 
 export type PublicationIssue = {
@@ -154,7 +144,6 @@ export type RevisionDetail = RevisionSummary & {
     name: string;
     kind: string;
     owner: string | null;
-    isSecret: boolean;
     hasValue: boolean;
     available: boolean;
   }>;
@@ -230,17 +219,6 @@ export function useMcpServerCommon(serverId: string) {
     placeholderData: keepPreviousData,
     enabled: serverId.length > 0,
   });
-}
-
-export function useMcpToolEditorState(
-  serverId: string,
-  toolId: string,
-  enabled: boolean,
-): UseQueryResult<McpToolEditorState> {
-  return useQuery({
-    ...api.mcp.toolEditorState.queryOptions({ serverId, toolId }),
-    enabled: enabled && serverId.length > 0 && toolId.length > 0,
-  }) as unknown as UseQueryResult<McpToolEditorState>;
 }
 
 export function useMcpCallLogs(serverId: string, input: PaginationInput) {
@@ -319,7 +297,6 @@ function useInvalidateMcp() {
       queryClient.invalidateQueries(api.mcp.tokens.pathFilter()),
       queryClient.invalidateQueries(api.mcp.variables.pathFilter()),
       queryClient.invalidateQueries(api.mcp.serverCommon.pathFilter()),
-      queryClient.invalidateQueries(api.mcp.toolEditorState.pathFilter()),
       queryClient.invalidateQueries(api.mcp.callLogs.pathFilter()),
       queryClient.invalidateQueries(api.mcp.publishPreview.pathFilter()),
       queryClient.invalidateQueries(api.mcp.revisionHistory.pathFilter()),

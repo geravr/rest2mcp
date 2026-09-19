@@ -115,7 +115,7 @@ export function PathPartsEditor({
                   ariaLabel={
                     index === firstTextIndex
                       ? undefined
-                      : `${t.servers.pathTemplate} ${index + 1}`
+                      : `${t.servers.path} ${index + 1}`
                   }
                   onChange={(value) => update(index, { ...part, value })}
                 />

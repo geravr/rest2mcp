@@ -262,8 +262,6 @@ function ServerDetailPage() {
                 <ServerSettingsTab
                   key={serverId}
                   server={data}
-                  defaultHeaders={data.defaultHeaders}
-                  defaultQuery={data.defaultQuery}
                   auth={data.auth}
                 />
               </TabsContent>

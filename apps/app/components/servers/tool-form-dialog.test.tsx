@@ -35,27 +35,9 @@ const updateMutate = vi.fn<(input: unknown, options?: SaveOptions) => void>();
 const previewMutate = vi.fn<(input: unknown) => void>();
 let previewResultQueue: PreviewResult[] = [];
 
-const editorStateRef = vi.hoisted(() => ({
-  value: undefined as
-    | {
-        data: unknown;
-        isLoading: boolean;
-        isError: boolean;
-        error: null;
-      }
-    | undefined,
-}));
-
 vi.mock("@/hooks/use-mcp", () => ({
   useCreateMcpTool: () => ({ mutate: createMutate, isPending: false }),
   useUpdateMcpTool: () => ({ mutate: updateMutate, isPending: false }),
-  useMcpToolEditorState: () =>
-    editorStateRef.value ?? {
-      data: undefined,
-      isLoading: false,
-      isError: false,
-      error: null,
-    },
   // A real useState-backed mock so `.data` reactively drives re-renders,
   // mirroring the real TanStack Query mutation hook's behavior.
   usePreviewToolCompile: () => {
@@ -77,9 +59,16 @@ const toolFixture: ToolFormTool = {
   name: "get_contact",
   description: null,
   method: "GET",
-  pathTemplate: "/contacts",
-  requestTemplate: null,
-  params: null,
+  requestDefinition: {
+    version: 1,
+    pathSegments: [
+      { id: "path_1", value: { kind: "literal", value: "/contacts" } },
+    ],
+    query: [],
+    headers: [],
+    body: { bodyType: "none" },
+    agentInputs: [],
+  },
   allowMutation: false,
   enabled: true,
 };
@@ -98,7 +87,6 @@ describe("ToolFormDialog", () => {
     updateMutate.mockReset();
     previewMutate.mockReset();
     previewResultQueue = [];
-    editorStateRef.value = undefined;
   });
 
   it("blocks enabling a tool once the preview reports a compile error", async () => {
@@ -308,7 +296,7 @@ describe("ToolFormDialog", () => {
     );
   });
 
-  it("infers an unknown query placeholder as Agent with stored description", async () => {
+  it("loads a typed agent-input query binding with its registry metadata", async () => {
     const user = userEvent.setup();
     render(
       <ToolFormDialog
@@ -316,15 +304,30 @@ describe("ToolFormDialog", () => {
         variableNames={["api_token"]}
         tool={{
           ...toolFixture,
-          requestTemplate: { query: { q: "{{search}}" } },
-          params: [
-            {
-              name: "search",
-              description: "Free-text query",
-              type: "string",
-              required: true,
-            },
-          ],
+          requestDefinition: {
+            version: 1,
+            pathSegments: [
+              { id: "path_1", value: { kind: "literal", value: "/contacts" } },
+            ],
+            query: [
+              {
+                id: "q1",
+                name: "q",
+                value: { kind: "agentInput", agentInputId: "ain_1" },
+              },
+            ],
+            headers: [],
+            body: { bodyType: "none" },
+            agentInputs: [
+              {
+                id: "ain_1",
+                name: "search",
+                required: true,
+                type: "string",
+                description: "Free-text query",
+              },
+            ],
+          },
         }}
         onClose={() => {}}
       />,
@@ -338,15 +341,33 @@ describe("ToolFormDialog", () => {
     expect(screen.getByLabelText(/^key$/i)).toHaveValue("q");
   });
 
-  it("infers a prefixed bearer header as Variable", async () => {
+  it("loads a typed server-value header binding with its prefix", async () => {
     render(
       <ToolFormDialog
         serverId="mcs_1"
         variableNames={["api_token"]}
+        variables={[{ id: "msv_1", name: "api_token", kind: "secret" }]}
         tool={{
           ...toolFixture,
-          requestTemplate: {
-            headers: { Authorization: "Bearer {{api_token}}" },
+          requestDefinition: {
+            version: 1,
+            pathSegments: [
+              { id: "path_1", value: { kind: "literal", value: "/contacts" } },
+            ],
+            query: [],
+            headers: [
+              {
+                id: "h1",
+                name: "Authorization",
+                value: {
+                  kind: "serverValue",
+                  serverValueId: "msv_1",
+                  prefix: "Bearer ",
+                },
+              },
+            ],
+            body: { bodyType: "none" },
+            agentInputs: [],
           },
         }}
         onClose={() => {}}
@@ -371,9 +392,40 @@ describe("ToolFormDialog", () => {
         variableNames={[]}
         tool={{
           ...toolFixture,
-          requestTemplate: {
-            bodyType: "json",
-            body: '{"user":{"id":1}}',
+          requestDefinition: {
+            version: 1,
+            pathSegments: [
+              { id: "path_1", value: { kind: "literal", value: "/contacts" } },
+            ],
+            query: [],
+            headers: [],
+            body: {
+              bodyType: "json",
+              root: {
+                kind: "object",
+                fields: [
+                  {
+                    id: "f1",
+                    key: "user",
+                    value: {
+                      kind: "object",
+                      fields: [
+                        {
+                          id: "f2",
+                          key: "id",
+                          value: {
+                            kind: "literal",
+                            jsonType: "number",
+                            value: 1,
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+            agentInputs: [],
           },
         }}
         onClose={() => {}}
@@ -382,7 +434,7 @@ describe("ToolFormDialog", () => {
 
     await user.click(screen.getByRole("tab", { name: /body/i }));
 
-    expect(screen.getByDisplayValue('{"user":{"id":1}}')).toBeInTheDocument();
+    expect(screen.getByDisplayValue(/"user"/)).toBeInTheDocument();
     expect(screen.queryByLabelText(/^key$/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^fields$/i })).toBeDisabled();
   });
@@ -447,11 +499,43 @@ describe("ToolFormDialog", () => {
         variableNames={[]}
         tool={{
           ...toolFixture,
-          requestTemplate: {
-            query: { q: "hello" },
-            headers: { Accept: "application/json" },
-            bodyType: "json",
-            body: '{"name":"test"}',
+          requestDefinition: {
+            version: 1,
+            pathSegments: [
+              { id: "path_1", value: { kind: "literal", value: "/contacts" } },
+            ],
+            query: [
+              {
+                id: "q1",
+                name: "q",
+                value: { kind: "literal", value: "hello" },
+              },
+            ],
+            headers: [
+              {
+                id: "h1",
+                name: "Accept",
+                value: { kind: "literal", value: "application/json" },
+              },
+            ],
+            body: {
+              bodyType: "json",
+              root: {
+                kind: "object",
+                fields: [
+                  {
+                    id: "f1",
+                    key: "name",
+                    value: {
+                      kind: "literal",
+                      jsonType: "string",
+                      value: "test",
+                    },
+                  },
+                ],
+              },
+            },
+            agentInputs: [],
           },
         }}
         onClose={() => {}}
@@ -581,52 +665,6 @@ describe("ToolFormDialog", () => {
       }),
       expect.anything(),
     );
-  });
-
-  it("renders a backend conversion draft for a legacy-only tool", () => {
-    editorStateRef.value = {
-      data: {
-        toolId: "mct_1",
-        typed: false,
-        definition: null,
-        issues: [],
-        conversionDraft: {
-          version: 1,
-          pathSegments: [
-            { id: "path_1", value: { kind: "literal", value: "/legacy" } },
-          ],
-          query: [],
-          headers: [],
-          body: { bodyType: "none" },
-          agentInputs: [],
-        },
-        conversionIssues: [
-          {
-            path: "query[0]",
-            id: "query_1",
-            code: "MCP_TEMPLATE_UNRESOLVED",
-            message: "Ambiguous source.",
-            severity: "error",
-          },
-        ],
-      },
-      isLoading: false,
-      isError: false,
-      error: null,
-    };
-
-    render(
-      <ToolFormDialog
-        serverId="mcs_1"
-        variableNames={[]}
-        tool={toolFixture}
-        onClose={() => {}}
-      />,
-    );
-
-    expect(screen.getByLabelText(/^path$/i)).toHaveValue("/legacy");
-    expect(screen.getByText(/ambiguous source/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/^enabled$/i)).toBeDisabled();
   });
 
   it("redacts secret values in the effective-request preview", async () => {

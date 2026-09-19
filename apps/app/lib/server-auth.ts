@@ -1,7 +1,7 @@
 /**
  * @file Client-side auth recipe form state for create + settings.
  * Maps UI fields to the tRPC/platform auth discriminator; never shows
- * variable names or isSecret.
+ * secret values or server-value display names.
  */
 
 export type AuthFormType =

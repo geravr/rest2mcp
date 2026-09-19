@@ -8,6 +8,7 @@ import {
   definitionToSourceRows,
   formStateToDefinition,
   isClientRequestDefinition,
+  sourceRowsToJsonText,
   type ClientAgentInput,
   type ClientJsonNode,
   type ClientRequestDefinition,
@@ -54,6 +55,60 @@ describe("client request-definition adapters", () => {
       kind: "literal",
       value: "Example {{name}}",
     });
+  });
+
+  it("round-trips advanced JSON id tokens for server-value rows", () => {
+    const text = sourceRowsToJsonText([
+      {
+        key: "token",
+        origin: "variable",
+        name: "api_token",
+        prefix: "",
+        serverValueId: "msv_1",
+      },
+    ]);
+    const definition = formStateToDefinition(
+      baseInput({
+        bodyType: "json",
+        jsonAdvanced: true,
+        advancedBody: text,
+        agentNames: new Set<string>(),
+      }),
+    );
+    expect(definition.body).toEqual({
+      bodyType: "json",
+      root: {
+        kind: "object",
+        fields: [
+          {
+            id: expect.any(String),
+            key: "token",
+            value: {
+              kind: "binding",
+              binding: { kind: "serverValue", serverValueId: "msv_1" },
+              jsonType: "string",
+            },
+          },
+        ],
+      },
+    });
+  });
+
+  it("keeps advanced raw id tokens bound to server values", () => {
+    const definition = formStateToDefinition(
+      baseInput({
+        bodyType: "raw",
+        advancedBody: '{"token":"{{msv_1}}"}',
+      }),
+    );
+    const body = definition.body;
+    expect(body.bodyType).toBe("raw");
+    if (body.bodyType !== "raw") throw new Error("expected raw body");
+    expect(body.bindings).toEqual([
+      expect.objectContaining({
+        binding: { kind: "serverValue", serverValueId: "msv_1" },
+      }),
+    ]);
   });
 
   it("preserves boolean and null JSON literals with their type", () => {

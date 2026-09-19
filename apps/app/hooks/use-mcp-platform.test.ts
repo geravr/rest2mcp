@@ -37,7 +37,6 @@ const { mcp, mutationFn } = vi.hoisted(() => {
     "tokens",
     "variables",
     "serverCommon",
-    "toolEditorState",
     "callLogs",
     "publishPreview",
     "revisionHistory",

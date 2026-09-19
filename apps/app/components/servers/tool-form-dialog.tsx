@@ -1,12 +1,8 @@
 import { PathPartsEditor } from "@/components/servers/path-parts-editor";
-import {
-  AgentLeftoverFields,
-  SourceRowEditor,
-} from "@/components/servers/source-row-editor";
+import { SourceRowEditor } from "@/components/servers/source-row-editor";
 import { TemplateValueInput } from "@/components/servers/template-value-input";
 import {
   useCreateMcpTool,
-  useMcpToolEditorState,
   usePreviewToolCompile,
   useUpdateMcpTool,
 } from "@/hooks/use-mcp";
@@ -20,21 +16,13 @@ import {
   definitionToSourceRows,
   formStateToDefinition,
   isClientRequestDefinition,
-  type ClientJsonNode,
+  isFlatJsonText,
+  jsonTextToSourceRows,
+  sourceRowsToJsonText,
   type ClientRequestDefinition,
 } from "@/lib/request-definition";
 import {
-  compileFormBody,
-  compileStructuredJson,
-  defaultAgentMeta,
-  detectPlaceholderNames,
-  inferFormRows,
-  inferJsonRows,
-  inferMapRows,
-  isFlatJsonTemplate,
   joinPath,
-  paramsByName,
-  splitPath,
   type AgentMeta,
   type PathPart,
   type SourceRow,
@@ -107,8 +95,6 @@ function pickAgentMeta(source: AgentMeta): AgentMeta {
 
 type BodyType = "none" | "json" | "form" | "raw";
 
-export type ToolParamDraft = AgentMeta;
-
 export type ToolCompileIssue = {
   path: string;
   /** Stable definition-local id of the affected node, when known. */
@@ -124,14 +110,6 @@ export type ToolFormTool = {
   title?: string | null;
   description: string | null;
   method: string;
-  pathTemplate: string;
-  requestTemplate: {
-    query?: Record<string, string>;
-    headers?: Record<string, string>;
-    body?: string | null;
-    bodyType?: "json" | "form" | "raw";
-  } | null;
-  params: ToolParamDraft[] | null;
   /** Canonical versioned definition; authoritative when present. */
   requestDefinition?: Record<string, unknown> | null;
   allowMutation: boolean;
@@ -145,48 +123,6 @@ export type ToolFormServerValue = {
   name: string;
   kind: "config" | "secret";
 };
-
-function initialBodyState(
-  tool: ToolFormTool | undefined,
-  variableNames: string[],
-  paramMap: Map<string, AgentMeta>,
-): {
-  bodyType: BodyType;
-  formRows: SourceRow[];
-  jsonRows: SourceRow[];
-  jsonAdvanced: boolean;
-  advancedBody: string;
-} {
-  const storedType = tool?.requestTemplate?.bodyType;
-  const storedBody = tool?.requestTemplate?.body ?? "";
-  const bodyType: BodyType = storedType ?? (storedBody ? "raw" : "none");
-  if (bodyType === "form") {
-    return {
-      bodyType,
-      formRows: inferFormRows(storedBody, variableNames, paramMap),
-      jsonRows: [],
-      jsonAdvanced: false,
-      advancedBody: "",
-    };
-  }
-  if (bodyType === "json") {
-    const rows = inferJsonRows(storedBody, variableNames, paramMap);
-    return {
-      bodyType,
-      formRows: [],
-      jsonRows: rows ?? [],
-      jsonAdvanced: rows === null,
-      advancedBody: storedBody,
-    };
-  }
-  return {
-    bodyType,
-    formRows: [],
-    jsonRows: [],
-    jsonAdvanced: bodyType === "raw",
-    advancedBody: storedBody,
-  };
-}
 
 function bodyTabCount(
   bodyType: BodyType,
@@ -448,14 +384,9 @@ function describeBinding(
 
 /**
  * Shared create/edit/duplicate tool form. Mount conditionally so state
- * initializes from `tool`. When a save returns template warnings the dialog
+ * initializes from `tool`. When a save returns compile errors the dialog
  * stays open and switches to editing the just-saved tool, so a second submit
  * updates instead of duplicating.
- */
-/**
- * Loads a legacy-only tool's backend conversion draft before rendering the
- * form, so unmigrated tools open as typed definitions when the analysis is
- * unambiguous and surface blocking diagnostics otherwise.
  */
 export function ToolFormDialog(props: {
   serverId: string;
@@ -466,67 +397,11 @@ export function ToolFormDialog(props: {
   duplicate?: boolean;
   onClose: () => void;
 }) {
-  const { t } = useTranslations();
   const isTyped = isClientRequestDefinition(props.tool?.requestDefinition);
-  const needsConversion = Boolean(props.tool) && !isTyped && !props.duplicate;
-  const editorState = useMcpToolEditorState(
-    props.serverId,
-    props.tool?.id ?? "",
-    needsConversion,
-  );
-  const draft = editorState.data?.conversionDraft;
-  const resolvedTool =
-    props.tool && draft && isClientRequestDefinition(draft)
-      ? {
-          ...props.tool,
-          requestDefinition: draft as unknown as Record<string, unknown>,
-        }
-      : props.tool;
-
-  if (needsConversion && editorState.isLoading && !editorState.data) {
-    return (
-      <Dialog open onOpenChange={() => props.onClose()}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{t.servers.editToolTitle}</DialogTitle>
-            <DialogDescription>
-              {t.servers.loadingToolDefinition}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex items-center justify-center py-6">
-            <LoaderCircle className="h-5 w-5 animate-spin text-muted-foreground" />
-          </div>
-        </DialogContent>
-      </Dialog>
-    );
-  }
-
-  if (needsConversion && editorState.isError) {
-    return (
-      <Dialog open onOpenChange={() => props.onClose()}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{t.servers.editToolTitle}</DialogTitle>
-            <DialogDescription>
-              {t.servers.conversionLoadFailed}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button type="button" onClick={() => props.onClose()}>
-              {t.servers.cancel}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    );
-  }
-
   return (
     <ToolFormDialogForm
-      key={`${props.tool?.id ?? "new"}-${isTyped ? "typed" : draft ? "converted" : "legacy"}`}
+      key={`${props.tool?.id ?? "new"}-${isTyped ? "typed" : "empty"}`}
       {...props}
-      tool={resolvedTool}
-      conversionIssues={editorState.data?.conversionIssues ?? []}
     />
   );
 }
@@ -539,7 +414,6 @@ export function ToolFormDialogForm({
   tool,
   duplicate = false,
   onClose,
-  conversionIssues = [],
 }: {
   serverId: string;
   configRevision?: number;
@@ -548,14 +422,12 @@ export function ToolFormDialogForm({
   tool?: ToolFormTool;
   duplicate?: boolean;
   onClose: () => void;
-  conversionIssues?: ToolCompileIssue[];
 }) {
   const { t } = useTranslations();
   const createTool = useCreateMcpTool();
   const updateTool = useUpdateMcpTool();
   const previewCompile = usePreviewToolCompile();
   const isEdit = Boolean(tool) && !duplicate;
-  const paramMap = paramsByName(tool?.params);
   const definition = isClientRequestDefinition(tool?.requestDefinition)
     ? tool.requestDefinition
     : null;
@@ -606,32 +478,32 @@ export function ToolFormDialogForm({
   )
     ? (tool?.method as (typeof METHODS)[number])
     : "GET";
-  const initialPathParts = definition
+  const initialPathParts: PathPart[] = definition
     ? definitionToPathParts(definition, lookup)
-    : splitPath(tool?.pathTemplate ?? "", variableNames, paramMap);
+    : [{ kind: "text", value: "" }];
   const initialTitle = tool?.title ?? "";
   const initialDescription = tool?.description ?? "";
-  const initialQuery = definition
+  const initialQuery: SourceRow[] = definition
     ? definitionToSourceRows(definition.query, lookup, definitionAgentInputById)
-    : inferMapRows(tool?.requestTemplate?.query, variableNames, paramMap);
-  const initialHeaders = definition
+    : [];
+  const initialHeaders: SourceRow[] = definition
     ? definitionToSourceRows(
         definition.headers,
         lookup,
         definitionAgentInputById,
       )
-    : inferMapRows(tool?.requestTemplate?.headers, variableNames, paramMap);
+    : [];
   const initialBody = definition
     ? definitionToBodyState(definition, lookup)
-    : initialBodyState(tool, variableNames, paramMap);
-  const initialLeftoverDrafts = Object.fromEntries(
-    (tool?.params ?? []).map((param) => [param.name, param]),
-  );
+    : {
+        bodyType: "none" as BodyType,
+        formRows: [] as SourceRow[],
+        jsonRows: [] as SourceRow[],
+        jsonAdvanced: false,
+        advancedBody: "",
+      };
   const initialAllowMutation = tool?.allowMutation ?? false;
-  const conversionBlocks = conversionIssues.some(
-    (issue) => issue.severity === "error",
-  );
-  const initialEnabled = conversionBlocks ? false : (tool?.enabled ?? true);
+  const initialEnabled = tool?.enabled ?? true;
   const initialDestructiveHint =
     definition?.annotations?.destructiveHint ??
     defaultDestructiveHint(initialMethod);
@@ -651,9 +523,6 @@ export function ToolFormDialogForm({
   const [jsonRows, setJsonRows] = useState<SourceRow[]>(initialBody.jsonRows);
   const [jsonAdvanced, setJsonAdvanced] = useState(initialBody.jsonAdvanced);
   const [advancedBody, setAdvancedBody] = useState(initialBody.advancedBody);
-  const [leftoverDrafts, setLeftoverDrafts] = useState<
-    Record<string, AgentMeta>
-  >(initialLeftoverDrafts);
   const [allowMutation, setAllowMutation] = useState(initialAllowMutation);
   const [destructiveHint, setDestructiveHint] = useState(
     initialDestructiveHint,
@@ -689,7 +558,6 @@ export function ToolFormDialogForm({
       ...(preview?.issues ?? []),
       ...(tool?.compileIssues ?? []),
       ...saveIssues,
-      ...conversionIssues,
     ];
     for (const issue of all) {
       if (issue.id && !map[issue.id]) {
@@ -697,7 +565,7 @@ export function ToolFormDialogForm({
       }
     }
     return map;
-  }, [preview, tool?.compileIssues, saveIssues, conversionIssues]);
+  }, [preview, tool?.compileIssues, saveIssues]);
 
   const applyAgentMetaToRow = (
     row: SourceRow,
@@ -833,7 +701,7 @@ export function ToolFormDialogForm({
   }, [bodyType, jsonAdvanced, advancedBody]);
   // Last-save issues inform the author but must not permanently lock the
   // dialog after they fix the definition; the backend re-validates on save.
-  const blockingIssues = conversionBlocks || advancedJsonInvalid;
+  const blockingIssues = advancedJsonInvalid;
 
   const isDirty = useMemo(() => {
     if (savedRef.current) return false;
@@ -853,8 +721,7 @@ export function ToolFormDialogForm({
       JSON.stringify(formRows) !== JSON.stringify(initialBody.formRows) ||
       JSON.stringify(jsonRows) !== JSON.stringify(initialBody.jsonRows) ||
       jsonAdvanced !== initialBody.jsonAdvanced ||
-      advancedBody !== initialBody.advancedBody ||
-      JSON.stringify(leftoverDrafts) !== JSON.stringify(initialLeftoverDrafts)
+      advancedBody !== initialBody.advancedBody
     );
   }, [
     name,
@@ -889,58 +756,6 @@ export function ToolFormDialogForm({
     initialBody.jsonAdvanced,
     advancedBody,
     initialBody.advancedBody,
-    leftoverDrafts,
-    initialLeftoverDrafts,
-  ]);
-
-  const rawBindingIds = useMemo(() => {
-    const ids = new Set<string>();
-    if (definition?.body.bodyType === "raw") {
-      for (const binding of definition.body.bindings) {
-        ids.add(binding.id);
-      }
-    }
-    if (definition?.body.bodyType === "json") {
-      const walk = (node: ClientJsonNode) => {
-        if (node.kind === "binding") {
-          const token =
-            node.binding.kind === "serverValue"
-              ? node.binding.serverValueId
-              : node.binding.kind === "agentInput"
-                ? node.binding.agentInputId
-                : null;
-          if (token) ids.add(token);
-          return;
-        }
-        if (node.kind === "array") {
-          node.items.forEach(walk);
-          return;
-        }
-        if (node.kind === "object") {
-          node.fields.forEach((field) => walk(field.value));
-        }
-      };
-      walk(definition.body.root);
-    }
-    return ids;
-  }, [definition]);
-
-  const leftoverParams = useMemo(() => {
-    if (!showAdvanced) return [];
-    return detectPlaceholderNames([advancedBody], variableNames)
-      .filter((paramName) => !rawBindingIds.has(paramName))
-      .map(
-        (paramName) =>
-          leftoverDrafts[paramName] ??
-          defaultAgentMeta(paramName, paramMap.get(paramName)),
-      );
-  }, [
-    showAdvanced,
-    advancedBody,
-    variableNames,
-    leftoverDrafts,
-    paramMap,
-    rawBindingIds,
   ]);
 
   const queryCount = query.length;
@@ -997,7 +812,6 @@ export function ToolFormDialogForm({
       ...(definition?.body.bodyType === "json"
         ? { existingJsonRoot: definition.body.root }
         : {}),
-      agentDrafts: leftoverDrafts,
       annotations: buildAnnotations(),
     });
 
@@ -1067,11 +881,11 @@ export function ToolFormDialogForm({
 
   const switchBodyType = (next: BodyType) => {
     if (next === "json") {
-      const drafts = new Map(paramMap);
-      for (const draft of Object.values(leftoverDrafts)) {
-        drafts.set(draft.name, draft);
-      }
-      const rows = inferJsonRows(advancedBody, variableNames, drafts);
+      const rows = jsonTextToSourceRows(
+        advancedBody,
+        lookup,
+        definitionAgentInputById,
+      );
       if (rows) {
         setJsonRows(rows);
         setJsonAdvanced(false);
@@ -1079,14 +893,9 @@ export function ToolFormDialogForm({
         setJsonAdvanced(true);
       }
     }
-    if (next === "form" && formRows.length === 0 && advancedBody.trim()) {
-      setFormRows(inferFormRows(advancedBody, variableNames, paramMap));
-    }
     if (next === "raw" && !advancedBody.trim()) {
       if (jsonRows.length > 0) {
-        setAdvancedBody(compileStructuredJson(jsonRows));
-      } else if (formRows.length > 0) {
-        setAdvancedBody(compileFormBody(formRows));
+        setAdvancedBody(sourceRowsToJsonText(jsonRows));
       }
     }
     setBodyType(next);
@@ -1094,16 +903,16 @@ export function ToolFormDialogForm({
 
   const switchJsonMode = (advanced: boolean) => {
     if (advanced) {
-      setAdvancedBody(compileStructuredJson(jsonRows));
+      setAdvancedBody(sourceRowsToJsonText(jsonRows));
       setJsonAdvanced(true);
       return;
     }
     if (!jsonAdvanced) return;
-    const drafts = new Map(paramMap);
-    for (const draft of Object.values(leftoverDrafts)) {
-      drafts.set(draft.name, draft);
-    }
-    const rows = inferJsonRows(advancedBody, variableNames, drafts);
+    const rows = jsonTextToSourceRows(
+      advancedBody,
+      lookup,
+      definitionAgentInputById,
+    );
     if (rows === null) return;
     setJsonRows(rows);
     setJsonAdvanced(false);
@@ -1199,7 +1008,7 @@ export function ToolFormDialogForm({
                 </Select>
               </Field>
               <Field>
-                <Label htmlFor="tool-form-path">{t.servers.pathTemplate}</Label>
+                <Label htmlFor="tool-form-path">{t.servers.path}</Label>
                 <PathPartsEditor
                   parts={pathParts}
                   onChange={changePathParts}
@@ -1273,7 +1082,7 @@ export function ToolFormDialogForm({
                         disabled={
                           jsonAdvanced &&
                           advancedBody.trim().length > 0 &&
-                          !isFlatJsonTemplate(advancedBody)
+                          !isFlatJsonText(advancedBody)
                         }
                         onClick={() => switchJsonMode(false)}
                       >
@@ -1338,42 +1147,10 @@ export function ToolFormDialogForm({
                           : t.servers.bodyRawPlaceholder
                       }
                     />
-                    <AgentLeftoverFields
-                      params={leftoverParams}
-                      onChange={(next) =>
-                        setLeftoverDrafts((current) => ({
-                          ...current,
-                          ...Object.fromEntries(
-                            next.map((param) => [param.name, param]),
-                          ),
-                        }))
-                      }
-                    />
                   </div>
                 ) : null}
               </TabsContent>
             </Tabs>
-
-            {conversionIssues.length > 0 ? (
-              <Alert variant="destructive">
-                <AlertDescription className="space-y-1">
-                  <p>
-                    {t.servers.conversionBlocked.replace(
-                      "{count}",
-                      String(conversionIssues.length),
-                    )}
-                  </p>
-                  {conversionIssues.slice(0, 8).map((issue) => (
-                    <p
-                      key={`${issue.id ?? issue.path}-${issue.code}`}
-                      className="font-mono text-xs"
-                    >
-                      {issue.path}: {issue.message}
-                    </p>
-                  ))}
-                </AlertDescription>
-              </Alert>
-            ) : null}
 
             {advancedJsonInvalid ? (
               <Alert variant="destructive">

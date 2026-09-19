@@ -341,6 +341,36 @@ export function definitionAgentInputs(
   return new Map(definition.agentInputs.map((input) => [input.id, input]));
 }
 
+/**
+ * Display-only path summary derived from typed path segments. Never persisted
+ * and never used as an authoring source. Server values render their stable id
+ * (never a resolved secret); agent inputs render their public name.
+ */
+export function summarizeDefinitionPath(
+  definition: ClientRequestDefinition,
+  serverValueNameById: Record<string, string> = {},
+): string {
+  const agentInputNameById = new Map(
+    definition.agentInputs.map((input) => [input.id, input.name]),
+  );
+  return definition.pathSegments
+    .map((segment) => {
+      const binding = segment.value;
+      if (binding.kind === "literal") {
+        return binding.value === null ? "" : String(binding.value);
+      }
+      if (binding.kind === "serverValue") {
+        const name =
+          serverValueNameById[binding.serverValueId] ?? binding.serverValueId;
+        return `${binding.prefix ?? ""}{{${name}}}${binding.suffix ?? ""}`;
+      }
+      const name =
+        agentInputNameById.get(binding.agentInputId) ?? binding.agentInputId;
+      return `{{${name}}}`;
+    })
+    .join("");
+}
+
 function jsonLiteralNode(value: string): ClientJsonNode {
   const trimmed = value.trim();
   if (trimmed.length > 0) {
@@ -389,6 +419,128 @@ export type BodyFormState = {
   jsonAdvanced: boolean;
   advancedBody: string;
 };
+
+function sourceRowToJsonPlainValue(row: SourceRow): unknown {
+  if (row.origin === "fixed") {
+    const trimmed = row.value.trim();
+    if (trimmed.length > 0) {
+      try {
+        const parsed: unknown = JSON.parse(trimmed);
+        if (
+          parsed === null ||
+          typeof parsed === "number" ||
+          typeof parsed === "boolean" ||
+          typeof parsed === "string"
+        ) {
+          return parsed;
+        }
+      } catch {
+        // treat as a plain string literal
+      }
+    }
+    return row.value;
+  }
+  if (row.origin === "variable") {
+    return `{{${row.serverValueId ?? row.name}}}`;
+  }
+  return `{{${row.id ?? row.name}}}`;
+}
+
+/** Serializes structured JSON rows into an advanced-body text representation. */
+export function sourceRowsToJsonText(rows: SourceRow[]): string {
+  const entries = rows
+    .filter((row) => row.key.trim().length > 0)
+    .map(
+      (row) =>
+        [row.key.trim(), sourceRowToJsonPlainValue(row)] as [string, unknown],
+    );
+  return JSON.stringify(Object.fromEntries(entries), null, 2);
+}
+
+/** True when advanced JSON text is a flat object of primitive/token values. */
+export function isFlatJsonText(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (
+      parsed === null ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed)
+    ) {
+      return false;
+    }
+    return Object.values(parsed as Record<string, unknown>).every(
+      (value) =>
+        value === null ||
+        typeof value === "string" ||
+        typeof value === "number" ||
+        typeof value === "boolean",
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Parses flat advanced JSON into structured rows using stable binding ids
+ * only; unknown tokens stay literal text. Returns null for non-flat text.
+ */
+export function jsonTextToSourceRows(
+  text: string,
+  lookup: ServerValueLookup,
+  agentInputById: Map<string, ClientAgentInput>,
+): SourceRow[] | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  const rows: SourceRow[] = [];
+  for (const [key, value] of Object.entries(
+    parsed as Record<string, unknown>,
+  )) {
+    if (
+      value === null ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
+      rows.push({ key, origin: "fixed", value: JSON.stringify(value) });
+      continue;
+    }
+    if (typeof value !== "string") return null;
+    const token = /^\{\{([^}]+)\}\}$/.exec(value)?.[1];
+    if (token) {
+      const variableName = lookup.nameById[token];
+      if (variableName) {
+        rows.push({
+          key,
+          origin: "variable",
+          name: variableName,
+          prefix: "",
+          serverValueId: token,
+        });
+        continue;
+      }
+      const agent = agentInputById.get(token);
+      if (agent) {
+        rows.push({
+          key,
+          origin: "agent",
+          id: agent.id,
+          ...inputToAgentMeta(agent),
+        });
+        continue;
+      }
+    }
+    rows.push({ key, origin: "fixed", value });
+  }
+  return rows;
+}
 
 export function definitionToBodyState(
   definition: ClientRequestDefinition,
@@ -706,6 +858,7 @@ function parseAdvancedJsonBody(
     bindings: new Map(),
   };
   if (existingRoot) collectExistingJson(existingRoot, index);
+  const serverValueIds = new Set(Object.values(ctx.serverValueIdByName));
 
   const convert = (value: unknown): ClientJsonNode => {
     if (value === null)
@@ -726,6 +879,23 @@ function parseAdvancedJsonBody(
             kind: "binding",
             binding: existing.binding,
             jsonType: existing.jsonType,
+          };
+        }
+        if (serverValueIds.has(token)) {
+          return {
+            kind: "binding",
+            binding: { kind: "serverValue", serverValueId: token },
+            jsonType: "string",
+          };
+        }
+        const knownAgent =
+          ctx.existingAgentInputsById.get(token) ?? ctx.agentInputs.get(token);
+        if (knownAgent) {
+          ctx.agentInputs.set(knownAgent.id, knownAgent);
+          return {
+            kind: "binding",
+            binding: { kind: "agentInput", agentInputId: knownAgent.id },
+            jsonType: "string",
           };
         }
         const variableId = ctx.serverValueIdByName[token];
@@ -874,6 +1044,7 @@ export function formStateToDefinition(
       }));
 
   const agentNames = input.agentNames ?? new Set<string>();
+  const serverValueIds = new Set(Object.values(ctx.serverValueIdByName));
 
   const buildRawBody = (
     text: string,
@@ -913,21 +1084,30 @@ export function formStateToDefinition(
         }
         const existing = seen.get(token);
         if (existing) return `{{${existing}}}`;
-        const variableId = ctx.serverValueIdByName[token];
+        const variableId =
+          ctx.serverValueIdByName[token] ??
+          (serverValueIds.has(token) ? token : undefined);
         const bindingId = createDefinitionId("raw");
         if (variableId) {
           rawBindings.push({
             id: bindingId,
             binding: { kind: "serverValue", serverValueId: variableId },
           });
-        } else if (agentNames.has(token) || ctx.agentDrafts[token]) {
+        } else if (
+          agentNames.has(token) ||
+          ctx.agentDrafts[token] ||
+          ctx.existingAgentInputsById.has(token)
+        ) {
+          const known = ctx.existingAgentInputsById.get(token);
           const id = registerAgent(
-            ctx.agentDrafts[token] ?? {
-              name: token,
-              type: "string",
-              required: true,
-            },
-            undefined,
+            known
+              ? inputToAgentMeta(known)
+              : (ctx.agentDrafts[token] ?? {
+                  name: token,
+                  type: "string",
+                  required: true,
+                }),
+            known?.id,
             ctx,
           );
           rawBindings.push({

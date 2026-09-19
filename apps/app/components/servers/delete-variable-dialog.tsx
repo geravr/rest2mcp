@@ -1,6 +1,6 @@
 import { useDeleteMcpVariable } from "@/hooks/use-mcp";
 import { useTranslations } from "@/i18n/use-translations";
-import { templateReferencesName } from "@/lib/value-origin";
+import type { ClientCommonEntries } from "@/lib/request-definition";
 import {
   Button,
   Dialog,
@@ -14,76 +14,79 @@ import { LoaderCircle } from "lucide-react";
 
 export type VariableReferenceTool = {
   name: string;
-  pathTemplate: string;
-  requestTemplate: {
-    query?: Record<string, string>;
-    headers?: Record<string, string>;
-    body?: string | null;
-  } | null;
+  requestDefinition?: Record<string, unknown> | null;
 };
 
 export type VariableReferenceDetails = {
   toolNames: string[];
-  defaultHeaderKeys: string[];
-  defaultQueryKeys: string[];
+  commonHeaderKeys: string[];
+  commonQueryKeys: string[];
 };
 
-export function findVariableReferences(
-  name: string,
-  tools: VariableReferenceTool[],
-  defaultHeaders: Record<string, string> | null,
-  defaultQuery: Record<string, string> | null,
-): VariableReferenceDetails {
-  const toolNames: string[] = [];
-  for (const tool of tools) {
-    const templates = [
-      tool.pathTemplate,
-      tool.requestTemplate?.body,
-      ...Object.values(tool.requestTemplate?.query ?? {}),
-      ...Object.values(tool.requestTemplate?.headers ?? {}),
-    ];
-    if (templates.some((template) => templateReferencesName(name, template))) {
-      toolNames.push(tool.name);
-    }
+function bindingReferencesValue(binding: unknown, valueId: string): boolean {
+  return (
+    !!binding &&
+    typeof binding === "object" &&
+    (binding as { kind?: unknown }).kind === "serverValue" &&
+    (binding as { serverValueId?: unknown }).serverValueId === valueId
+  );
+}
+
+/** Deep-scans a stored request definition for a `serverValue` binding by id. */
+function definitionReferencesValue(node: unknown, valueId: string): boolean {
+  if (!node || typeof node !== "object") return false;
+  if (Array.isArray(node)) {
+    return node.some((item) => definitionReferencesValue(item, valueId));
   }
-  const defaultHeaderKeys = Object.entries(defaultHeaders ?? {})
-    .filter(([, value]) => templateReferencesName(name, value))
-    .map(([key]) => key);
-  const defaultQueryKeys = Object.entries(defaultQuery ?? {})
-    .filter(([, value]) => templateReferencesName(name, value))
-    .map(([key]) => key);
-  return { toolNames, defaultHeaderKeys, defaultQueryKeys };
+  if (bindingReferencesValue(node, valueId)) return true;
+  return Object.values(node as Record<string, unknown>).some((value) =>
+    definitionReferencesValue(value, valueId),
+  );
+}
+
+export function findVariableReferences(
+  valueId: string,
+  tools: VariableReferenceTool[],
+  common: ClientCommonEntries,
+): VariableReferenceDetails {
+  const toolNames = tools
+    .filter((tool) =>
+      definitionReferencesValue(tool.requestDefinition, valueId),
+    )
+    .map((tool) => tool.name);
+  const commonHeaderKeys = common.headers
+    .filter((entry) => bindingReferencesValue(entry.value, valueId))
+    .map((entry) => entry.name);
+  const commonQueryKeys = common.query
+    .filter((entry) => bindingReferencesValue(entry.value, valueId))
+    .map((entry) => entry.name);
+  return { toolNames, commonHeaderKeys, commonQueryKeys };
 }
 
 export function DeleteVariableDialog({
   serverId,
   configRevision = 1,
+  valueId,
   name,
   tools,
-  defaultHeaders,
-  defaultQuery,
+  common,
   onClose,
 }: {
   serverId: string;
   configRevision?: number;
+  valueId: string;
   name: string;
   tools: VariableReferenceTool[];
-  defaultHeaders: Record<string, string> | null;
-  defaultQuery: Record<string, string> | null;
+  common: ClientCommonEntries;
   onClose: () => void;
 }) {
   const { t } = useTranslations();
   const deleteVariable = useDeleteMcpVariable();
-  const references = findVariableReferences(
-    name,
-    tools,
-    defaultHeaders,
-    defaultQuery,
-  );
+  const references = findVariableReferences(valueId, tools, common);
   const hasReferences =
     references.toolNames.length > 0 ||
-    references.defaultHeaderKeys.length > 0 ||
-    references.defaultQueryKeys.length > 0;
+    references.commonHeaderKeys.length > 0 ||
+    references.commonQueryKeys.length > 0;
 
   return (
     <Dialog open onOpenChange={(next) => (!next ? onClose() : undefined)}>
@@ -96,17 +99,17 @@ export function DeleteVariableDialog({
         </DialogHeader>
         {hasReferences ? (
           <ul role="alert" className="space-y-1 text-sm text-destructive">
-            {references.defaultHeaderKeys.map((key) => (
+            {references.commonHeaderKeys.map((key) => (
               <li key={`header-${key}`}>
-                {t.servers.deleteVariableReferencedDefaultHeader.replace(
+                {t.servers.deleteVariableReferencedCommonHeader.replace(
                   "{key}",
                   key,
                 )}
               </li>
             ))}
-            {references.defaultQueryKeys.map((key) => (
+            {references.commonQueryKeys.map((key) => (
               <li key={`query-${key}`}>
-                {t.servers.deleteVariableReferencedDefaultQuery.replace(
+                {t.servers.deleteVariableReferencedCommonQuery.replace(
                   "{key}",
                   key,
                 )}
@@ -134,7 +137,7 @@ export function DeleteVariableDialog({
               deleteVariable.mutate(
                 {
                   serverId,
-                  name,
+                  valueId,
                   expectedRevision: configRevision,
                 },
                 { onSuccess: () => onClose() },

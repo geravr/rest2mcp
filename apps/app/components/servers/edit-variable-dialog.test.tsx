@@ -27,7 +27,13 @@ describe("EditVariableDialog", () => {
     render(
       <EditVariableDialog
         serverId="mcs_1"
-        variable={{ name: "api_token", isSecret: true }}
+        variable={{
+          id: "msv_1",
+          name: "api_token",
+          kind: "secret",
+          owner: "manual",
+          hasValue: true,
+        }}
         onClose={onClose}
       />,
     );
@@ -43,8 +49,7 @@ describe("EditVariableDialog", () => {
       {
         serverId: "mcs_1",
         expectedRevision: 1,
-        name: "api_token",
-        isSecret: true,
+        valueId: "msv_1",
         value: "sk_rotated",
       },
       expect.anything(),
@@ -52,12 +57,18 @@ describe("EditVariableDialog", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("requires a new value to turn a secret into a non-secret", async () => {
+  it("requires a new value to turn a secret into a config", async () => {
     const user = userEvent.setup();
     render(
       <EditVariableDialog
         serverId="mcs_1"
-        variable={{ name: "api_token", isSecret: true }}
+        variable={{
+          id: "msv_1",
+          name: "api_token",
+          kind: "secret",
+          owner: "manual",
+          hasValue: true,
+        }}
         onClose={() => {}}
       />,
     );
@@ -74,8 +85,8 @@ describe("EditVariableDialog", () => {
       {
         serverId: "mcs_1",
         expectedRevision: 1,
-        name: "api_token",
-        isSecret: false,
+        valueId: "msv_1",
+        kind: "config",
         value: "now-plain",
       },
       expect.anything(),
@@ -87,8 +98,11 @@ describe("EditVariableDialog", () => {
       <EditVariableDialog
         serverId="mcs_1"
         variable={{
+          id: "msv_1",
           name: "api_token",
-          isSecret: true,
+          kind: "secret",
+          owner: "manual",
+          hasValue: true,
           value: "should-not-show",
         }}
         onClose={() => {}}
@@ -105,7 +119,13 @@ describe("EditVariableDialog", () => {
     render(
       <EditVariableDialog
         serverId="mcs_1"
-        variable={{ name: "api_token", isSecret: true }}
+        variable={{
+          id: "msv_1",
+          name: "api_token",
+          kind: "secret",
+          owner: "manual",
+          hasValue: true,
+        }}
         onClose={() => {}}
       />,
     );
@@ -119,7 +139,13 @@ describe("EditVariableDialog", () => {
     render(
       <EditVariableDialog
         serverId="mcs_1"
-        variable={{ name: "api_token", isSecret: true }}
+        variable={{
+          id: "msv_1",
+          name: "api_token",
+          kind: "secret",
+          owner: "manual",
+          hasValue: true,
+        }}
         onClose={() => {}}
       />,
     );

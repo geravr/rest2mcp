@@ -16,6 +16,8 @@ vi.mock("@/hooks/use-mcp", () => ({
   }),
 }));
 
+const emptyCommon = { headers: [], query: [] };
+
 describe("DeleteVariableDialog", () => {
   beforeEach(() => {
     deleteMutate.mockClear();
@@ -27,10 +29,10 @@ describe("DeleteVariableDialog", () => {
     render(
       <DeleteVariableDialog
         serverId="mcs_1"
+        valueId="msv_1"
         name="api_token"
         tools={[]}
-        defaultHeaders={null}
-        defaultQuery={null}
+        common={emptyCommon}
         onClose={onClose}
       />,
     );
@@ -44,10 +46,10 @@ describe("DeleteVariableDialog", () => {
     render(
       <DeleteVariableDialog
         serverId="mcs_1"
+        valueId="msv_1"
         name="api_token"
         tools={[]}
-        defaultHeaders={null}
-        defaultQuery={null}
+        common={emptyCommon}
         onClose={() => {}}
       />,
     );
@@ -58,43 +60,67 @@ describe("DeleteVariableDialog", () => {
     expect(screen.queryByText(/\{\{api_token\}\}/)).not.toBeInTheDocument();
   });
 
-  it("warns with default query param keys when referenced", () => {
+  it("warns with common query param keys when referenced", () => {
     render(
       <DeleteVariableDialog
         serverId="mcs_1"
+        valueId="msv_1"
         name="api_token"
         tools={[]}
-        defaultHeaders={null}
-        defaultQuery={{ token: "{{api_token}}" }}
+        common={{
+          headers: [],
+          query: [
+            {
+              id: "q1",
+              name: "token",
+              value: { kind: "serverValue", serverValueId: "msv_1" },
+            },
+          ],
+        }}
         onClose={() => {}}
       />,
     );
 
-    expect(screen.getByText(/default query param token/i)).toBeInTheDocument();
+    expect(screen.getByText(/common query param token/i)).toBeInTheDocument();
   });
 
-  it("warns with tool names and default header keys when referenced", () => {
+  it("warns with tool names and common header keys when referenced", () => {
     render(
       <DeleteVariableDialog
         serverId="mcs_1"
+        valueId="msv_1"
         name="api_token"
         tools={[
           {
             name: "get_contact",
-            pathTemplate: "/contacts",
-            requestTemplate: {
-              headers: { Authorization: "Bearer {{api_token}}" },
+            requestDefinition: {
+              version: 1,
+              headers: [
+                {
+                  id: "h1",
+                  name: "Authorization",
+                  value: { kind: "serverValue", serverValueId: "msv_1" },
+                },
+              ],
             },
           },
         ]}
-        defaultHeaders={{ Authorization: "Bearer {{api_token}}" }}
-        defaultQuery={null}
+        common={{
+          headers: [
+            {
+              id: "h1",
+              name: "Authorization",
+              value: { kind: "serverValue", serverValueId: "msv_1" },
+            },
+          ],
+          query: [],
+        }}
         onClose={() => {}}
       />,
     );
 
     expect(
-      screen.getByText(/default header Authorization/i),
+      screen.getByText(/common header Authorization/i),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/May be used in tools on this page: get_contact/i),
@@ -102,22 +128,28 @@ describe("DeleteVariableDialog", () => {
     expect(screen.queryByText(/\{\{api_token\}\}/)).not.toBeInTheDocument();
   });
 
-  it("does not warn when a shorter name is only a substring of a placeholder", () => {
+  it("does not warn when a different server value id is referenced", () => {
     render(
       <DeleteVariableDialog
         serverId="mcs_1"
-        name="api"
+        valueId="msv_1"
+        name="api_token"
         tools={[
           {
             name: "get_contact",
-            pathTemplate: "/contacts",
-            requestTemplate: {
-              headers: { Authorization: "Bearer {{api_token}}" },
+            requestDefinition: {
+              version: 1,
+              headers: [
+                {
+                  id: "h1",
+                  name: "Authorization",
+                  value: { kind: "serverValue", serverValueId: "msv_other" },
+                },
+              ],
             },
           },
         ]}
-        defaultHeaders={null}
-        defaultQuery={null}
+        common={emptyCommon}
         onClose={() => {}}
       />,
     );
@@ -131,18 +163,24 @@ describe("DeleteVariableDialog", () => {
     render(
       <DeleteVariableDialog
         serverId="mcs_1"
+        valueId="msv_1"
         name="api_token"
         tools={[
           {
             name: "get_contact",
-            pathTemplate: "/contacts",
-            requestTemplate: {
-              headers: { Authorization: "Bearer {{api_token}}" },
+            requestDefinition: {
+              version: 1,
+              headers: [
+                {
+                  id: "h1",
+                  name: "Authorization",
+                  value: { kind: "serverValue", serverValueId: "msv_1" },
+                },
+              ],
             },
           },
         ]}
-        defaultHeaders={null}
-        defaultQuery={null}
+        common={emptyCommon}
         onClose={onClose}
       />,
     );
@@ -159,10 +197,10 @@ describe("DeleteVariableDialog", () => {
     render(
       <DeleteVariableDialog
         serverId="mcs_1"
+        valueId="msv_1"
         name="api_token"
         tools={[]}
-        defaultHeaders={null}
-        defaultQuery={null}
+        common={emptyCommon}
         onClose={onClose}
       />,
     );
@@ -172,7 +210,7 @@ describe("DeleteVariableDialog", () => {
     expect(deleteMutate).toHaveBeenCalledWith(
       {
         serverId: "mcs_1",
-        name: "api_token",
+        valueId: "msv_1",
         expectedRevision: 1,
       },
       expect.objectContaining({ onSuccess: expect.any(Function) }),

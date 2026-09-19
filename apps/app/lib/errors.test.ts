@@ -161,7 +161,7 @@ describe("resolveErrorMessage", () => {
     ).toBe(es.errors.codes.USER_NOT_FOUND);
   });
 
-  it("interpolates MCP_TEMPLATE_UNRESOLVED placeholder in English", () => {
+  it("resolves MCP_TEMPLATE_UNRESOLVED without parsing a placeholder name", () => {
     expect(
       resolveErrorMessage(
         {
@@ -172,39 +172,34 @@ describe("resolveErrorMessage", () => {
         },
         t,
       ),
-    ).toBe("Template placeholder limit has no matching argument or variable.");
-  });
-
-  it("interpolates MCP_TEMPLATE_UNRESOLVED from shape.data.details", () => {
+    ).toBe("A request binding has no matching server value or agent input.");
     expect(
       resolveErrorMessage(
         {
           shape: {
             data: {
               appCode: APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED,
-              details: { placeholder: "limit" },
             },
           },
         },
         t,
       ),
-    ).toBe("Template placeholder limit has no matching argument or variable.");
+    ).toBe("A request binding has no matching server value or agent input.");
   });
 
-  it("interpolates MCP_TEMPLATE_UNRESOLVED placeholder in Spanish", () => {
+  it("resolves MCP_TEMPLATE_UNRESOLVED in Spanish", () => {
     const es = getTranslations("es");
     expect(
       resolveErrorMessage(
         {
           data: {
             appCode: APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED,
-            details: { placeholder: "limit" },
           },
         },
         es,
       ),
     ).toBe(
-      "El placeholder limit de la plantilla no tiene argumento ni variable correspondiente.",
+      "Un enlace de la petición no tiene un valor de servidor ni una entrada de agente correspondiente.",
     );
   });
 
