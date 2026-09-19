@@ -71,6 +71,19 @@ import { useMemo, useRef, useState } from "react";
 const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] as const;
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
+function defaultDestructiveHint(method: string): boolean {
+  return method === "DELETE";
+}
+
+function defaultIdempotentHint(method: string): boolean {
+  return (
+    method === "GET" ||
+    method === "HEAD" ||
+    method === "PUT" ||
+    method === "DELETE"
+  );
+}
+
 /** Keeps only agent metadata fields so propagation never clobbers row keys/ids. */
 function pickAgentMeta(source: AgentMeta): AgentMeta {
   return {
@@ -85,6 +98,7 @@ function pickAgentMeta(source: AgentMeta): AgentMeta {
     minLength: source.minLength,
     maxLength: source.maxLength,
     pattern: source.pattern,
+    format: source.format,
     enum: source.enum,
     examples: source.examples,
     allowEmpty: source.allowEmpty,
@@ -107,6 +121,7 @@ export type ToolCompileIssue = {
 export type ToolFormTool = {
   id: string;
   name: string;
+  title?: string | null;
   description: string | null;
   method: string;
   pathTemplate: string;
@@ -210,11 +225,197 @@ type CompiledPlanPreview = {
   agentInputs: Array<{ id: string; name: string }>;
 };
 
-function asCompiledPlanPreview(
-  plan: Record<string, unknown> | null | undefined,
-): CompiledPlanPreview | null {
+function asCompiledPlanPreview(plan: unknown): CompiledPlanPreview | null {
   if (!plan) return null;
   return plan as unknown as CompiledPlanPreview;
+}
+
+type CompiledContractAnnotations = {
+  readOnlyHint: boolean;
+  destructiveHint: boolean;
+  idempotentHint: boolean;
+  openWorldHint: boolean;
+};
+
+type CompiledContractPreview = {
+  name: string;
+  title: string;
+  description: string;
+  method: string;
+  contractVersion: number;
+  inputSchema: Record<string, unknown>;
+  outputSchema: Record<string, unknown>;
+  annotations: CompiledContractAnnotations;
+  metadata: Record<string, unknown>;
+  fingerprint: string;
+};
+
+function asCompiledContractPreview(
+  contract: unknown,
+): CompiledContractPreview | null {
+  if (!contract || typeof contract !== "object") return null;
+  return contract as CompiledContractPreview;
+}
+
+type JsonSchemaProperty = {
+  type?: unknown;
+  format?: unknown;
+  description?: unknown;
+  pattern?: unknown;
+  enum?: unknown;
+  examples?: unknown;
+  writeOnly?: unknown;
+  minimum?: unknown;
+  maximum?: unknown;
+  minLength?: unknown;
+  maxLength?: unknown;
+};
+
+function describePropertyConstraints(property: JsonSchemaProperty): string[] {
+  const parts: string[] = [];
+  if (typeof property.format === "string") parts.push(property.format);
+  if (typeof property.minLength === "number")
+    parts.push(`min ${property.minLength}`);
+  if (typeof property.maxLength === "number")
+    parts.push(`max ${property.maxLength}`);
+  if (typeof property.minimum === "number") parts.push(`≥ ${property.minimum}`);
+  if (typeof property.maximum === "number") parts.push(`≤ ${property.maximum}`);
+  if (typeof property.pattern === "string") parts.push(`/${property.pattern}/`);
+  if (Array.isArray(property.enum)) {
+    parts.push(
+      `enum: ${property.enum.map((value) => String(value)).join(", ")}`,
+    );
+  }
+  if (Array.isArray(property.examples) && property.examples.length > 0) {
+    parts.push(
+      `e.g. ${property.examples.map((value) => String(value)).join(", ")}`,
+    );
+  }
+  if (property.writeOnly === true) parts.push("write-only");
+  return parts;
+}
+
+function ContractPreview({ contract }: { contract: CompiledContractPreview }) {
+  const { t } = useTranslations();
+  const inputSchema = contract.inputSchema as {
+    properties?: Record<string, JsonSchemaProperty>;
+    required?: unknown;
+  };
+  const properties = Object.entries(inputSchema.properties ?? {});
+  const required = new Set(
+    Array.isArray(inputSchema.required)
+      ? inputSchema.required.filter(
+          (value): value is string => typeof value === "string",
+        )
+      : [],
+  );
+  const outputPresent =
+    contract.outputSchema !== null &&
+    typeof contract.outputSchema === "object" &&
+    Object.keys(contract.outputSchema).length > 0;
+
+  return (
+    <div className="space-y-3 rounded-md border border-border bg-muted/20 p-3">
+      <p className="text-sm font-medium">{t.servers.previewContractHeading}</p>
+      <dl className="grid gap-1 text-xs sm:grid-cols-[9rem_1fr]">
+        <dt className="text-muted-foreground">
+          {t.servers.previewContractName}
+        </dt>
+        <dd className="font-mono">{contract.name}</dd>
+        <dt className="text-muted-foreground">
+          {t.servers.previewContractTitleLabel}
+        </dt>
+        <dd>{contract.title}</dd>
+        <dt className="text-muted-foreground">
+          {t.servers.previewContractDescription}
+        </dt>
+        <dd>{contract.description}</dd>
+        <dt className="text-muted-foreground">
+          {t.servers.previewContractVersion}
+        </dt>
+        <dd>{contract.contractVersion}</dd>
+        <dt className="text-muted-foreground">
+          {t.servers.previewContractFingerprint}
+        </dt>
+        <dd className="break-all font-mono">{contract.fingerprint}</dd>
+      </dl>
+      <div className="space-y-1">
+        <p className="text-xs font-medium">
+          {t.servers.previewContractInputSchema}
+        </p>
+        {properties.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            {t.servers.previewContractNoProperties}
+          </p>
+        ) : (
+          <ul className="space-y-1">
+            {properties.map(([name, property]) => {
+              const constraints = describePropertyConstraints(property);
+              return (
+                <li key={name} className="text-xs">
+                  <span className="font-mono">{name}</span>
+                  {required.has(name) ? (
+                    <Badge variant="outline" className="ml-1">
+                      {t.servers.previewContractRequired}
+                    </Badge>
+                  ) : (
+                    <span className="ml-1 text-muted-foreground">
+                      {t.servers.previewContractOptional}
+                    </span>
+                  )}
+                  {property.description ? (
+                    <span className="ml-1 text-muted-foreground">
+                      — {String(property.description)}
+                    </span>
+                  ) : null}
+                  {constraints.length > 0 ? (
+                    <span className="ml-1 font-mono text-muted-foreground">
+                      ({constraints.join(", ")})
+                    </span>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+      <div className="space-y-1">
+        <p className="text-xs font-medium">
+          {t.servers.previewContractOutputSchema}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {outputPresent
+            ? t.servers.previewContractOutputPresent
+            : t.servers.previewContractOutputAbsent}
+        </p>
+      </div>
+      <div className="space-y-1">
+        <p className="text-xs font-medium">
+          {t.servers.previewContractAnnotations}
+        </p>
+        <div className="flex flex-wrap gap-1">
+          {contract.annotations.readOnlyHint ? (
+            <Badge variant="outline">{t.servers.annotationReadOnly}</Badge>
+          ) : null}
+          {contract.annotations.destructiveHint ? (
+            <Badge variant="outline">{t.servers.annotationDestructive}</Badge>
+          ) : null}
+          {contract.annotations.idempotentHint ? (
+            <Badge variant="outline">{t.servers.annotationIdempotent}</Badge>
+          ) : null}
+          {contract.annotations.openWorldHint ? (
+            <Badge variant="outline">{t.servers.annotationOpenWorld}</Badge>
+          ) : null}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {contract.annotations.destructiveHint ||
+          !contract.annotations.idempotentHint
+            ? t.servers.contractRetryNotAutomatic
+            : t.servers.contractRetryAllowsRetry}
+        </p>
+      </div>
+    </div>
+  );
 }
 
 function describeBinding(
@@ -405,6 +606,7 @@ export function ToolFormDialogForm({
   const initialPathParts = definition
     ? definitionToPathParts(definition, lookup)
     : splitPath(tool?.pathTemplate ?? "", variableNames, paramMap);
+  const initialTitle = tool?.title ?? "";
   const initialDescription = tool?.description ?? "";
   const initialQuery = definition
     ? definitionToSourceRows(definition.query, lookup, definitionAgentInputById)
@@ -427,8 +629,15 @@ export function ToolFormDialogForm({
     (issue) => issue.severity === "error",
   );
   const initialEnabled = conversionBlocks ? false : (tool?.enabled ?? true);
+  const initialDestructiveHint =
+    definition?.annotations?.destructiveHint ??
+    defaultDestructiveHint(initialMethod);
+  const initialIdempotentHint =
+    definition?.annotations?.idempotentHint ??
+    defaultIdempotentHint(initialMethod);
 
   const [name, setName] = useState(initialName);
+  const [title, setTitle] = useState(initialTitle);
   const [method, setMethod] = useState<(typeof METHODS)[number]>(initialMethod);
   const [pathParts, setPathParts] = useState<PathPart[]>(initialPathParts);
   const [description, setDescription] = useState(initialDescription);
@@ -443,6 +652,10 @@ export function ToolFormDialogForm({
     Record<string, AgentMeta>
   >(initialLeftoverDrafts);
   const [allowMutation, setAllowMutation] = useState(initialAllowMutation);
+  const [destructiveHint, setDestructiveHint] = useState(
+    initialDestructiveHint,
+  );
+  const [idempotentHint, setIdempotentHint] = useState(initialIdempotentHint);
   const [enabled, setEnabled] = useState(initialEnabled);
   const [savedToolId, setSavedToolId] = useState<string | null>(
     isEdit && tool ? tool.id : null,
@@ -452,6 +665,7 @@ export function ToolFormDialogForm({
   const [mutationConfirmOpen, setMutationConfirmOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const preview = previewCompile.data ?? null;
+  const previewContract = asCompiledContractPreview(preview?.contract);
   const savedRef = useRef(false);
   const nodeIdRegistryRef = useRef(new Map<object, string>());
   const resolveNodeId = (source: object, prefix: string): string => {
@@ -587,6 +801,20 @@ export function ToolFormDialogForm({
   const showAdvanced =
     bodyType === "raw" || (bodyType === "json" && jsonAdvanced);
   const isMutatingMethod = MUTATING_METHODS.has(method);
+  const buildAnnotations = (): ClientRequestDefinition["annotations"] =>
+    isMutatingMethod
+      ? {
+          readOnlyHint: false,
+          destructiveHint,
+          idempotentHint,
+          openWorldHint: true,
+        }
+      : {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: true,
+        };
   const previewBlocksEnable = preview !== null && !preview.ok;
   const saveBlocks = saveIssues.some((issue) => issue.severity === "error");
   const advancedJsonInvalid = useMemo(() => {
@@ -608,9 +836,12 @@ export function ToolFormDialogForm({
     if (savedRef.current) return false;
     return (
       name !== initialName ||
+      title !== initialTitle ||
       method !== initialMethod ||
       description !== initialDescription ||
       allowMutation !== initialAllowMutation ||
+      destructiveHint !== initialDestructiveHint ||
+      idempotentHint !== initialIdempotentHint ||
       enabled !== initialEnabled ||
       joinPath(pathParts) !== joinPath(initialPathParts) ||
       JSON.stringify(query) !== JSON.stringify(initialQuery) ||
@@ -625,12 +856,18 @@ export function ToolFormDialogForm({
   }, [
     name,
     initialName,
+    title,
+    initialTitle,
     method,
     initialMethod,
     description,
     initialDescription,
     allowMutation,
     initialAllowMutation,
+    destructiveHint,
+    initialDestructiveHint,
+    idempotentHint,
+    initialIdempotentHint,
     enabled,
     initialEnabled,
     pathParts,
@@ -758,9 +995,7 @@ export function ToolFormDialogForm({
         ? { existingJsonRoot: definition.body.root }
         : {}),
       agentDrafts: leftoverDrafts,
-      ...(definition?.annotations
-        ? { annotations: definition.annotations }
-        : {}),
+      annotations: buildAnnotations(),
     });
 
   const runPreview = () => {
@@ -768,6 +1003,9 @@ export function ToolFormDialogForm({
     setSaveIssues([]);
     previewCompile.mutate({
       serverId,
+      ...(name.trim() ? { name: name.trim() } : {}),
+      title: title.trim() ? title.trim() : null,
+      description: description.trim() ? description.trim() : null,
       method,
       requestDefinition: buildRequestDefinition(),
       allowMutation,
@@ -780,6 +1018,7 @@ export function ToolFormDialogForm({
     const base = {
       serverId,
       name,
+      title: title.trim() ? title.trim() : null,
       description: description.trim() ? description.trim() : null,
       method,
       requestDefinition,
@@ -866,6 +1105,12 @@ export function ToolFormDialogForm({
     setJsonAdvanced(false);
   };
 
+  const changeMethod = (next: (typeof METHODS)[number]) => {
+    setMethod(next);
+    setDestructiveHint(defaultDestructiveHint(next));
+    setIdempotentHint(defaultIdempotentHint(next));
+  };
+
   return (
     <Dialog open onOpenChange={(next) => (!next ? requestClose() : undefined)}>
       <DialogContent
@@ -905,6 +1150,17 @@ export function ToolFormDialogForm({
             </Field>
 
             <Field>
+              <Label htmlFor="tool-form-title">{t.servers.toolTitle}</Label>
+              <Input
+                id="tool-form-title"
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder={t.servers.toolTitlePlaceholder}
+                autoComplete="off"
+              />
+            </Field>
+
+            <Field>
               <Label htmlFor="tool-form-description">
                 {t.servers.toolDescription}
               </Label>
@@ -923,7 +1179,7 @@ export function ToolFormDialogForm({
                 <Select
                   value={method}
                   onValueChange={(value) =>
-                    setMethod(value as (typeof METHODS)[number])
+                    changeMethod(value as (typeof METHODS)[number])
                   }
                 >
                   <SelectTrigger aria-label={t.servers.method}>
@@ -1290,10 +1546,70 @@ export function ToolFormDialogForm({
                             );
                           })()
                         : null}
+                      {previewContract ? (
+                        <ContractPreview contract={previewContract} />
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
               ) : null}
+            </div>
+
+            <div className="space-y-3 rounded-md border border-border p-3">
+              <div>
+                <p className="text-sm font-medium">
+                  {t.servers.annotationsTitle}
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {t.servers.annotationsHelp}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {!isMutatingMethod ? (
+                  <Badge variant="outline">
+                    {t.servers.annotationReadOnly}
+                  </Badge>
+                ) : null}
+                <Badge variant="outline">{t.servers.annotationOpenWorld}</Badge>
+              </div>
+              {isMutatingMethod ? (
+                <div className="space-y-3">
+                  <label className="flex items-center justify-between gap-4 text-sm">
+                    <span>
+                      <span className="font-medium">
+                        {t.servers.annotationDestructive}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                        {t.servers.annotationDestructiveHelp}
+                      </span>
+                    </span>
+                    <Switch
+                      aria-label={t.servers.annotationDestructive}
+                      checked={destructiveHint}
+                      onCheckedChange={setDestructiveHint}
+                    />
+                  </label>
+                  <label className="flex items-center justify-between gap-4 text-sm">
+                    <span>
+                      <span className="font-medium">
+                        {t.servers.annotationIdempotent}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                        {t.servers.annotationIdempotentHelp}
+                      </span>
+                    </span>
+                    <Switch
+                      aria-label={t.servers.annotationIdempotent}
+                      checked={idempotentHint}
+                      onCheckedChange={setIdempotentHint}
+                    />
+                  </label>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  {t.servers.annotationReadOnlyHelp}
+                </p>
+              )}
             </div>
 
             {mutationConfirmOpen ? (

@@ -19,6 +19,7 @@ type SaveOptions = {
 
 type PreviewResult = {
   ok: boolean;
+  ready?: boolean;
   issues: Array<{
     path: string;
     code: string;
@@ -26,6 +27,7 @@ type PreviewResult = {
     severity: "error" | "warning";
   }>;
   plan: unknown;
+  contract?: unknown;
 };
 
 const createMutate = vi.fn<(input: unknown, options?: SaveOptions) => void>();
@@ -672,5 +674,289 @@ describe("ToolFormDialog", () => {
 
     expect(screen.getByText(/•••• \(secret value\)/i)).toBeInTheDocument();
     expect(screen.queryByText(/super-secret/i)).not.toBeInTheDocument();
+  });
+
+  it("sends the tool title on save and in preview", async () => {
+    const user = userEvent.setup();
+    createMutate.mockImplementation((_input, options) => {
+      options?.onSuccess?.({ id: "mct_new" });
+    });
+    previewResultQueue = [{ ok: true, issues: [], plan: null }];
+
+    render(
+      <ToolFormDialog serverId="mcs_1" variableNames={[]} onClose={() => {}} />,
+    );
+
+    await user.type(screen.getByLabelText(/^title$/i), "Get contact");
+    await user.type(screen.getByLabelText(/tool name/i), "get_contact");
+    await user.type(screen.getByLabelText(/^path$/i), "/contacts");
+
+    await user.click(
+      screen.getByRole("button", { name: /effective request preview/i }),
+    );
+    await user.click(screen.getByRole("button", { name: /^preview$/i }));
+
+    expect(previewMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Get contact" }),
+    );
+
+    await user.click(screen.getByRole("button", { name: /save tool/i }));
+
+    expect(createMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Get contact" }),
+      expect.anything(),
+    );
+  });
+
+  it("prefills the existing title on duplicate", async () => {
+    const user = userEvent.setup();
+    createMutate.mockImplementation((_input, options) => {
+      options?.onSuccess?.({ id: "mct_2" });
+    });
+
+    render(
+      <ToolFormDialog
+        serverId="mcs_1"
+        variableNames={[]}
+        tool={{ ...toolFixture, title: "Get contact" }}
+        duplicate
+        onClose={() => {}}
+      />,
+    );
+
+    expect(screen.getByLabelText(/^title$/i)).toHaveValue("Get contact");
+
+    await user.click(screen.getByRole("button", { name: /save tool/i }));
+
+    expect(createMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Get contact" }),
+      expect.anything(),
+    );
+  });
+
+  it("marks a duplicate dirty when only the title changes", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(
+      <ToolFormDialog
+        serverId="mcs_1"
+        variableNames={[]}
+        tool={{ ...toolFixture, title: "Get contact" }}
+        duplicate
+        onClose={onClose}
+      />,
+    );
+
+    await user.type(screen.getByLabelText(/^title$/i), " updated");
+    await user.click(screen.getByRole("button", { name: /^cancel$/i }));
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByText(/discard this tool/i)).toBeInTheDocument();
+  });
+
+  it("derives fixed read-only annotations for read methods", async () => {
+    const user = userEvent.setup();
+    createMutate.mockImplementation((_input, options) => {
+      options?.onSuccess?.({ id: "mct_new" });
+    });
+
+    render(
+      <ToolFormDialog serverId="mcs_1" variableNames={[]} onClose={() => {}} />,
+    );
+
+    await user.type(screen.getByLabelText(/tool name/i), "get_contacts");
+    await user.type(screen.getByLabelText(/^path$/i), "/contacts");
+
+    expect(screen.queryByLabelText(/^destructive$/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^idempotent$/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /save tool/i }));
+
+    expect(createMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestDefinition: expect.objectContaining({
+          annotations: {
+            readOnlyHint: true,
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: true,
+          },
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("sends destructive and idempotent hints for a DELETE tool", async () => {
+    const user = userEvent.setup();
+    createMutate.mockImplementation((_input, options) => {
+      options?.onSuccess?.({ id: "mct_new" });
+    });
+
+    render(
+      <ToolFormDialog serverId="mcs_1" variableNames={[]} onClose={() => {}} />,
+    );
+
+    await user.type(screen.getByLabelText(/tool name/i), "delete_contact");
+    await user.type(screen.getByLabelText(/^path$/i), "/contacts/1");
+    await user.click(screen.getByLabelText(/^method$/i));
+    await user.click(screen.getByRole("option", { name: /^delete$/i }));
+
+    expect(screen.getByLabelText(/^destructive$/i)).toBeChecked();
+    expect(screen.getByLabelText(/^idempotent$/i)).toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: /save tool/i }));
+
+    expect(createMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestDefinition: expect.objectContaining({
+          annotations: expect.objectContaining({
+            readOnlyHint: false,
+            destructiveHint: true,
+            idempotentHint: true,
+            openWorldHint: true,
+          }),
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("lets the owner toggle destructive and idempotent hints", async () => {
+    const user = userEvent.setup();
+    createMutate.mockImplementation((_input, options) => {
+      options?.onSuccess?.({ id: "mct_new" });
+    });
+
+    render(
+      <ToolFormDialog serverId="mcs_1" variableNames={[]} onClose={() => {}} />,
+    );
+
+    await user.type(screen.getByLabelText(/tool name/i), "create_contact");
+    await user.type(screen.getByLabelText(/^path$/i), "/contacts");
+    await user.click(screen.getByLabelText(/^method$/i));
+    await user.click(screen.getByRole("option", { name: /^post$/i }));
+
+    expect(screen.getByLabelText(/^destructive$/i)).not.toBeChecked();
+    expect(screen.getByLabelText(/^idempotent$/i)).not.toBeChecked();
+    await user.click(screen.getByLabelText(/^destructive$/i));
+    await user.click(screen.getByLabelText(/^idempotent$/i));
+
+    await user.click(screen.getByRole("button", { name: /save tool/i }));
+
+    expect(createMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestDefinition: expect.objectContaining({
+          annotations: expect.objectContaining({
+            readOnlyHint: false,
+            destructiveHint: true,
+            idempotentHint: true,
+            openWorldHint: true,
+          }),
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("renders the agent-visible contract preview", async () => {
+    const user = userEvent.setup();
+    previewResultQueue = [
+      {
+        ok: true,
+        issues: [],
+        plan: null,
+        contract: {
+          name: "get_contact",
+          title: "Get contact",
+          description: "Fetch a contact by id.",
+          method: "GET",
+          contractVersion: 1,
+          inputSchema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              contact_id: {
+                type: "string",
+                description: "Contact to fetch",
+                format: "uuid",
+              },
+            },
+            required: ["contact_id"],
+          },
+          outputSchema: { type: "object", properties: {} },
+          annotations: {
+            readOnlyHint: true,
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: true,
+          },
+          metadata: {
+            "io.rest2mcp/contract": { version: 1, fingerprint: "sha256:abc" },
+          },
+          fingerprint: "sha256:abc",
+        },
+      },
+    ];
+
+    render(
+      <ToolFormDialog serverId="mcs_1" variableNames={[]} onClose={() => {}} />,
+    );
+
+    await user.type(screen.getByLabelText(/tool name/i), "get_contact");
+    await user.type(screen.getByLabelText(/^path$/i), "/contacts");
+    await user.click(
+      screen.getByRole("button", { name: /effective request preview/i }),
+    );
+    await user.click(screen.getByRole("button", { name: /^preview$/i }));
+
+    expect(screen.getByText(/agent contract/i)).toBeInTheDocument();
+    expect(screen.getByText("sha256:abc")).toBeInTheDocument();
+    expect(screen.getByText("contact_id")).toBeInTheDocument();
+    expect(screen.getByText(/contact to fetch/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/structured output is advertised/i),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText(/read-only/i).length).toBeGreaterThan(0);
+  });
+
+  it("saves a string agent input format", async () => {
+    const user = userEvent.setup();
+    createMutate.mockImplementation((_input, options) => {
+      options?.onSuccess?.({ id: "mct_new" });
+    });
+
+    render(
+      <ToolFormDialog serverId="mcs_1" variableNames={[]} onClose={() => {}} />,
+    );
+
+    await user.type(screen.getByLabelText(/tool name/i), "search");
+    await user.type(screen.getByLabelText(/^path$/i), "/search");
+    await user.click(screen.getByRole("button", { name: /add row/i }));
+    await user.type(screen.getByLabelText(/^key$/i), "email");
+    await selectOrigin(user, /^agent$/i);
+    await user.type(
+      screen.getByPlaceholderText(/what is this value/i),
+      "Email to search",
+    );
+    await user.click(screen.getByLabelText(/input format/i));
+    await user.click(screen.getByRole("option", { name: /^email$/i }));
+
+    await user.click(screen.getByRole("button", { name: /save tool/i }));
+
+    expect(createMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestDefinition: expect.objectContaining({
+          agentInputs: [
+            expect.objectContaining({
+              name: "email",
+              description: "Email to search",
+              format: "email",
+            }),
+          ],
+        }),
+      }),
+      expect.anything(),
+    );
   });
 });

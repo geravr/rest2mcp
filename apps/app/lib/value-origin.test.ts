@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  collectAgentParams,
   compileFormBody,
   compileOrigin,
   compileStructuredJson,
+  defaultAgentMeta,
   inferFormRows,
   inferJsonRows,
   inferOrigin,
@@ -282,5 +284,22 @@ describe("templateReferencesName", () => {
     expect(templatesReferenceName("api_token", ["Bearer {{api_token}}"])).toBe(
       true,
     );
+  });
+});
+
+describe("agent input format", () => {
+  it("preserves format through defaults and collection", () => {
+    const meta: AgentMeta = {
+      name: "email",
+      description: "Email address",
+      type: "string",
+      format: "email",
+      required: true,
+    };
+
+    expect(defaultAgentMeta("email", meta).format).toBe("email");
+    expect(collectAgentParams([{ origin: "agent", ...meta }])).toEqual([
+      expect.objectContaining({ name: "email", format: "email" }),
+    ]);
   });
 });

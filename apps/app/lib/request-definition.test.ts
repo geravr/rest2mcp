@@ -652,4 +652,64 @@ describe("client request-definition adapters", () => {
       template: "plain text",
     });
   });
+
+  it("round-trips a string agent input format", () => {
+    const source: ClientRequestDefinition = {
+      version: 1,
+      pathSegments: [{ id: "path_1", value: { kind: "literal", value: "/" } }],
+      query: [
+        {
+          id: "query_1",
+          name: "email",
+          value: { kind: "agentInput", agentInputId: "ain_1" },
+        },
+      ],
+      headers: [],
+      body: { bodyType: "none" },
+      agentInputs: [
+        {
+          id: "ain_1",
+          name: "email",
+          description: "Email address",
+          required: true,
+          sensitive: false,
+          type: "string",
+          format: "email",
+        },
+      ],
+    };
+    const rows = definitionToSourceRows(
+      source.query,
+      lookup,
+      definitionAgentInputs(source),
+    );
+    expect(rows[0]).toMatchObject({ origin: "agent", format: "email" });
+
+    const rebuilt = formStateToDefinition(baseInput({ query: rows }));
+    expect(rebuilt.agentInputs[0]).toMatchObject({
+      id: "ain_1",
+      name: "email",
+      type: "string",
+      format: "email",
+    });
+  });
+
+  it("omits an advertised format for non-string inputs", () => {
+    const rebuilt = formStateToDefinition(
+      baseInput({
+        query: [
+          {
+            key: "count",
+            origin: "agent",
+            id: "ain_1",
+            name: "count",
+            type: "number",
+            format: "email",
+            required: true,
+          },
+        ],
+      }),
+    );
+    expect(rebuilt.agentInputs[0]?.format).toBeUndefined();
+  });
 });

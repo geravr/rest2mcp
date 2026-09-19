@@ -129,3 +129,48 @@ describe("source row keyboard", () => {
     expect(screen.queryByLabelText(/^key$/i)).not.toBeInTheDocument();
   });
 });
+
+describe("SourceRowEditor agent input format", () => {
+  it("selects a format on a string agent input", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness
+        initial={[
+          {
+            key: "email",
+            origin: "agent",
+            name: "email",
+            description: "",
+            type: "string",
+            required: true,
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByLabelText(/input format/i)).toBeInTheDocument();
+    await user.click(screen.getByLabelText(/input format/i));
+    await user.click(screen.getByRole("option", { name: /^email$/i }));
+
+    expect(screen.getByLabelText(/input format/i)).toHaveTextContent("Email");
+  });
+
+  it("hides the format selector for non-string inputs", () => {
+    render(
+      <Harness
+        initial={[
+          {
+            key: "count",
+            origin: "agent",
+            name: "count",
+            description: "",
+            type: "number",
+            required: true,
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.queryByLabelText(/input format/i)).not.toBeInTheDocument();
+  });
+});

@@ -7,6 +7,7 @@ import {
   useMutation,
   useQuery,
   useQueryClient,
+  type UseMutationResult,
   type UseQueryResult,
 } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -26,6 +27,25 @@ export type McpToolEditorState = {
   issues: McpToolEditorIssue[];
   conversionDraft: unknown;
   conversionIssues: McpToolEditorIssue[];
+};
+
+export type McpToolPreviewCompileInput = {
+  serverId: string;
+  name?: string;
+  title?: string | null;
+  description?: string | null;
+  method: string;
+  requestDefinition: unknown;
+  allowMutation?: boolean;
+};
+
+export type McpToolPreviewCompileResult = {
+  ok: boolean;
+  ready: boolean;
+  issues: McpToolEditorIssue[];
+  plan: unknown;
+  contract: unknown;
+  compatibilityProjectable: boolean;
 };
 
 export function useMcpServers(input: PaginationInput) {
@@ -247,7 +267,12 @@ export function useParseCurlPreview() {
   });
 }
 
-export function usePreviewToolCompile() {
+export function usePreviewToolCompile(): UseMutationResult<
+  McpToolPreviewCompileResult,
+  Error,
+  McpToolPreviewCompileInput,
+  unknown
+> {
   const { t } = useTranslations();
   const baseOptions = api.mcp.previewToolCompile.mutationOptions();
   return useMutation({
@@ -256,7 +281,12 @@ export function usePreviewToolCompile() {
       baseOptions.onError?.(error, ...rest);
       toast.error(resolveErrorMessage(error, t));
     },
-  });
+  }) as unknown as UseMutationResult<
+    McpToolPreviewCompileResult,
+    Error,
+    McpToolPreviewCompileInput,
+    unknown
+  >;
 }
 
 export function useCreateMcpTool() {

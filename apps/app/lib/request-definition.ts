@@ -6,7 +6,12 @@
  * only preserves stable ids, primitive JSON types, and ordered entries across
  * load, edit, preview, and submit.
  */
-import type { AgentMeta, PathPart, SourceRow } from "./value-origin";
+import type {
+  AgentInputFormat,
+  AgentMeta,
+  PathPart,
+  SourceRow,
+} from "./value-origin";
 import { PLACEHOLDER_PATTERN } from "./value-origin";
 
 export const REQUEST_DEFINITION_VERSION = 1 as const;
@@ -66,6 +71,7 @@ export type ClientAgentInput = {
   minLength?: number;
   maxLength?: number;
   pattern?: string;
+  format?: AgentInputFormat;
   enum?: Array<string | number | boolean>;
   examples?: unknown[];
   allowEmpty?: boolean;
@@ -174,6 +180,9 @@ export function agentMetaToInput(
     ...(meta.minLength !== undefined ? { minLength: meta.minLength } : {}),
     ...(meta.maxLength !== undefined ? { maxLength: meta.maxLength } : {}),
     ...(meta.pattern !== undefined ? { pattern: meta.pattern } : {}),
+    ...(meta.type === "string" && meta.format !== undefined
+      ? { format: meta.format }
+      : {}),
     ...(meta.enum !== undefined ? { enum: meta.enum } : {}),
     ...(meta.examples !== undefined ? { examples: meta.examples } : {}),
     ...(meta.allowEmpty !== undefined ? { allowEmpty: meta.allowEmpty } : {}),
@@ -193,6 +202,7 @@ export function inputToAgentMeta(input: ClientAgentInput): AgentMeta {
     minLength: input.minLength,
     maxLength: input.maxLength,
     pattern: input.pattern,
+    format: input.format,
     enum: input.enum,
     examples: input.examples,
     allowEmpty: input.allowEmpty,
@@ -541,6 +551,7 @@ function metaOf(input: {
   minLength?: number;
   maxLength?: number;
   pattern?: string;
+  format?: AgentInputFormat;
   enum?: Array<string | number | boolean>;
   examples?: unknown[];
   allowEmpty?: boolean;
@@ -557,6 +568,7 @@ function metaOf(input: {
     minLength: input.minLength,
     maxLength: input.maxLength,
     pattern: input.pattern,
+    format: input.format,
     enum: input.enum,
     examples: input.examples,
     allowEmpty: input.allowEmpty,

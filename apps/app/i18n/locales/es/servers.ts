@@ -44,6 +44,8 @@ export const esServers = {
     importCurl: "Importar curl",
     toolName: "Nombre",
     toolNamePlaceholder: "get_contact",
+    toolTitle: "Título",
+    toolTitlePlaceholder: "Obtener contacto",
     method: "Método",
     pathTemplate: "Ruta",
     pathPlaceholder: "/contacts/",
@@ -275,6 +277,15 @@ export const esServers = {
       boolean: "Booleano",
       json: "JSON",
     },
+    paramFormat: "Formato de entrada",
+    paramFormats: {
+      none: "Ninguno",
+      date: "Fecha",
+      "date-time": "Fecha y hora",
+      email: "Email",
+      uri: "URL",
+      uuid: "UUID",
+    },
     paramSensitive: "Sensible",
     paramSensitiveHelp:
       "Nunca se registra ni se muestra; se enmascara como contraseña en el playground.",
@@ -331,6 +342,21 @@ export const esServers = {
     previewValid: "Esta petición compila sin problemas.",
     previewSecretValue: "•••• (valor secreto)",
     previewAgentInput: "entrada del agente",
+    previewContractHeading: "Contrato del agente",
+    previewContractName: "Nombre",
+    previewContractTitleLabel: "Título",
+    previewContractDescription: "Descripción",
+    previewContractVersion: "Versión del contrato",
+    previewContractFingerprint: "Huella",
+    previewContractInputSchema: "Esquema de entrada",
+    previewContractNoProperties:
+      "Sin entradas del agente. Esta herramienta se llama con un objeto vacío.",
+    previewContractRequired: "requerido",
+    previewContractOptional: "opcional",
+    previewContractOutputSchema: "Esquema de salida",
+    previewContractOutputPresent: "Se anuncia salida estructurada.",
+    previewContractOutputAbsent: "Sin esquema de salida estructurada.",
+    previewContractAnnotations: "Anotaciones",
     previewSavedIssues:
       "Esta herramienta tiene {count} problema(s) de compilación sin resolver desde el último guardado. Ejecuta la vista previa para ver los detalles.",
     loadingToolDefinition: "Cargando la definición de la herramienta…",
@@ -344,6 +370,20 @@ export const esServers = {
     annotationReadOnly: "Solo lectura",
     annotationDestructive: "Destructiva",
     annotationIdempotent: "Idempotente",
+    annotationOpenWorld: "Mundo abierto",
+    annotationsTitle: "Comportamiento del agente",
+    annotationsHelp:
+      "Describe cómo se comporta esta herramienta para que los agentes decidan cuándo llamarla. Solo lectura y mundo abierto dependen del método HTTP y del origen REST.",
+    annotationDestructiveHelp:
+      "Esta llamada puede borrar o sobrescribir datos.",
+    annotationIdempotentHelp:
+      "Repetir esta llamada tiene el mismo efecto que llamarla una vez.",
+    annotationReadOnlyHelp:
+      "Las peticiones de lectura siempre son de solo lectura, no destructivas e idempotentes.",
+    contractRetryAllowsRetry:
+      "El agente puede reintentar esta llamada tras un fallo transitorio.",
+    contractRetryNotAutomatic:
+      "No se le indicará al agente que reintente esta llamada automáticamente.",
     mutationConfirmTitle: "¿Revocar el permiso de mutación?",
     mutationConfirmDescription:
       "Esta herramienta envía una petición que muta datos. Desactivar Permitir mutación también la deshabilitará.",

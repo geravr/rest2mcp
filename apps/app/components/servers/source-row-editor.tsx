@@ -1,11 +1,13 @@
 import { VariablePicker } from "@/components/servers/variable-picker";
 import { useTranslations } from "@/i18n/use-translations";
 import {
+  AGENT_INPUT_FORMATS,
   emptyFixedRow,
   joinCommaList,
   parseCommaList,
   slugifyAgentName,
   type AgentConstraints,
+  type AgentInputFormat,
   type AgentMeta,
   type AgentParamType,
   type SourceRow,
@@ -52,6 +54,39 @@ function AgentTypeSelect({
         {PARAM_TYPES.map((item) => (
           <SelectItem key={item} value={item}>
             {t.servers.paramTypes[item]}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function AgentFormatSelect({
+  format,
+  disabled,
+  onChange,
+}: {
+  format?: AgentInputFormat;
+  disabled?: boolean;
+  onChange: (format: AgentInputFormat | undefined) => void;
+}) {
+  const { t } = useTranslations();
+  return (
+    <Select
+      value={format ?? "none"}
+      disabled={disabled}
+      onValueChange={(next) =>
+        onChange(next === "none" ? undefined : (next as AgentInputFormat))
+      }
+    >
+      <SelectTrigger className="w-full" aria-label={t.servers.paramFormat}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="none">{t.servers.paramFormats.none}</SelectItem>
+        {AGENT_INPUT_FORMATS.map((item) => (
+          <SelectItem key={item} value={item}>
+            {t.servers.paramFormats[item]}
           </SelectItem>
         ))}
       </SelectContent>
@@ -199,6 +234,8 @@ export function AgentParamCard({
   descriptionAriaLabel,
   type,
   onTypeChange,
+  format,
+  onFormatChange,
   required,
   onRequiredChange,
   sensitive = false,
@@ -217,6 +254,8 @@ export function AgentParamCard({
   descriptionAriaLabel?: string;
   type: AgentParamType;
   onTypeChange: (type: AgentParamType) => void;
+  format?: AgentInputFormat;
+  onFormatChange?: (format: AgentInputFormat | undefined) => void;
   required: boolean;
   onRequiredChange: (required: boolean) => void;
   sensitive?: boolean;
@@ -289,6 +328,16 @@ export function AgentParamCard({
             onChange={onTypeChange}
           />
         </Field>
+        {onFormatChange && type === "string" ? (
+          <Field>
+            <Label className="text-xs">{t.servers.paramFormat}</Label>
+            <AgentFormatSelect
+              format={format}
+              disabled={disabled}
+              onChange={onFormatChange}
+            />
+          </Field>
+        ) : null}
         <Field>
           <Label className="text-xs">{t.servers.paramRequired}</Label>
           <div className="flex h-10 items-center">
@@ -527,8 +576,15 @@ export function SourceRowEditor({
               }
               type={row.type}
               onTypeChange={(nextType) =>
-                update(index, { ...row, type: nextType, inputType: undefined })
+                update(index, {
+                  ...row,
+                  type: nextType,
+                  inputType: undefined,
+                  ...(nextType === "string" ? {} : { format: undefined }),
+                })
               }
+              format={row.format}
+              onFormatChange={(format) => update(index, { ...row, format })}
               required={row.required}
               onRequiredChange={(nextRequired) =>
                 update(index, { ...row, required: nextRequired })
@@ -596,7 +652,14 @@ export function AgentLeftoverFields({
           }
           descriptionAriaLabel={`${t.servers.paramDescription} (${param.name})`}
           type={param.type}
-          onTypeChange={(type) => update(param.name, { type })}
+          onTypeChange={(type) =>
+            update(param.name, {
+              type,
+              ...(type === "string" ? {} : { format: undefined }),
+            })
+          }
+          format={param.format}
+          onFormatChange={(format) => update(param.name, { format })}
           required={param.required}
           onRequiredChange={(required) => update(param.name, { required })}
           sensitive={param.sensitive ?? false}

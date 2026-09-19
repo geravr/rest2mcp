@@ -44,6 +44,8 @@ export const enServers = {
     importCurl: "Import curl",
     toolName: "Tool name",
     toolNamePlaceholder: "get_contact",
+    toolTitle: "Title",
+    toolTitlePlaceholder: "Get contact",
     method: "Method",
     pathTemplate: "Path",
     pathPlaceholder: "/contacts/",
@@ -269,6 +271,15 @@ export const enServers = {
       boolean: "Boolean",
       json: "JSON",
     },
+    paramFormat: "Input format",
+    paramFormats: {
+      none: "None",
+      date: "Date",
+      "date-time": "Date & time",
+      email: "Email",
+      uri: "URL",
+      uuid: "UUID",
+    },
     paramSensitive: "Sensitive",
     paramSensitiveHelp:
       "Never logged or previewed; masked as a password field in the playground.",
@@ -325,6 +336,21 @@ export const enServers = {
     previewValid: "This request compiles without issues.",
     previewSecretValue: "•••• (secret value)",
     previewAgentInput: "agent input",
+    previewContractHeading: "Agent contract",
+    previewContractName: "Name",
+    previewContractTitleLabel: "Title",
+    previewContractDescription: "Description",
+    previewContractVersion: "Contract version",
+    previewContractFingerprint: "Fingerprint",
+    previewContractInputSchema: "Input schema",
+    previewContractNoProperties:
+      "No agent inputs. This tool is called with an empty object.",
+    previewContractRequired: "required",
+    previewContractOptional: "optional",
+    previewContractOutputSchema: "Output schema",
+    previewContractOutputPresent: "Structured output is advertised.",
+    previewContractOutputAbsent: "No structured output schema.",
+    previewContractAnnotations: "Annotations",
     previewSavedIssues:
       "This tool has {count} unresolved compile issue(s) from the last save. Run Preview to see details.",
     loadingToolDefinition: "Loading tool definition…",
@@ -338,6 +364,19 @@ export const enServers = {
     annotationReadOnly: "Read-only",
     annotationDestructive: "Destructive",
     annotationIdempotent: "Idempotent",
+    annotationOpenWorld: "Open world",
+    annotationsTitle: "Agent behavior",
+    annotationsHelp:
+      "Describe how this tool behaves so agents can decide when to call it. Read-only and open world follow the HTTP method and the REST upstream.",
+    annotationDestructiveHelp: "This call can delete or overwrite data.",
+    annotationIdempotentHelp:
+      "Repeating this call has the same effect as calling it once.",
+    annotationReadOnlyHelp:
+      "Read requests are always read-only, non-destructive, and idempotent.",
+    contractRetryAllowsRetry:
+      "The agent may retry this call after a transient failure.",
+    contractRetryNotAutomatic:
+      "The agent will not be told to retry this call automatically.",
     mutationConfirmTitle: "Revoke mutation permission?",
     mutationConfirmDescription:
       "This tool sends a mutating request. Turning off Allow mutation will also disable it.",

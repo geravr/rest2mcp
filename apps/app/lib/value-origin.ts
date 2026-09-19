@@ -1,5 +1,15 @@
 export type AgentParamType = "string" | "number" | "boolean" | "json";
 
+export type AgentInputFormat = "date" | "date-time" | "email" | "uri" | "uuid";
+
+export const AGENT_INPUT_FORMATS: readonly AgentInputFormat[] = [
+  "date",
+  "date-time",
+  "email",
+  "uri",
+  "uuid",
+];
+
 export type AgentMeta = {
   name: string;
   description?: string;
@@ -14,6 +24,8 @@ export type AgentMeta = {
   minLength?: number;
   maxLength?: number;
   pattern?: string;
+  /** Advertised string format for `string` inputs. */
+  format?: AgentInputFormat;
   enum?: Array<string | number | boolean>;
   examples?: unknown[];
   allowEmpty?: boolean;
@@ -73,6 +85,7 @@ export function defaultAgentMeta(
     minLength: existing?.minLength,
     maxLength: existing?.maxLength,
     pattern: existing?.pattern,
+    format: existing?.format,
     enum: existing?.enum,
     examples: existing?.examples,
     allowEmpty: existing?.allowEmpty,
@@ -406,6 +419,7 @@ export function collectAgentParams(origins: ValueOrigin[]): AgentMeta[] {
       minLength: origin.minLength,
       maxLength: origin.maxLength,
       pattern: origin.pattern,
+      format: origin.format,
       enum: origin.enum,
       examples: origin.examples,
       allowEmpty: origin.allowEmpty,
@@ -507,6 +521,7 @@ export function originsFromPath(parts: PathPart[]): ValueOrigin[] {
         minLength: part.minLength,
         maxLength: part.maxLength,
         pattern: part.pattern,
+        format: part.format,
         enum: part.enum,
         examples: part.examples,
         allowEmpty: part.allowEmpty,

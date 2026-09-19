@@ -202,8 +202,15 @@ export function PathPartsEditor({
                 }
                 type={part.type}
                 onTypeChange={(type) =>
-                  update(index, { ...part, type, inputType: undefined })
+                  update(index, {
+                    ...part,
+                    type,
+                    inputType: undefined,
+                    ...(type === "string" ? {} : { format: undefined }),
+                  })
                 }
+                format={part.format}
+                onFormatChange={(format) => update(index, { ...part, format })}
                 required={part.required}
                 onRequiredChange={(required) =>
                   update(index, { ...part, required })

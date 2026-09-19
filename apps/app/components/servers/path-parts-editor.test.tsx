@@ -127,4 +127,42 @@ describe("PathPartsEditor", () => {
       "/a/{{api_version}}/mid/{{id}}/c",
     );
   });
+
+  it("offers a format selector on a string agent path part", () => {
+    render(
+      <Harness
+        initial={[
+          { kind: "text", value: "/tags/" },
+          {
+            kind: "agent",
+            name: "tag",
+            description: "",
+            type: "string",
+            required: true,
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByLabelText(/input format/i)).toBeInTheDocument();
+  });
+
+  it("hides the format selector on a non-string agent path part", () => {
+    render(
+      <Harness
+        initial={[
+          { kind: "text", value: "/tags/" },
+          {
+            kind: "agent",
+            name: "tag",
+            description: "",
+            type: "number",
+            required: true,
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.queryByLabelText(/input format/i)).not.toBeInTheDocument();
+  });
 });
