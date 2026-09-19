@@ -26,7 +26,7 @@ Every Platform MCP tool SHALL be registered from a centralized contract containi
 
 ### Requirement: Platform tool outcomes use the structured contract
 
-Every completed Platform MCP tool call SHALL return compatibility text and `structuredContent` matching its advertised output schema. Successes SHALL use the shared base envelope with explicitly typed data. Failures SHALL use the shared structured error object with category, stable code, safe message, retryability, optional retry delay, and location-aware issues. Scope, authorization, destructive confirmation, validation, rate-limit, and internal failures SHALL NOT fall back to an unrelated text-only shape.
+Every completed Platform MCP tool call SHALL return MCP `content` text and `structuredContent` matching its advertised output schema and representing the same safe outcome. Successes SHALL use the shared base envelope with explicitly typed data. Failures SHALL use the shared structured error object with category, stable code, safe message, retryability, optional retry delay, and location-aware issues, without superseded flat error fields. Scope, authorization, destructive confirmation, validation, rate-limit, and internal failures SHALL NOT fall back to an unrelated text-only shape.
 
 #### Scenario: Validation error is repairable
 
@@ -46,10 +46,9 @@ Every completed Platform MCP tool call SHALL return compatibility text and `stru
 #### Scenario: Successful pagination is typed
 
 - **WHEN** `list_servers` succeeds
-- **THEN** `structuredContent.data` matches the advertised pagination schema and compatibility text represents the same safe envelope
+- **THEN** `structuredContent.data` matches the advertised pagination schema and MCP text represents the same safe envelope
 
 #### Scenario: Internal error remains schema-valid
 
 - **WHEN** an unexpected exception occurs inside a Platform operation
 - **THEN** the result is a redacted internal-error envelope that validates against the advertised output schema
-

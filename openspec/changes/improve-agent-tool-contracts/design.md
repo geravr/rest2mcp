@@ -4,7 +4,7 @@ The hosted product gateway already derives a closed Zod input schema from compil
 
 Platform MCP is less consistent. Its tools have short descriptions and input schemas, but most fields lack descriptions, output schemas and annotations are absent, and results use untyped JSON text. Scope-filtered data can also be represented as a false value instead of being omitted, which invites an agent to infer information it was not authorized to see.
 
-The `persist-typed-request-bindings` change is establishing the canonical source for input definitions and stable ids. This change depends on that contract but does not alter binding persistence. It compiles the persisted author intent into the exact MCP metadata and result semantics consumed by agents.
+The typed request-binding model is the canonical source for input definitions and stable ids. This change consumes that contract without preserving an older registration or result interpretation. It compiles persisted author intent into the exact MCP metadata and result semantics consumed by agents.
 
 ## Goals / Non-Goals
 
@@ -49,9 +49,9 @@ Alternative considered: improve descriptions inline in each MCP route. Rejected 
 
 Product tools gain an optional persisted `title`. New or edited tools may remain disabled with incomplete contract copy, but enabling requires a nonblank title, nonblank outcome-oriented description, and a description for every exposed agent input. Length, control-character, and duplication checks are deterministic; the product does not claim to judge prose quality.
 
-Existing enabled tools are migrated without disappearing: title is backfilled from a humanized tool name, and missing tool/input descriptions receive deterministic generated copy tagged as generated. Studio shows warnings and requires owners to replace generated copy the next time they edit and re-enable the tool.
+Every enabled tool must satisfy these requirements immediately. Development tools with incomplete title, tool description, or input descriptions are disabled by the schema/data migration or removed when development data is reset; the system does not invent generated copy or retain provenance for placeholders that should never reach production. Seeds and fixtures are updated to contain explicit authored metadata.
 
-Alternative considered: disable every incomplete existing tool immediately. Rejected because contract improvement must not silently break installed agents.
+Alternative considered: generate temporary copy and keep incomplete tools callable. Rejected because the product is pre-production and generated prose would create a second readiness state, weaker agent contracts, and permanent cleanup work.
 
 ### 3. Generate JSON Schema once and validate with the same semantics
 
@@ -75,9 +75,9 @@ Studio explains these fields in behavioral language. Platform annotations are de
 
 Alternative considered: infer every hint from HTTP method. Rejected because real REST endpoints do not always honor textbook method semantics.
 
-### 5. Keep the success envelope and add one structured error object
+### 5. Replace duplicated errors with one structured envelope
 
-The current top-level success fields remain compatible: `ok`, `status`, `contentType`, `data` or `body`, safe `headers`, and `truncated`. Failures add:
+Successful calls retain the canonical top-level execution fields: `ok`, `status`, `contentType`, `data` or `body`, safe `headers`, and `truncated`. Failures use one nested error shape:
 
 ```text
 error.category       invalid_arguments | policy | auth | not_found |
@@ -91,7 +91,7 @@ error.indeterminate?
 error.issues?        [{ path, id?, code, message }]
 ```
 
-Legacy flat `appCode`, `phase`, `retryAfterSeconds`, and `indeterminate` fields remain during this version for compatibility. Every completed tool call returns `structuredContent` matching the declared envelope, including argument validation, policy rejection, rate limits, caught `AppError`, and unexpected failures. Compatibility text is a concise serialization of the same safe envelope, not a separate message contract.
+Superseded flat `appCode`, `phase`, `retryAfterSeconds`, and `indeterminate` result fields are removed rather than dual-written. Every completed tool call returns `structuredContent` matching the declared envelope, including argument validation, policy rejection, rate limits, caught `AppError`, and unexpected failures. MCP `content` text remains a concise serialization of the same safe envelope for protocol interoperability; it is not a second internal result contract.
 
 Retryability is computed centrally. Invalid input, policy, auth, not-found, and conflict errors are non-retryable without a changed request or owner action. Rate limits are retryable with delay. Upstream 429 and known-safe transient read/idempotent failures may be retryable. An indeterminate mutation is never marked safe to retry automatically.
 
@@ -125,26 +125,25 @@ Deterministic decision fixtures assert that the contract contains the facts need
 ## Risks / Trade-offs
 
 - **[Stricter readiness blocks new tools]** Missing descriptions may feel like friction. → Allow incomplete disabled drafts and provide generated starting copy, field-level guidance, and exact preview.
-- **[Migration-generated copy is generic]** Existing tools remain usable but not ideal. → Tag generated content, surface warnings, and require replacement on subsequent enable/edit flows.
+- **[Development tools become disabled after the clean cutover]** Some local fixtures may no longer be callable. → Update canonical seeds/fixtures and require explicit authored metadata rather than shipping generated copy.
 - **[Schema metadata may be dropped by SDK conversion]** A correct internal model could still produce incomplete wire JSON. → Snapshot actual SDK client payloads, not only compiler objects.
 - **[Fingerprint churn breaks caches]** Nondeterministic ordering or irrelevant metadata could change hashes. → Canonicalize only agent-visible fields and test stability under database/order noise.
 - **[Retry hints can cause duplicate mutations]** Overly broad transient classification is dangerous. → Default to non-retryable and require known idempotence plus a determinate outcome for automatic retryability.
 - **[Detailed issues can leak values]** Validation diagnostics may echo sensitive input. → Return paths, expected constraints, and codes without received values for sensitive fields.
-- **[Concurrent typed-binding work]** Implementing against a moving authoring schema can create rework. → Land this change after `persist-typed-request-bindings` and consume its final shared types instead of copying them.
+- **[Typed-binding cleanup may change shared types]** Implementing against a moving authoring schema can create rework. → Consume the canonical typed definitions directly and coordinate removal of legacy request fields without copying transitional types.
 
 ## Migration Plan
 
-1. Complete and archive `persist-typed-request-bindings`, then rebase this change's implementation on its shared definition schemas.
-2. Add the contract compiler, envelope/error schemas, normalizer, and wire-level snapshots without switching registration.
-3. Add tool title/readiness metadata and generated backfill through a Drizzle-generated migration if persistence is required.
-4. Switch the product gateway to compiled contracts and uniform structured results behind a compatibility flag.
-5. Add Studio readiness diagnostics and exact contract preview; enforce readiness for new/edited enabled tools.
-6. Convert Platform MCP registrations and results to the central registry and structured envelope.
-7. Compare contract snapshots and telemetry, then remove the compatibility flag while retaining legacy flat error fields for the remainder of contract version 1.
+1. Reconcile the implementation with the canonical typed request-definition schemas and delete any contract adapters that depend on legacy request fields.
+2. Add the contract compiler, envelope/error schemas, normalizer, and wire-level snapshots as the only registration/result path.
+3. Add required tool title/readiness metadata through a generated Drizzle migration; disable incomplete development rows or reset/reseed the development database instead of backfilling copy.
+4. Switch product and Platform registration atomically to the shared compiler and remove the prior description/schema assembly and result helpers in the same change.
+5. Add Studio readiness diagnostics and exact contract preview, enforcing readiness for every enabled tool.
+6. Remove superseded flat error fields, unused types, compatibility tests, flags, metrics, and documentation.
+7. Verify a database created from migrations plus seeds exposes only the new contracts and results.
 
-Rollback switches registration/result normalization back while leaving additive metadata unused. It does not roll back typed request bindings or delete generated titles/descriptions.
+If the change must be reverted during development, revert the code and generated unshared migration together or reset the development database. No legacy runtime path is retained for rollback.
 
 ## Open Questions
 
-- How long should generated descriptions remain acceptable for untouched legacy tools before owners must review them?
 - Should contract fingerprints be returned only in `_meta`, or also shown in Studio and call logs for support diagnostics?

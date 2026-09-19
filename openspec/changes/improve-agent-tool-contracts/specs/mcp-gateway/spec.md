@@ -2,12 +2,12 @@
 
 ### Requirement: Gateway proxies mapped REST calls
 
-For an enabled valid tool, the gateway SHALL execute its compiled request plan within one deadline and return an MCP-native result matching the tool's advertised output schema. Every completed call SHALL contain compatibility text and `structuredContent`. A 2xx response SHALL include the existing success-envelope fields. Every failure SHALL include `ok: false` plus a structured `error` with stable category/code, safe message, explicit retryability, and available retry delay, indeterminate-outcome state, and location-aware issues. Legacy flat error fields SHALL remain populated during contract version 1. A 4xx or 5xx upstream response SHALL return `isError: true` and SHALL NOT use `MCP_UPSTREAM_ERROR` unless no completed upstream HTTP response exists.
+For an enabled valid tool, the gateway SHALL execute its compiled request plan within one deadline and return an MCP-native result matching the tool's advertised output schema. Every completed call SHALL contain MCP `content` text and matching `structuredContent`. A 2xx response SHALL include the canonical success-envelope fields. Every failure SHALL include `ok: false` plus one structured `error` with stable category/code, safe message, explicit retryability, and available retry delay, indeterminate-outcome state, and location-aware issues. Superseded flat error fields SHALL NOT be emitted. A 4xx or 5xx upstream response SHALL return `isError: true` and SHALL NOT use `MCP_UPSTREAM_ERROR` unless no completed upstream HTTP response exists.
 
 #### Scenario: Successful JSON GET
 
 - **WHEN** upstream returns JSON with status 200
-- **THEN** the result has `isError` false, parsed `structuredContent.data`, the declared success-envelope fields, and serialized compatibility text
+- **THEN** the result has `isError` false, parsed `structuredContent.data`, the declared success-envelope fields, and MCP text serialized from the same safe envelope
 
 #### Scenario: Invalid arguments are structured
 
@@ -93,4 +93,3 @@ For unchanged persisted tool intent, the gateway SHALL emit a byte-stable normal
 
 - **WHEN** a referenced secret value rotates without changing the request binding or schema
 - **THEN** the contract fingerprint remains unchanged and no secret-derived material appears in it
-

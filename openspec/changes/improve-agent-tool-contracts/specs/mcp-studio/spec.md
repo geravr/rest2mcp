@@ -2,7 +2,7 @@
 
 ### Requirement: Studio validates agent-facing contract readiness
 
-The Studio SHALL compile deterministic contract-readiness diagnostics from the same backend contract compiler used by the gateway. A new or edited tool SHALL NOT be enabled unless it has a valid human-facing title, nonblank outcome-oriented description, descriptions for every exposed agent input, supported schema constraints, and non-contradictory annotations. Incomplete tools MAY be saved as disabled drafts. Existing enabled tools with generated migration copy SHALL remain available but SHALL show warnings and require explicit owner copy before a later re-enable.
+The Studio SHALL compile deterministic contract-readiness diagnostics from the same backend contract compiler used by the gateway. A tool SHALL NOT be enabled unless it has a valid human-facing title, nonblank outcome-oriented description, descriptions for every exposed agent input, supported schema constraints, and non-contradictory annotations. Incomplete tools MAY be saved only as disabled drafts. The system SHALL NOT generate placeholder title/description copy to preserve an incomplete enabled tool.
 
 #### Scenario: Missing input description blocks enable
 
@@ -14,10 +14,10 @@ The Studio SHALL compile deterministic contract-readiness diagnostics from the s
 - **WHEN** a POST tool is marked read-only
 - **THEN** readiness reports the contradiction and the tool is not enabled
 
-#### Scenario: Existing tool remains available after migration
+#### Scenario: Incomplete development tool is not preserved as enabled
 
-- **WHEN** an existing enabled tool lacks a title or description during migration
-- **THEN** deterministic generated copy keeps it callable, Studio identifies that copy as generated, and no secret or resolved value is used
+- **WHEN** a development tool lacks required contract copy during the clean migration
+- **THEN** the tool is disabled or removed by an explicit development-data reset and no generated placeholder copy is persisted
 
 #### Scenario: Disabled draft supports iterative authoring
 
@@ -47,4 +47,3 @@ Before enabling a tool, Studio SHALL provide a backend-generated preview of the 
 
 - **WHEN** contract compilation fails
 - **THEN** preview returns location-aware diagnostics without modifying the tool, compiled plan, server values, or enabled state
-

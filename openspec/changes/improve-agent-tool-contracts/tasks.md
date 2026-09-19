@@ -1,19 +1,19 @@
 ## 1. Dependency and Policy Decisions
 
 - [ ] 1.1 Confirm `persist-typed-request-bindings` is complete and consume its final shared request-definition and compile-issue types without copying them.
-- [ ] 1.2 Choose the grace period for generated legacy descriptions and document when owner review becomes mandatory.
+- [ ] 1.2 Define the clean pre-production data policy for incomplete tools: disable them in migration or reset/reseed development data, with no generated copy.
 - [ ] 1.3 Decide whether contract fingerprints remain `_meta`-only or also appear in Studio and support-oriented call-log metadata.
-- [ ] 1.4 Define the namespaced contract metadata key, contract version 1 compatibility policy, and canonical JSON rules.
+- [ ] 1.4 Define the namespaced contract metadata key, clean contract version 1 boundary, and canonical JSON rules without legacy result fields.
 - [ ] 1.5 Inventory every product and Platform tool plus its current title, descriptions, input/output schema, annotations, and result shape.
 
 ## 2. Contract and Persistence Model
 
-- [ ] 2.1 Define shared types and strict schemas for compiled tool contracts, readiness issues, fingerprints, and generated-copy provenance.
+- [ ] 2.1 Define shared types and strict schemas for compiled tool contracts, readiness issues, and fingerprints without generated-copy provenance.
 - [ ] 2.2 Add optional product-tool title and any required provenance/readiness fields to the Drizzle schema.
 - [ ] 2.3 Generate and inspect the Drizzle migration without manually editing generated SQL.
-- [ ] 2.4 Implement deterministic humanized-title and description backfill for incomplete existing enabled tools.
-- [ ] 2.5 Verify the migration preserves tool availability, typed request definitions, compiled plans, and secret-free metadata.
-- [ ] 2.6 Add migration tests for complete tools, incomplete enabled tools, disabled drafts, reruns, and rollback-compatible nullable fields.
+- [ ] 2.4 Make required contract metadata authoritative for enabled tools and disable incomplete development rows or document the reset/reseed path.
+- [ ] 2.5 Remove obsolete persisted contract/result metadata and verify typed definitions, compiled plans, and secret-free metadata remain canonical.
+- [ ] 2.6 Add migration tests for complete tools, incomplete rows becoming unavailable, disabled drafts, clean database creation, and reseeding.
 
 ## 3. Input Schema and Contract Compiler
 
@@ -28,12 +28,12 @@
 
 ## 4. Structured Result and Error Normalization
 
-- [ ] 4.1 Extend the execution envelope with the additive structured error categories, stable code, safe message, retryability, delay, indeterminate flag, and issues.
-- [ ] 4.2 Preserve legacy flat error fields throughout contract version 1 and add compatibility tests for existing consumers.
+- [ ] 4.1 Replace the execution error shape with structured categories, stable code, safe message, retryability, delay, indeterminate flag, and issues.
+- [ ] 4.2 Remove legacy flat error fields, their shared types, serializers, fixtures, and assertions from every product and Platform path.
 - [ ] 4.3 Implement central retry classification that defaults to non-retryable and accounts for idempotence and determinate upstream outcomes.
 - [ ] 4.4 Map validation, policy, auth, not-found, conflict, rate-limit, upstream, timeout, network, and internal failures to stable categories.
 - [ ] 4.5 Normalize Zod issues into path/id diagnostics without echoing received sensitive values.
-- [ ] 4.6 Build one success/error result helper that emits compatibility text and matching `structuredContent`.
+- [ ] 4.6 Build one success/error result helper that emits MCP `content` text and matching `structuredContent` from the same safe envelope.
 - [ ] 4.7 Validate outgoing structured content and fall back to a minimal schema-valid internal error with telemetry on normalization defects.
 - [ ] 4.8 Add tests for upstream 401/429/500, invalid arguments, rate limiting, timeout before send, timeout after mutation send, and unexpected exceptions.
 
@@ -63,10 +63,10 @@
 - [ ] 7.3 Add behavioral annotation controls that explain read-only, destructive, idempotent, and open-world effects in plain language.
 - [ ] 7.4 Expose a backend readiness procedure using the same contract compiler and stable issue locations as gateway registration.
 - [ ] 7.5 Allow incomplete disabled drafts while blocking enable for contract errors in the save transaction.
-- [ ] 7.6 Surface generated migration copy as warnings and require explicit replacement on later re-enable/edit workflows.
+- [ ] 7.6 Ensure incomplete development tools remain disabled until the owner supplies explicit title, descriptions, and valid annotations.
 - [ ] 7.7 Build an exact agent-contract preview for name, title, description, input/output schemas, annotations, version, and fingerprint.
 - [ ] 7.8 Redact secret bindings, sensitive examples, internal ids, and credential-bearing resolved data from preview.
-- [ ] 7.9 Add component tests for readiness gating, disabled drafts, generated-copy warnings, annotation conflicts, preview parity, and write-free failures.
+- [ ] 7.9 Add component tests for readiness gating, disabled incomplete drafts, annotation conflicts, preview parity, and write-free failures.
 
 ## 8. Contract Snapshots and Agent Decision Fixtures
 
@@ -80,9 +80,10 @@
 
 ## 9. Rollout, Documentation, and Verification
 
-- [ ] 9.1 Add a compatibility flag for switching product and Platform registration/result normalization independently during rollout.
-- [ ] 9.2 Emit telemetry for readiness failures, schema-invalid internal results, generated-copy usage, and contract-version/fingerprint counts without sensitive values.
-- [ ] 9.3 Update maintainer documentation for contract versioning, error categories, retry semantics, metadata namespace, and rollback.
+- [ ] 9.1 Switch product and Platform registration/result normalization atomically and add an architecture test that rejects imports of superseded helpers.
+- [ ] 9.2 Emit telemetry for readiness failures, schema-invalid internal results, and contract-version/fingerprint counts without sensitive values.
+- [ ] 9.3 Update maintainer documentation for contract versioning, error categories, retry semantics, metadata namespace, and the pre-production reset/revert procedure.
 - [ ] 9.4 Update owner-facing en/es guidance for titles, descriptions, annotations, sensitive inputs, and agent-visible previews.
 - [ ] 9.5 Run migration checks, focused protocol/component tests, `bun typecheck`, `bun lint`, the full test suite, and final formatting.
 - [ ] 9.6 Validate actual MCP SDK client payloads after build and confirm no generated contract includes secrets, internal ids, or nondeterministic fields.
+- [ ] 9.7 Search production source, schemas, tests, and documentation for removed flat error fields, generated-copy provenance, compatibility flags, or fallback registration paths and eliminate every remaining occurrence.

@@ -7,11 +7,12 @@ Agents can discover and invoke the generated MCP tools, but contract quality is 
 - Define one agent-facing tool contract compiler for product and Platform MCP tools, including title, outcome-oriented description, closed input schema, output schema, annotations, and namespaced contract metadata.
 - Require enabled product tools and exposed inputs to have agent-usable descriptions; validate contradictory or unsafe annotations before advertisement.
 - Preserve input types, constraints, formats, enums, examples, required fields, and sensitivity metadata in the advertised JSON Schema.
-- Add an additive structured error object with stable category/code, safe message, retryability, retry delay, indeterminate-outcome state, and argument issue locations.
+- Replace duplicated flat execution-error fields with one structured error object containing stable category/code, safe message, retryability, retry delay, indeterminate-outcome state, and argument issue locations.
 - Return the declared structured envelope for every tool completion, including invalid arguments, policy rejection, rate limiting, upstream non-2xx responses, timeouts, and unexpected failures.
 - Give every Platform MCP tool explicit input/output contracts and safety annotations, and omit scope-hidden properties rather than returning misleading false values.
 - Add a Studio contract-readiness check and exact MCP preview before a tool can be enabled.
 - Add deterministic contract snapshots and agent-behavior fixtures for selection, argument correction, retry, and destructive-action decisions.
+- **BREAKING**: require every enabled development tool to satisfy the complete contract immediately; remove generated legacy copy, old result shapes, compatibility flags, and fallback registration paths instead of backfilling or preserving them.
 
 **Non-goals:** changing typed request-binding persistence, upstream transport policy, authentication/secret storage, curl import behavior, exact per-API response modeling, or adding LLM-dependent production validation.
 
@@ -29,4 +30,4 @@ None.
 
 ## Impact
 
-This affects MCP registration helpers, request-definition input metadata, execution/result normalization, Platform MCP registration, Studio tool authoring and previews, localized validation copy, and protocol tests. A small tool-contract metadata addition may require a generated Drizzle migration. Existing success-envelope fields remain compatible; the structured error object and contract metadata are additive.
+This affects MCP registration helpers, request-definition input metadata, execution/result normalization, Platform MCP registration, Studio tool authoring and previews, localized validation copy, persisted tool metadata, and protocol tests. A generated Drizzle migration may add required contract metadata and remove superseded fields. Development records may be reset or left disabled until they satisfy the new contract; no runtime compatibility layer remains.
