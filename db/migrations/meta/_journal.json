@@ -43,6 +43,13 @@
       "when": 1789789179126,
       "tag": "0005_atomic_studio_writes",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789795244703,
+      "tag": "0006_married_lightspeed",
+      "breakpoints": true
     }
   ]
 }
