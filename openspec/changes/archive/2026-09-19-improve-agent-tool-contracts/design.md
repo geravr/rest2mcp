@@ -86,8 +86,8 @@ error.category       invalid_arguments | policy | auth | not_found |
 error.code           stable APP_ERROR_CODE
 error.message        safe, concise explanation
 error.retryable      explicit boolean
-error.retryAfterSeconds? 
-error.indeterminate? 
+error.retryAfterSeconds?
+error.indeterminate?
 error.issues?        [{ path, id?, code, message }]
 ```
 
