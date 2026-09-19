@@ -142,7 +142,7 @@ The system SHALL let the owner create a tool with a unique MCP-safe name, agent-
 
 ### Requirement: Owner can add a tool from curl
 
-The system SHALL import curl as a sanitized definition for one endpoint. The confirmed import SHALL create exactly one disabled draft tool in one transaction and SHALL NOT create, update, rotate, delete, or overwrite server authentication, server values, secrets, or default headers/query. Credential headers, cookies, proxy credentials, and unsafe transport headers SHALL be excluded. Detected authentication SHALL be reported only by kind and header/query name, without its value, as a separate configuration requirement. Value markings SHALL identify a concrete location and occurrence rather than matching globally by literal value.
+The system SHALL import curl as a sanitized definition for one endpoint. The confirmed import SHALL create exactly one disabled draft tool in one transaction and MAY assign it to one optional existing group owned by the same server. It SHALL NOT create, update, rotate, delete, or overwrite server authentication, server values, secrets, default headers/query, or groups. Credential headers, cookies, proxy credentials, and unsafe transport headers SHALL be excluded. Detected authentication SHALL be reported only by kind and header/query name, without its value, as a separate configuration requirement. Value markings SHALL identify a concrete location and occurrence rather than matching globally by literal value.
 
 #### Scenario: Curl credential is excluded
 
@@ -159,10 +159,20 @@ The system SHALL import curl as a sanitized definition for one endpoint. The con
 - **WHEN** the same literal appears in path and body and the owner marks only the body occurrence as an agent input
 - **THEN** only the selected body location receives that binding
 
+#### Scenario: Import into an existing group
+
+- **WHEN** the owner confirms a curl import with an existing group belonging to the selected server
+- **THEN** the one disabled draft tool is created in that group without changing the group itself
+
+#### Scenario: Foreign group is rejected atomically
+
+- **WHEN** the curl confirmation references a group from another server or owner
+- **THEN** import fails with not-found semantics and creates no tool or other persistent row
+
 #### Scenario: Import is atomic
 
 - **WHEN** draft tool creation fails after preview
-- **THEN** no tool, server value, auth configuration, default, or other persistent row is changed
+- **THEN** no tool, group, server value, auth configuration, default, or other persistent row is changed
 
 #### Scenario: Foreign origin is rejected
 
