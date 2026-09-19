@@ -67,8 +67,6 @@ export const APP_ERROR_CODES = {
   MCP_UPSTREAM_HTTP_ERROR: "MCP_UPSTREAM_HTTP_ERROR",
   MCP_MUTATION_INDETERMINATE: "MCP_MUTATION_INDETERMINATE",
   MCP_BINARY_UNSUPPORTED: "MCP_BINARY_UNSUPPORTED",
-  MCP_LEGACY_PROJECTION_UNAVAILABLE: "MCP_LEGACY_PROJECTION_UNAVAILABLE",
-  MCP_LEGACY_DOWNGRADE_REJECTED: "MCP_LEGACY_DOWNGRADE_REJECTED",
   /** Stale `expectedRevision`: the aggregate changed elsewhere; reread before retrying. */
   MCP_WRITE_CONFLICT: "MCP_WRITE_CONFLICT",
   /** A known fully-rolled-back transient database failure after retries were exhausted. */
