@@ -58,6 +58,47 @@ export const enServers = {
     saveTool: "Save tool",
     savingTool: "Saving…",
     noTools: "No tools yet. Add a GET tool or paste a curl command.",
+    groups: {
+      filterLabel: "Filter by group",
+      all: "All",
+      ungrouped: "Ungrouped",
+      toolCount: "{count} tools",
+      toolCountOne: "1 tool",
+      createTitle: "New group",
+      createDescription:
+        "Groups organize tools in Studio. They do not change tool configuration or published agent behavior.",
+      renameTitle: "Rename group",
+      renameDescription:
+        "Renaming only changes the Studio label. Tool configuration and published agent behavior are unchanged.",
+      deleteTitle: "Delete group",
+      deleteDescription:
+        "Deleting {name} removes only the group. Its {count} tools move to Ungrouped — the tools themselves are not deleted, and their configuration and published agent behavior are unchanged.",
+      deleteDescriptionOne:
+        "Deleting {name} removes only the group. Its single tool moves to Ungrouped — the tool itself is not deleted, and its configuration and published agent behavior are unchanged.",
+      nameLabel: "Group name",
+      namePlaceholder: "Invoices",
+      nameHint: "Up to {limit} characters.",
+      limitReached:
+        "This server already has {limit} groups, the current limit.",
+      create: "Create group",
+      creating: "Creating…",
+      rename: "Rename group",
+      renaming: "Renaming…",
+      delete: "Delete group",
+      deleting: "Deleting…",
+      moveTitle: "Move tools",
+      moveDescription:
+        "Move the {count} selected tools to a group. Moving changes only Studio organization — it does not change tool configuration or published agent behavior.",
+      moveDescriptionOne:
+        "Move the selected tool to a group. Moving changes only Studio organization — it does not change tool configuration or published agent behavior.",
+      moveTarget: "Group",
+      moveSubmit: "Move tools",
+      moving: "Moving…",
+      created: "Group created.",
+      renamed: "Group renamed.",
+      deleted: "Group deleted. Its tools are now ungrouped.",
+      toolsMoved: "Tool organization updated.",
+    },
     identityTitle: "Server",
     identityDescription: "Name, origin, and optional notes for this server.",
     iconTitle: "Icon",

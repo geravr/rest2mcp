@@ -6,6 +6,7 @@ import { enDashboard } from "./dashboard";
 import { enLayout } from "./layout";
 import { enErrors } from "./errors";
 import { enLegal } from "./legal";
+import { enOpenApi } from "./openapi";
 import { enServers } from "./servers";
 import { enSettings } from "./settings";
 
@@ -19,4 +20,5 @@ export const en = defineTranslations({
   ...enLayout,
   ...enErrors,
   ...enLegal,
+  ...enOpenApi,
 });

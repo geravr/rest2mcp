@@ -181,12 +181,38 @@ export function useMcpServer(serverId: string) {
   });
 }
 
-export function useMcpTools(serverId: string, input: PaginationInput) {
+export type McpToolGroupSummary = {
+  id: string;
+  name: string;
+  normalizedName: string;
+  toolCount: number;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export function useMcpTools(
+  serverId: string,
+  input: PaginationInput & { group?: string },
+) {
   return useQuery({
     ...api.mcp.tools.queryOptions({ serverId, ...input }),
     placeholderData: keepPreviousData,
     enabled: serverId.length > 0,
   });
+}
+
+/**
+ * Groups are capped at `MCP_TOOL_GROUP_LIMITS.maxGroupsPerServer` per server, so
+ * this is an explicitly tiny bounded list and deliberately not paginated.
+ */
+export function useMcpToolGroups(
+  serverId: string,
+): UseQueryResult<McpToolGroupSummary[]> {
+  return useQuery({
+    ...api.mcp.toolGroups.queryOptions({ serverId }),
+    placeholderData: keepPreviousData,
+    enabled: serverId.length > 0,
+  }) as unknown as UseQueryResult<McpToolGroupSummary[]>;
 }
 
 export function useMcpTokens(serverId: string) {
@@ -287,13 +313,14 @@ export function usePlatformSnippet() {
   });
 }
 
-function useInvalidateMcp() {
+export function useInvalidateMcp() {
   const queryClient = useQueryClient();
   return async () => {
     await Promise.all([
       queryClient.invalidateQueries(api.mcp.servers.pathFilter()),
       queryClient.invalidateQueries(api.mcp.getServer.pathFilter()),
       queryClient.invalidateQueries(api.mcp.tools.pathFilter()),
+      queryClient.invalidateQueries(api.mcp.toolGroups.pathFilter()),
       queryClient.invalidateQueries(api.mcp.tokens.pathFilter()),
       queryClient.invalidateQueries(api.mcp.variables.pathFilter()),
       queryClient.invalidateQueries(api.mcp.serverCommon.pathFilter()),
@@ -544,6 +571,111 @@ export function useDeleteMcpTool() {
       baseOptions.onSuccess?.(...args);
       await invalidate();
       toast.success(t.toasts.servers.toolDeleted);
+    },
+    onError: (error, ...rest) => {
+      baseOptions.onError?.(error, ...rest);
+      handleError(error);
+    },
+  });
+}
+
+export function usePreviewOpenApiImport() {
+  const handleError = useMcpMutationError();
+  const baseOptions = api.mcp.previewOpenApiImport.mutationOptions();
+  return useMutation({
+    ...baseOptions,
+    onError: (error, ...rest) => {
+      baseOptions.onError?.(error, ...rest);
+      handleError(error);
+    },
+  });
+}
+
+export function useConfirmOpenApiImport() {
+  const handleError = useMcpMutationError();
+  const invalidate = useInvalidateMcp();
+  const baseOptions = api.mcp.confirmOpenApiImport.mutationOptions();
+  return useMutation({
+    ...baseOptions,
+    onSuccess: async (...args) => {
+      baseOptions.onSuccess?.(...args);
+      await invalidate();
+    },
+    onError: (error, ...rest) => {
+      baseOptions.onError?.(error, ...rest);
+      handleError(error);
+    },
+  });
+}
+
+export function useCreateMcpToolGroup() {
+  const { t } = useTranslations();
+  const handleError = useMcpMutationError();
+  const invalidate = useInvalidateMcp();
+  const baseOptions = api.mcp.createToolGroup.mutationOptions();
+  return useMutation({
+    ...baseOptions,
+    onSuccess: async (...args) => {
+      baseOptions.onSuccess?.(...args);
+      await invalidate();
+      toast.success(t.servers.groups.created);
+    },
+    onError: (error, ...rest) => {
+      baseOptions.onError?.(error, ...rest);
+      handleError(error);
+    },
+  });
+}
+
+export function useRenameMcpToolGroup() {
+  const { t } = useTranslations();
+  const handleError = useMcpMutationError();
+  const invalidate = useInvalidateMcp();
+  const baseOptions = api.mcp.renameToolGroup.mutationOptions();
+  return useMutation({
+    ...baseOptions,
+    onSuccess: async (...args) => {
+      baseOptions.onSuccess?.(...args);
+      await invalidate();
+      toast.success(t.servers.groups.renamed);
+    },
+    onError: (error, ...rest) => {
+      baseOptions.onError?.(error, ...rest);
+      handleError(error);
+    },
+  });
+}
+
+export function useDeleteMcpToolGroup() {
+  const { t } = useTranslations();
+  const handleError = useMcpMutationError();
+  const invalidate = useInvalidateMcp();
+  const baseOptions = api.mcp.deleteToolGroup.mutationOptions();
+  return useMutation({
+    ...baseOptions,
+    onSuccess: async (...args) => {
+      baseOptions.onSuccess?.(...args);
+      await invalidate();
+      toast.success(t.servers.groups.deleted);
+    },
+    onError: (error, ...rest) => {
+      baseOptions.onError?.(error, ...rest);
+      handleError(error);
+    },
+  });
+}
+
+export function useAssignMcpToolGroup() {
+  const { t } = useTranslations();
+  const handleError = useMcpMutationError();
+  const invalidate = useInvalidateMcp();
+  const baseOptions = api.mcp.assignToolGroup.mutationOptions();
+  return useMutation({
+    ...baseOptions,
+    onSuccess: async (...args) => {
+      baseOptions.onSuccess?.(...args);
+      await invalidate();
+      toast.success(t.servers.groups.toolsMoved);
     },
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);

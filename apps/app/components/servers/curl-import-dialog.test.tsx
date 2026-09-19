@@ -26,6 +26,19 @@ const previewFixture = {
 } as const;
 
 const parseMutate = vi.fn();
+
+function group(id: string, name: string) {
+  return {
+    id,
+    name,
+    normalizedName: name.toLowerCase(),
+    toolCount: 2,
+    createdAt: new Date("2026-01-01T00:00:00Z"),
+    updatedAt: new Date("2026-01-01T00:00:00Z"),
+  };
+}
+
+const groupsFixture = [group("mtg_1", "Invoices"), group("mtg_2", "Contacts")];
 const createMutate = vi.fn(
   (
     _input: unknown,
@@ -199,5 +212,280 @@ describe("CurlImportDialog", () => {
         },
       },
     ]);
+  });
+
+  it("confirms the import into the selected group", async () => {
+    const user = userEvent.setup();
+    render(
+      <CurlImportDialog
+        serverId="mcs_1"
+        groups={groupsFixture}
+        onClose={() => {}}
+      />,
+    );
+
+    await user.type(screen.getByLabelText(/curl command/i), "curl …");
+    await user.click(screen.getByRole("button", { name: /^parse$/i }));
+
+    expect(screen.getByLabelText(/^group$/i)).toHaveTextContent("Ungrouped");
+
+    await user.click(screen.getByLabelText(/^group$/i));
+    await user.click(screen.getByRole("option", { name: "Invoices" }));
+    await user.click(screen.getByRole("button", { name: /create tool/i }));
+
+    expect(createMutate).toHaveBeenCalledTimes(1);
+    const [payload] = createMutate.mock.calls[0] as [
+      Record<string, unknown>,
+      unknown,
+    ];
+    expect(payload.groupId).toBe("mtg_1");
+  });
+
+  it("preselects the active group filter and sends null for Ungrouped", async () => {
+    const user = userEvent.setup();
+    render(
+      <CurlImportDialog
+        serverId="mcs_1"
+        groups={groupsFixture}
+        initialGroupId="mtg_2"
+        onClose={() => {}}
+      />,
+    );
+
+    await user.type(screen.getByLabelText(/curl command/i), "curl …");
+    await user.click(screen.getByRole("button", { name: /^parse$/i }));
+
+    expect(screen.getByLabelText(/^group$/i)).toHaveTextContent("Contacts");
+
+    await user.click(screen.getByLabelText(/^group$/i));
+    await user.click(screen.getByRole("option", { name: "Ungrouped" }));
+    await user.click(screen.getByRole("button", { name: /create tool/i }));
+
+    expect(createMutate).toHaveBeenCalledTimes(1);
+    const [payload] = createMutate.mock.calls[0] as [
+      Record<string, unknown>,
+      unknown,
+    ];
+    expect("groupId" in payload).toBe(true);
+    expect(payload.groupId).toBeNull();
+  });
+
+  it("submits the preselected group that the loaded list still contains", async () => {
+    const user = userEvent.setup();
+    render(
+      <CurlImportDialog
+        serverId="mcs_1"
+        groups={groupsFixture}
+        initialGroupId="mtg_2"
+        onClose={() => {}}
+      />,
+    );
+
+    await user.type(screen.getByLabelText(/curl command/i), "curl …");
+    await user.click(screen.getByRole("button", { name: /^parse$/i }));
+    await user.click(screen.getByRole("button", { name: /create tool/i }));
+
+    const [payload] = createMutate.mock.calls[0] as [
+      Record<string, unknown>,
+      unknown,
+    ];
+    expect(payload.groupId).toBe("mtg_2");
+  });
+
+  it("falls back to ungrouped when the preselected group is no longer listed", async () => {
+    const user = userEvent.setup();
+    render(
+      <CurlImportDialog
+        serverId="mcs_1"
+        groups={groupsFixture}
+        initialGroupId="mtg_deleted"
+        onClose={() => {}}
+      />,
+    );
+
+    await user.type(screen.getByLabelText(/curl command/i), "curl …");
+    await user.click(screen.getByRole("button", { name: /^parse$/i }));
+
+    expect(screen.getByLabelText(/^group$/i)).toHaveTextContent("Ungrouped");
+
+    await user.click(screen.getByRole("button", { name: /create tool/i }));
+
+    const [payload] = createMutate.mock.calls[0] as [
+      Record<string, unknown>,
+      unknown,
+    ];
+    expect(payload.groupId).toBeNull();
+  });
+
+  it("falls back when the group list arrives after the first render", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <CurlImportDialog
+        serverId="mcs_1"
+        groups={[]}
+        initialGroupId="mtg_2"
+        onClose={() => {}}
+      />,
+    );
+
+    await user.type(screen.getByLabelText(/curl command/i), "curl …");
+    await user.click(screen.getByRole("button", { name: /^parse$/i }));
+
+    // The not-yet-loaded id is not offered, so the selection stays ungrouped.
+    expect(screen.getByLabelText(/^group$/i)).toHaveTextContent("Ungrouped");
+
+    // A list that never contains the id keeps the fallback in the payload.
+    rerender(
+      <CurlImportDialog
+        serverId="mcs_1"
+        groups={[group("mtg_9", "Archive")]}
+        initialGroupId="mtg_2"
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByLabelText(/^group$/i)).toHaveTextContent("Ungrouped");
+
+    await user.click(screen.getByRole("button", { name: /create tool/i }));
+
+    const [missingPayload] = createMutate.mock.calls[0] as [
+      Record<string, unknown>,
+      unknown,
+    ];
+    expect(missingPayload.groupId).toBeNull();
+  });
+
+  it("preselects a late-arriving group that lists the initial id", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <CurlImportDialog
+        serverId="mcs_1"
+        groups={[]}
+        initialGroupId="mtg_2"
+        onClose={() => {}}
+      />,
+    );
+
+    await user.type(screen.getByLabelText(/curl command/i), "curl …");
+    await user.click(screen.getByRole("button", { name: /^parse$/i }));
+    expect(screen.getByLabelText(/^group$/i)).toHaveTextContent("Ungrouped");
+
+    rerender(
+      <CurlImportDialog
+        serverId="mcs_1"
+        groups={groupsFixture}
+        initialGroupId="mtg_2"
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByLabelText(/^group$/i)).toHaveTextContent("Contacts");
+
+    await user.click(screen.getByRole("button", { name: /create tool/i }));
+
+    const [payload] = createMutate.mock.calls[0] as [
+      Record<string, unknown>,
+      unknown,
+    ];
+    expect(payload.groupId).toBe("mtg_2");
+  });
+
+  it("preselects an initialGroupId that arrives with the loaded group list", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <CurlImportDialog serverId="mcs_1" onClose={() => {}} />,
+    );
+
+    await user.type(screen.getByLabelText(/curl command/i), "curl …");
+    await user.click(screen.getByRole("button", { name: /^parse$/i }));
+
+    // Neither the group list nor the active filter has resolved on this render.
+    expect(screen.queryByLabelText(/^group$/i)).not.toBeInTheDocument();
+
+    rerender(
+      <CurlImportDialog
+        serverId="mcs_1"
+        groups={groupsFixture}
+        initialGroupId="mtg_2"
+        onClose={() => {}}
+      />,
+    );
+
+    expect(screen.getByLabelText(/^group$/i)).toHaveTextContent("Contacts");
+
+    await user.click(screen.getByRole("button", { name: /create tool/i }));
+
+    const [payload] = createMutate.mock.calls[0] as [
+      Record<string, unknown>,
+      unknown,
+    ];
+    expect(payload.groupId).toBe("mtg_2");
+  });
+
+  it("keeps an owner-chosen group when initialGroupId arrives afterwards", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <CurlImportDialog
+        serverId="mcs_1"
+        groups={groupsFixture}
+        onClose={() => {}}
+      />,
+    );
+
+    await user.type(screen.getByLabelText(/curl command/i), "curl …");
+    await user.click(screen.getByRole("button", { name: /^parse$/i }));
+
+    await user.click(screen.getByLabelText(/^group$/i));
+    await user.click(screen.getByRole("option", { name: "Invoices" }));
+    expect(screen.getByLabelText(/^group$/i)).toHaveTextContent("Invoices");
+
+    // The active filter resolves later; it must not overwrite the choice.
+    rerender(
+      <CurlImportDialog
+        serverId="mcs_1"
+        groups={groupsFixture}
+        initialGroupId="mtg_2"
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByLabelText(/^group$/i)).toHaveTextContent("Invoices");
+
+    await user.click(screen.getByRole("button", { name: /create tool/i }));
+
+    const [payload] = createMutate.mock.calls[0] as [
+      Record<string, unknown>,
+      unknown,
+    ];
+    expect(payload.groupId).toBe("mtg_1");
+  });
+
+  it("keeps the confirm payload shape apart from groupId and creates one tool", async () => {
+    const user = userEvent.setup();
+    render(<CurlImportDialog serverId="mcs_1" onClose={() => {}} />);
+
+    await user.type(
+      screen.getByLabelText(/curl command/i),
+      "curl https://api.example.com/v1/contacts/123",
+    );
+    await user.click(screen.getByRole("button", { name: /^parse$/i }));
+
+    // Without groups (and no preselect value) the selector stays out of the dialog.
+    expect(screen.queryByLabelText(/^group$/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /create tool/i }));
+
+    expect(createMutate).toHaveBeenCalledTimes(1);
+    const [payload] = createMutate.mock.calls[0] as [
+      Record<string, unknown>,
+      unknown,
+    ];
+    expect(Object.keys(payload).sort()).toEqual([
+      "curl",
+      "expectedRevision",
+      "groupId",
+      "markings",
+      "serverId",
+    ]);
+    expect(payload.groupId).toBeNull();
+    expect(payload.expectedRevision).toBe(1);
+    expect(payload.markings).toEqual([]);
   });
 });

@@ -160,8 +160,10 @@ function ServerDetailPage() {
                 <ServerToolsTab
                   serverId={serverId}
                   configRevision={data.configRevision}
+                  toolCount={data.tools.length}
                   page={page}
                   pageSize={pageSize}
+                  group={search.group}
                   onPageChange={(next) =>
                     void navigate({
                       search: (prev) =>
@@ -176,6 +178,17 @@ function ServerDetailPage() {
                           ...prev,
                           pageSize: next,
                           page: 1,
+                        }),
+                      replace: true,
+                    })
+                  }
+                  onGroupChange={(next) =>
+                    void navigate({
+                      search: (prev) =>
+                        omitPaginationDefaults({
+                          ...prev,
+                          group: next,
+                          page: undefined,
                         }),
                       replace: true,
                     })

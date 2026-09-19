@@ -73,6 +73,19 @@ const toolFixture: ToolFormTool = {
   enabled: true,
 };
 
+function group(id: string, name: string) {
+  return {
+    id,
+    name,
+    normalizedName: name.toLowerCase(),
+    toolCount: 0,
+    createdAt: new Date("2026-01-01T00:00:00Z"),
+    updatedAt: new Date("2026-01-01T00:00:00Z"),
+  };
+}
+
+const groupsFixture = [group("mtg_1", "Invoices"), group("mtg_2", "Contacts")];
+
 async function selectOrigin(
   user: ReturnType<typeof userEvent.setup>,
   label: string | RegExp,
@@ -996,5 +1009,213 @@ describe("ToolFormDialog", () => {
       }),
       expect.anything(),
     );
+  });
+
+  it("sends the selected group when creating a manual tool", async () => {
+    const user = userEvent.setup();
+    createMutate.mockImplementation((_input, options) => {
+      options?.onSuccess?.({ id: "mct_new" });
+    });
+
+    render(
+      <ToolFormDialog
+        serverId="mcs_1"
+        variableNames={[]}
+        groups={groupsFixture}
+        onClose={() => {}}
+      />,
+    );
+
+    expect(screen.getByLabelText(/^group$/i)).toHaveTextContent("Ungrouped");
+
+    await user.type(screen.getByLabelText(/tool name/i), "list_invoices");
+    await user.type(screen.getByLabelText(/^path$/i), "/invoices");
+    await user.click(screen.getByLabelText(/^group$/i));
+    await user.click(screen.getByRole("option", { name: "Invoices" }));
+    await user.click(screen.getByRole("button", { name: /save tool/i }));
+
+    expect(createMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ groupId: "mtg_1" }),
+      expect.anything(),
+    );
+    expect(updateMutate).not.toHaveBeenCalled();
+  });
+
+  it("sends a null group when Ungrouped is chosen on create", async () => {
+    const user = userEvent.setup();
+    createMutate.mockImplementation((_input, options) => {
+      options?.onSuccess?.({ id: "mct_new" });
+    });
+
+    render(
+      <ToolFormDialog
+        serverId="mcs_1"
+        variableNames={[]}
+        groups={groupsFixture}
+        onClose={() => {}}
+      />,
+    );
+
+    await user.type(screen.getByLabelText(/tool name/i), "list_invoices");
+    await user.type(screen.getByLabelText(/^path$/i), "/invoices");
+    await user.click(screen.getByLabelText(/^group$/i));
+    await user.click(screen.getByRole("option", { name: "Ungrouped" }));
+    await user.click(screen.getByRole("button", { name: /save tool/i }));
+
+    const [payload] = createMutate.mock.calls[0] as [
+      Record<string, unknown>,
+      unknown,
+    ];
+    expect("groupId" in payload).toBe(true);
+    expect(payload.groupId).toBeNull();
+  });
+
+  it("preselects the active group filter on create", async () => {
+    const user = userEvent.setup();
+    createMutate.mockImplementation((_input, options) => {
+      options?.onSuccess?.({ id: "mct_new" });
+    });
+
+    render(
+      <ToolFormDialog
+        serverId="mcs_1"
+        variableNames={[]}
+        groups={groupsFixture}
+        initialGroupId="mtg_2"
+        onClose={() => {}}
+      />,
+    );
+
+    expect(screen.getByLabelText(/^group$/i)).toHaveTextContent("Contacts");
+
+    await user.type(screen.getByLabelText(/tool name/i), "list_contacts");
+    await user.type(screen.getByLabelText(/^path$/i), "/contacts");
+    await user.click(screen.getByRole("button", { name: /save tool/i }));
+
+    expect(createMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ groupId: "mtg_2" }),
+      expect.anything(),
+    );
+  });
+
+  it("keeps the source group when duplicating a grouped tool", async () => {
+    const user = userEvent.setup();
+    createMutate.mockImplementation((_input, options) => {
+      options?.onSuccess?.({ id: "mct_2" });
+    });
+
+    render(
+      <ToolFormDialog
+        serverId="mcs_1"
+        variableNames={[]}
+        groups={groupsFixture}
+        tool={{ ...toolFixture, groupId: "mtg_1" }}
+        duplicate
+        onClose={() => {}}
+      />,
+    );
+
+    expect(screen.getByLabelText(/^group$/i)).toHaveTextContent("Invoices");
+
+    await user.click(screen.getByRole("button", { name: /save tool/i }));
+
+    expect(createMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ groupId: "mtg_1" }),
+      expect.anything(),
+    );
+    expect(updateMutate).not.toHaveBeenCalled();
+  });
+
+  it("omits groupId when an edit leaves the group selector untouched", async () => {
+    const user = userEvent.setup();
+    updateMutate.mockImplementation((_input, options) => {
+      options?.onSuccess?.({ id: "mct_1", compileIssues: [] });
+    });
+
+    render(
+      <ToolFormDialog
+        serverId="mcs_1"
+        variableNames={[]}
+        groups={groupsFixture}
+        tool={{ ...toolFixture, groupId: "mtg_1" }}
+        onClose={() => {}}
+      />,
+    );
+
+    expect(screen.getByLabelText(/^group$/i)).toHaveTextContent("Invoices");
+
+    await user.click(screen.getByRole("button", { name: /save tool/i }));
+
+    const [payload] = updateMutate.mock.calls[0] as [
+      Record<string, unknown>,
+      unknown,
+    ];
+    // Tri-state update contract: absent must mean "leave the assignment
+    // unchanged", so the key has to be missing rather than undefined.
+    expect("groupId" in payload).toBe(false);
+    expect(payload.name).toBe("get_contact");
+  });
+
+  it("sends the new group when an edit changes the selection", async () => {
+    const user = userEvent.setup();
+    updateMutate.mockImplementation((_input, options) => {
+      options?.onSuccess?.({ id: "mct_1", compileIssues: [] });
+    });
+
+    render(
+      <ToolFormDialog
+        serverId="mcs_1"
+        variableNames={[]}
+        groups={groupsFixture}
+        tool={{ ...toolFixture, groupId: "mtg_1" }}
+        onClose={() => {}}
+      />,
+    );
+
+    await user.click(screen.getByLabelText(/^group$/i));
+    await user.click(screen.getByRole("option", { name: "Contacts" }));
+    await user.click(screen.getByRole("button", { name: /save tool/i }));
+
+    const [payload] = updateMutate.mock.calls[0] as [
+      Record<string, unknown>,
+      unknown,
+    ];
+    expect(payload.groupId).toBe("mtg_2");
+  });
+
+  it("sends a null group when an edit moves the tool to Ungrouped", async () => {
+    const user = userEvent.setup();
+    updateMutate.mockImplementation((_input, options) => {
+      options?.onSuccess?.({ id: "mct_1", compileIssues: [] });
+    });
+
+    render(
+      <ToolFormDialog
+        serverId="mcs_1"
+        variableNames={[]}
+        groups={groupsFixture}
+        tool={{ ...toolFixture, groupId: "mtg_1" }}
+        onClose={() => {}}
+      />,
+    );
+
+    await user.click(screen.getByLabelText(/^group$/i));
+    await user.click(screen.getByRole("option", { name: "Ungrouped" }));
+    await user.click(screen.getByRole("button", { name: /save tool/i }));
+
+    const [payload] = updateMutate.mock.calls[0] as [
+      Record<string, unknown>,
+      unknown,
+    ];
+    expect("groupId" in payload).toBe(true);
+    expect(payload.groupId).toBeNull();
+  });
+
+  it("hides the group selector without groups or a preselect value", () => {
+    render(
+      <ToolFormDialog serverId="mcs_1" variableNames={[]} onClose={() => {}} />,
+    );
+
+    expect(screen.queryByLabelText(/^group$/i)).not.toBeInTheDocument();
   });
 });

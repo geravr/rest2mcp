@@ -170,6 +170,28 @@ export const esErrors = {
       [APP_ERROR_CODES.MCP_ACTIVE_SECRET_IN_USE]:
         "Este secreto lo usa la revisión publicada activa y no se puede eliminar.",
 
+      [APP_ERROR_CODES.MCP_TOOL_GROUP_NOT_FOUND]:
+        "Ese grupo de herramientas no existe en este servidor.",
+      [APP_ERROR_CODES.MCP_TOOL_GROUP_NAME_CONFLICT]:
+        "Ya existe un grupo con ese nombre en este servidor.",
+      [APP_ERROR_CODES.MCP_TOOL_GROUP_LIMIT_REACHED]:
+        "Este servidor alcanzó su límite de grupos de herramientas.",
+      [APP_ERROR_CODES.MCP_TOOL_LIMIT_REACHED]:
+        "Este servidor alcanzó su límite de herramientas.",
+
+      [APP_ERROR_CODES.MCP_OPENAPI_INVALID]:
+        "Ese archivo no es un documento JSON de OpenAPI válido.",
+      [APP_ERROR_CODES.MCP_OPENAPI_VERSION_UNSUPPORTED]:
+        "Solo se pueden importar documentos JSON de OpenAPI 3.0 y 3.1.",
+      [APP_ERROR_CODES.MCP_OPENAPI_LIMIT_EXCEEDED]:
+        "El documento es demasiado grande o declara demasiadas operaciones para importar.",
+      [APP_ERROR_CODES.MCP_OPENAPI_SOURCE_UNAVAILABLE]:
+        "No se pudo obtener la URL del documento de forma segura desde internet público.",
+      [APP_ERROR_CODES.MCP_OPENAPI_STALE_PREVIEW]:
+        "El documento cambió desde la vista previa. Vuelve a previsualizarlo antes de importar.",
+      [APP_ERROR_CODES.MCP_OPENAPI_INVALID_SELECTION]:
+        "Revisa las operaciones seleccionadas, los nombres y el grupo antes de importar.",
+
       [APP_ERROR_CODES.ROUTE_NOT_FOUND]: "Esta ruta de API no existe.",
       [APP_ERROR_CODES.INTERNAL_ERROR]:
         "Ocurri\u00f3 un error inesperado. Int\u00e9ntalo de nuevo.",

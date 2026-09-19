@@ -1,4 +1,8 @@
-import { useCreateMcpToolFromCurl, useParseCurlPreview } from "@/hooks/use-mcp";
+import {
+  useCreateMcpToolFromCurl,
+  useParseCurlPreview,
+  type McpToolGroupSummary,
+} from "@/hooks/use-mcp";
 import { useTranslations } from "@/i18n/use-translations";
 import {
   Alert,
@@ -41,6 +45,23 @@ type MarkingState = {
 // Mirrors mcpValueNameSchema on the API: [a-z][a-z0-9_]*.
 const AGENT_INPUT_NAME_PATTERN = /^[a-z][a-z0-9_]*$/;
 
+/** Radix Select cannot use an empty value for the ungrouped choice. */
+const UNGROUPED_GROUP = "ungrouped";
+
+/**
+ * The selector only offers listed groups, so an id missing from the loaded list
+ * (deleted, or not loaded yet) resolves to ungrouped for the displayed selection
+ * and for the submitted payload alike.
+ */
+function resolveGroupSelection(
+  candidate: string | null | undefined,
+  groups: McpToolGroupSummary[],
+): string {
+  return candidate && groups.some((group) => group.id === candidate)
+    ? candidate
+    : UNGROUPED_GROUP;
+}
+
 function suggestName(occurrence: CurlOccurrence, index: number): string {
   const source = occurrence.jsonPath ?? occurrence.key ?? occurrence.value;
   const cleaned = source
@@ -64,10 +85,16 @@ function truncate(value: string, length = 48): string {
 export function CurlImportDialog({
   serverId,
   configRevision = 1,
+  groups = [],
+  initialGroupId,
   onClose,
 }: {
   serverId: string;
   configRevision?: number;
+  /** Server groups already fetched by the parent; this dialog never queries them. */
+  groups?: McpToolGroupSummary[];
+  /** Active Studio group filter, used only to preselect the imported tool's group. */
+  initialGroupId?: string | undefined;
   onClose: () => void;
 }) {
   const { t } = useTranslations();
@@ -75,10 +102,25 @@ export function CurlImportDialog({
   const createFromCurl = useCreateMcpToolFromCurl();
   const [curl, setCurl] = useState("");
   const [markings, setMarkings] = useState<Record<string, MarkingState>>({});
+  /**
+   * `null` until the owner picks a group, so the effective selection keeps
+   * following `initialGroupId` while the parent's group query resolves. An owner
+   * choice is never overwritten by a later prop.
+   */
+  const [groupChoice, setGroupChoice] = useState<string | null>(null);
   const [report, setReport] = useState<{
     excludedCredentials: number;
     issues: number;
   } | null>(null);
+
+  const showGroupSelect = groups.length > 0 || initialGroupId !== undefined;
+  // Derived on every render from the owner's choice first, then the props, so a
+  // group list or an initialGroupId that arrives after the first render still
+  // decides the displayed selection and the submitted payload alike.
+  const resolvedGroupSelection = resolveGroupSelection(
+    groupChoice ?? initialGroupId ?? UNGROUPED_GROUP,
+    groups,
+  );
 
   const preview = parsePreview.data ?? null;
   const occurrences = (preview?.occurrences ?? []) as CurlOccurrence[];
@@ -125,6 +167,10 @@ export function CurlImportDialog({
         serverId,
         expectedRevision: configRevision,
         curl,
+        groupId:
+          resolvedGroupSelection === UNGROUPED_GROUP
+            ? null
+            : resolvedGroupSelection,
         markings: activeMarkings.map((entry) => ({
           location: entry.occurrence!.location,
           key: entry.occurrence!.key,
@@ -329,6 +375,32 @@ export function CurlImportDialog({
               <p className="text-xs text-destructive">
                 {t.servers.invalidMarkingName}
               </p>
+            ) : null}
+
+            {showGroupSelect ? (
+              <Field>
+                <Label htmlFor="curl-import-group">
+                  {t.servers.groups.moveTarget}
+                </Label>
+                <Select
+                  value={resolvedGroupSelection}
+                  onValueChange={setGroupChoice}
+                >
+                  <SelectTrigger id="curl-import-group">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={UNGROUPED_GROUP}>
+                      {t.servers.groups.ungrouped}
+                    </SelectItem>
+                    {groups.map((group) => (
+                      <SelectItem key={group.id} value={group.id}>
+                        {group.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
             ) : null}
 
             <DialogFooter>

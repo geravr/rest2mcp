@@ -5,6 +5,7 @@ import {
   useCreateMcpTool,
   usePreviewToolCompile,
   useUpdateMcpTool,
+  type McpToolGroupSummary,
 } from "@/hooks/use-mcp";
 import { useTranslations } from "@/i18n/use-translations";
 import {
@@ -58,6 +59,22 @@ import { useMemo, useRef, useState } from "react";
 
 const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] as const;
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+/** Radix Select cannot use an empty value for the ungrouped choice. */
+const UNGROUPED_GROUP = "ungrouped";
+
+/**
+ * A ToolFormTool group is only selectable while it is still listed for the
+ * server, so a deleted or not-yet-loaded group starts the selector ungrouped.
+ */
+function resolveGroupSelection(
+  candidate: string | null | undefined,
+  groups: McpToolGroupSummary[],
+): string {
+  return candidate && groups.some((group) => group.id === candidate)
+    ? candidate
+    : UNGROUPED_GROUP;
+}
 
 function defaultDestructiveHint(method: string): boolean {
   return method === "DELETE";
@@ -114,6 +131,8 @@ export type ToolFormTool = {
   requestDefinition?: Record<string, unknown> | null;
   allowMutation: boolean;
   enabled: boolean;
+  /** Studio group membership; absent means unknown and is treated as ungrouped. */
+  groupId?: string | null;
   compileStatus?: string | null;
   compileIssues?: ToolCompileIssue[] | null;
 };
@@ -393,6 +412,10 @@ export function ToolFormDialog(props: {
   configRevision?: number;
   variableNames: string[];
   variables?: ToolFormServerValue[];
+  /** Server groups already fetched by the parent; this dialog never queries them. */
+  groups?: McpToolGroupSummary[];
+  /** Active Studio group filter, used only to preselect a new tool's group. */
+  initialGroupId?: string | undefined;
   tool?: ToolFormTool;
   duplicate?: boolean;
   onClose: () => void;
@@ -411,6 +434,8 @@ export function ToolFormDialogForm({
   configRevision = 1,
   variableNames,
   variables = [],
+  groups = [],
+  initialGroupId,
   tool,
   duplicate = false,
   onClose,
@@ -419,6 +444,8 @@ export function ToolFormDialogForm({
   configRevision?: number;
   variableNames: string[];
   variables?: ToolFormServerValue[];
+  groups?: McpToolGroupSummary[];
+  initialGroupId?: string | undefined;
   tool?: ToolFormTool;
   duplicate?: boolean;
   onClose: () => void;
@@ -510,6 +537,12 @@ export function ToolFormDialogForm({
   const initialIdempotentHint =
     definition?.annotations?.idempotentHint ??
     defaultIdempotentHint(initialMethod);
+  // Editing and duplicating keep the tool's own group; a new tool follows the
+  // active Studio group filter. The selector is never locked to that value.
+  const initialGroupSelection =
+    isEdit || duplicate
+      ? resolveGroupSelection(tool?.groupId, groups)
+      : (initialGroupId ?? UNGROUPED_GROUP);
 
   const [name, setName] = useState(initialName);
   const [title, setTitle] = useState(initialTitle);
@@ -529,6 +562,9 @@ export function ToolFormDialogForm({
   );
   const [idempotentHint, setIdempotentHint] = useState(initialIdempotentHint);
   const [enabled, setEnabled] = useState(initialEnabled);
+  const [groupSelection, setGroupSelection] = useState(initialGroupSelection);
+  const showGroupSelect = groups.length > 0 || initialGroupId !== undefined;
+  const groupSelectionChanged = groupSelection !== initialGroupSelection;
   const [savedToolId, setSavedToolId] = useState<string | null>(
     isEdit && tool ? tool.id : null,
   );
@@ -721,7 +757,8 @@ export function ToolFormDialogForm({
       JSON.stringify(formRows) !== JSON.stringify(initialBody.formRows) ||
       JSON.stringify(jsonRows) !== JSON.stringify(initialBody.jsonRows) ||
       jsonAdvanced !== initialBody.jsonAdvanced ||
-      advancedBody !== initialBody.advancedBody
+      advancedBody !== initialBody.advancedBody ||
+      groupSelection !== initialGroupSelection
     );
   }, [
     name,
@@ -756,6 +793,8 @@ export function ToolFormDialogForm({
     initialBody.jsonAdvanced,
     advancedBody,
     initialBody.advancedBody,
+    groupSelection,
+    initialGroupSelection,
   ]);
 
   const queryCount = query.length;
@@ -859,9 +898,25 @@ export function ToolFormDialogForm({
       onClose();
     };
     if (savedToolId) {
-      updateTool.mutate({ ...base, toolId: savedToolId }, { onSuccess });
+      // Tri-state Studio contract: an omitted `groupId` leaves the stored
+      // assignment untouched, so an unrelated edit must never send the key.
+      const groupChange = groupSelectionChanged
+        ? {
+            groupId: groupSelection === UNGROUPED_GROUP ? null : groupSelection,
+          }
+        : {};
+      updateTool.mutate(
+        { ...base, ...groupChange, toolId: savedToolId },
+        { onSuccess },
+      );
     } else {
-      createTool.mutate(base, { onSuccess });
+      createTool.mutate(
+        {
+          ...base,
+          groupId: groupSelection === UNGROUPED_GROUP ? null : groupSelection,
+        },
+        { onSuccess },
+      );
     }
   };
 
@@ -985,6 +1040,32 @@ export function ToolFormDialogForm({
                 placeholder={t.servers.toolDescriptionPlaceholder}
               />
             </Field>
+
+            {showGroupSelect ? (
+              <Field>
+                <Label htmlFor="tool-form-group">
+                  {t.servers.groups.moveTarget}
+                </Label>
+                <Select
+                  value={groupSelection}
+                  onValueChange={setGroupSelection}
+                >
+                  <SelectTrigger id="tool-form-group">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={UNGROUPED_GROUP}>
+                      {t.servers.groups.ungrouped}
+                    </SelectItem>
+                    {groups.map((group) => (
+                      <SelectItem key={group.id} value={group.id}>
+                        {group.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            ) : null}
 
             <div className="grid items-start gap-3 sm:grid-cols-[8rem_1fr]">
               <Field>

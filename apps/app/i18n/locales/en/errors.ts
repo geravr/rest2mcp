@@ -156,6 +156,28 @@ export const enErrors = {
       [APP_ERROR_CODES.MCP_ACTIVE_SECRET_IN_USE]:
         "This secret is used by the active published revision and cannot be deleted.",
 
+      [APP_ERROR_CODES.MCP_TOOL_GROUP_NOT_FOUND]:
+        "That tool group does not exist on this server.",
+      [APP_ERROR_CODES.MCP_TOOL_GROUP_NAME_CONFLICT]:
+        "A group with that name already exists on this server.",
+      [APP_ERROR_CODES.MCP_TOOL_GROUP_LIMIT_REACHED]:
+        "This server has reached its tool group limit.",
+      [APP_ERROR_CODES.MCP_TOOL_LIMIT_REACHED]:
+        "This server has reached its tool limit.",
+
+      [APP_ERROR_CODES.MCP_OPENAPI_INVALID]:
+        "That file is not a valid OpenAPI JSON document.",
+      [APP_ERROR_CODES.MCP_OPENAPI_VERSION_UNSUPPORTED]:
+        "Only OpenAPI 3.0 and 3.1 JSON documents can be imported.",
+      [APP_ERROR_CODES.MCP_OPENAPI_LIMIT_EXCEEDED]:
+        "The document is too large or declares too many operations to import.",
+      [APP_ERROR_CODES.MCP_OPENAPI_SOURCE_UNAVAILABLE]:
+        "The document URL could not be retrieved safely from the public internet.",
+      [APP_ERROR_CODES.MCP_OPENAPI_STALE_PREVIEW]:
+        "The document changed since the preview. Preview it again before importing.",
+      [APP_ERROR_CODES.MCP_OPENAPI_INVALID_SELECTION]:
+        "Check the selected operations, names, and group before importing.",
+
       [APP_ERROR_CODES.ROUTE_NOT_FOUND]: "This API route does not exist.",
       [APP_ERROR_CODES.INTERNAL_ERROR]:
         "An unexpected error occurred. Please try again.",
