@@ -8,6 +8,7 @@ export * from "./mcp-platform-token-scope";
 export * from "./mcp-platform-token-server-grant";
 export * from "./mcp-relations";
 export * from "./mcp-server";
+export * from "./mcp-server-revision";
 export * from "./mcp-server-variable";
 export * from "./mcp-storage-asset";
 export * from "./mcp-tool";

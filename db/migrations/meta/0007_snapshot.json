@@ -1,9 +1,121 @@
 {
-  "id": "d125c642-762c-4291-8220-11bf98659856",
-  "prevId": "63d5d980-71c2-40e5-9a30-5a706ce8b526",
+  "id": "df2ba23b-c413-48f8-adc6-07079b23e188",
+  "prevId": "f51fe272-9304-420b-9065-88c4c7f993dc",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
+    "public.mcp_platform_step_up_grant": {
+      "name": "mcp_platform_step_up_grant",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "session_id": {
+          "name": "session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fingerprint": {
+          "name": "fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "consumed_at": {
+          "name": "consumed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "mcp_platform_step_up_grant_user_id_idx": {
+          "name": "mcp_platform_step_up_grant_user_id_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "mcp_platform_step_up_grant_session_id_idx": {
+          "name": "mcp_platform_step_up_grant_session_id_idx",
+          "columns": [
+            {
+              "expression": "session_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "mcp_platform_step_up_grant_expires_at_idx": {
+          "name": "mcp_platform_step_up_grant_expires_at_idx",
+          "columns": [
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "mcp_platform_step_up_grant_user_id_user_id_fk": {
+          "name": "mcp_platform_step_up_grant_user_id_user_id_fk",
+          "tableFrom": "mcp_platform_step_up_grant",
+          "tableTo": "user",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.mcp_agent_token": {
       "name": "mcp_agent_token",
       "schema": "",
@@ -50,9 +162,21 @@
           "primaryKey": false,
           "notNull": true
         },
-        "scopes": {
-          "name": "scopes",
-          "type": "jsonb",
+        "policy_version": {
+          "name": "policy_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resource_mode": {
+          "name": "resource_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "replaces_token_id": {
+          "name": "replaces_token_id",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -174,6 +298,49 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "mcp_agent_token_platform_owner_idx": {
+          "name": "mcp_agent_token_platform_owner_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "revoked_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"mcp_agent_token\".\"kind\" = 'platform'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "mcp_agent_token_expires_at_idx": {
+          "name": "mcp_agent_token_expires_at_idx",
+          "columns": [
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -193,6 +360,15 @@
           "columnsFrom": ["server_id"],
           "columnsTo": ["id"],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "mcp_agent_token_replaces_token_id_mcp_agent_token_id_fk": {
+          "name": "mcp_agent_token_replaces_token_id_mcp_agent_token_id_fk",
+          "tableFrom": "mcp_agent_token",
+          "tableTo": "mcp_agent_token",
+          "columnsFrom": ["replaces_token_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
           "onUpdate": "no action"
         },
         "mcp_agent_token_replaced_by_token_id_mcp_agent_token_id_fk": {
@@ -510,6 +686,662 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.mcp_platform_token_server_grant": {
+      "name": "mcp_platform_token_server_grant",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "token_id": {
+          "name": "token_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "server_id": {
+          "name": "server_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "mcp_platform_token_server_grant_token_id_idx": {
+          "name": "mcp_platform_token_server_grant_token_id_idx",
+          "columns": [
+            {
+              "expression": "token_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "mcp_platform_token_server_grant_server_id_idx": {
+          "name": "mcp_platform_token_server_grant_server_id_idx",
+          "columns": [
+            {
+              "expression": "server_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "mcp_platform_token_server_grant_token_id_mcp_agent_token_id_fk": {
+          "name": "mcp_platform_token_server_grant_token_id_mcp_agent_token_id_fk",
+          "tableFrom": "mcp_platform_token_server_grant",
+          "tableTo": "mcp_agent_token",
+          "columnsFrom": ["token_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "mcp_platform_token_server_grant_server_id_mcp_server_id_fk": {
+          "name": "mcp_platform_token_server_grant_server_id_mcp_server_id_fk",
+          "tableFrom": "mcp_platform_token_server_grant",
+          "tableTo": "mcp_server",
+          "columnsFrom": ["server_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "mcp_platform_token_server_grant_token_server_unique": {
+          "name": "mcp_platform_token_server_grant_token_server_unique",
+          "nullsNotDistinct": false,
+          "columns": ["token_id", "server_id"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.mcp_server_revision": {
+      "name": "mcp_server_revision",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "server_id": {
+          "name": "server_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision_number": {
+          "name": "revision_number",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_draft_revision": {
+          "name": "source_draft_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "candidate_fingerprint": {
+          "name": "candidate_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "contract_fingerprint": {
+          "name": "contract_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "schema_version": {
+          "name": "schema_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "compiler_version": {
+          "name": "compiler_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "base_url": {
+          "name": "base_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "allowed_hosts": {
+          "name": "allowed_hosts",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "common_entries": {
+          "name": "common_entries",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "auth_configuration": {
+          "name": "auth_configuration",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "diff_summary": {
+          "name": "diff_summary",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "publish_request_id": {
+          "name": "publish_request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_source": {
+          "name": "actor_source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_user_id": {
+          "name": "actor_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "mcp_server_revision_server_number_idx": {
+          "name": "mcp_server_revision_server_number_idx",
+          "columns": [
+            {
+              "expression": "server_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "revision_number",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "mcp_server_revision_server_created_idx": {
+          "name": "mcp_server_revision_server_created_idx",
+          "columns": [
+            {
+              "expression": "server_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "mcp_server_revision_server_fingerprint_idx": {
+          "name": "mcp_server_revision_server_fingerprint_idx",
+          "columns": [
+            {
+              "expression": "server_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "candidate_fingerprint",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "mcp_server_revision_server_id_mcp_server_id_fk": {
+          "name": "mcp_server_revision_server_id_mcp_server_id_fk",
+          "tableFrom": "mcp_server_revision",
+          "tableTo": "mcp_server",
+          "columnsFrom": ["server_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "mcp_server_revision_number_unique": {
+          "name": "mcp_server_revision_number_unique",
+          "nullsNotDistinct": false,
+          "columns": ["server_id", "revision_number"]
+        },
+        "mcp_server_revision_request_unique": {
+          "name": "mcp_server_revision_request_unique",
+          "nullsNotDistinct": false,
+          "columns": ["server_id", "publish_request_id"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.mcp_server_revision_config": {
+      "name": "mcp_server_revision_config",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "revision_id": {
+          "name": "revision_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "server_id": {
+          "name": "server_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_value_id": {
+          "name": "source_value_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "owner": {
+          "name": "owner",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_secret": {
+          "name": "is_secret",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "value": {
+          "name": "value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "mcp_server_revision_config_revision_idx": {
+          "name": "mcp_server_revision_config_revision_idx",
+          "columns": [
+            {
+              "expression": "revision_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "mcp_server_revision_config_server_idx": {
+          "name": "mcp_server_revision_config_server_idx",
+          "columns": [
+            {
+              "expression": "server_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "mcp_server_revision_config_revision_id_mcp_server_revision_id_fk": {
+          "name": "mcp_server_revision_config_revision_id_mcp_server_revision_id_fk",
+          "tableFrom": "mcp_server_revision_config",
+          "tableTo": "mcp_server_revision",
+          "columnsFrom": ["revision_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "mcp_server_revision_config_server_id_mcp_server_id_fk": {
+          "name": "mcp_server_revision_config_server_id_mcp_server_id_fk",
+          "tableFrom": "mcp_server_revision_config",
+          "tableTo": "mcp_server",
+          "columnsFrom": ["server_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "mcp_server_revision_config_source_unique": {
+          "name": "mcp_server_revision_config_source_unique",
+          "nullsNotDistinct": false,
+          "columns": ["revision_id", "source_value_id"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.mcp_server_revision_tool": {
+      "name": "mcp_server_revision_tool",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "revision_id": {
+          "name": "revision_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "server_id": {
+          "name": "server_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_tool_id": {
+          "name": "source_tool_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "method": {
+          "name": "method",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "path_template": {
+          "name": "path_template",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_definition": {
+          "name": "request_definition",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "compiled_plan": {
+          "name": "compiled_plan",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "compile_status": {
+          "name": "compile_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "compile_issues": {
+          "name": "compile_issues",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "annotations": {
+          "name": "annotations",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "allow_mutation": {
+          "name": "allow_mutation",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "contract_fingerprint": {
+          "name": "contract_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "definition_hash": {
+          "name": "definition_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tool_order": {
+          "name": "tool_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "mcp_server_revision_tool_revision_idx": {
+          "name": "mcp_server_revision_tool_revision_idx",
+          "columns": [
+            {
+              "expression": "revision_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "mcp_server_revision_tool_server_name_idx": {
+          "name": "mcp_server_revision_tool_server_name_idx",
+          "columns": [
+            {
+              "expression": "server_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "mcp_server_revision_tool_revision_id_mcp_server_revision_id_fk": {
+          "name": "mcp_server_revision_tool_revision_id_mcp_server_revision_id_fk",
+          "tableFrom": "mcp_server_revision_tool",
+          "tableTo": "mcp_server_revision",
+          "columnsFrom": ["revision_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "mcp_server_revision_tool_server_id_mcp_server_id_fk": {
+          "name": "mcp_server_revision_tool_server_id_mcp_server_id_fk",
+          "tableFrom": "mcp_server_revision_tool",
+          "tableTo": "mcp_server",
+          "columnsFrom": ["server_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "mcp_server_revision_tool_source_unique": {
+          "name": "mcp_server_revision_tool_source_unique",
+          "nullsNotDistinct": false,
+          "columns": ["revision_id", "source_tool_id"]
+        },
+        "mcp_server_revision_tool_name_unique": {
+          "name": "mcp_server_revision_tool_name_unique",
+          "nullsNotDistinct": false,
+          "columns": ["revision_id", "name"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.mcp_server": {
       "name": "mcp_server",
       "schema": "",
@@ -600,6 +1432,19 @@
           "notNull": true,
           "default": 1
         },
+        "draft_revision": {
+          "name": "draft_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "published_revision_id": {
+          "name": "published_revision_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -636,6 +1481,21 @@
           "columns": [
             {
               "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "mcp_server_published_revision_idx": {
+          "name": "mcp_server_published_revision_idx",
+          "columns": [
+            {
+              "expression": "published_revision_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -970,6 +1830,42 @@
           "primaryKey": false,
           "notNull": true
         },
+        "published_revision_id": {
+          "name": "published_revision_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revision_number": {
+          "name": "revision_number",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "aggregate_fingerprint": {
+          "name": "aggregate_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tool_fingerprint": {
+          "name": "tool_fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revision_mode": {
+          "name": "revision_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "draft_revision": {
+          "name": "draft_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
         "status": {
           "name": "status",
           "type": "text",
@@ -1086,6 +1982,42 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "mcp_call_log_revision_idx": {
+          "name": "mcp_call_log_revision_idx",
+          "columns": [
+            {
+              "expression": "server_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "revision_number",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "mcp_call_log_published_revision_idx": {
+          "name": "mcp_call_log_published_revision_idx",
+          "columns": [
+            {
+              "expression": "published_revision_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -1106,19 +2038,80 @@
           "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
-        },
-        "mcp_call_log_tool_id_mcp_tool_id_fk": {
-          "name": "mcp_call_log_tool_id_mcp_tool_id_fk",
-          "tableFrom": "mcp_call_log",
-          "tableTo": "mcp_tool",
-          "columnsFrom": ["tool_id"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.mcp_platform_token_scope": {
+      "name": "mcp_platform_token_scope",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "token_id": {
+          "name": "token_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scope": {
+          "name": "scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "mcp_platform_token_scope_token_id_idx": {
+          "name": "mcp_platform_token_scope_token_id_idx",
+          "columns": [
+            {
+              "expression": "token_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "mcp_platform_token_scope_token_id_mcp_agent_token_id_fk": {
+          "name": "mcp_platform_token_scope_token_id_mcp_agent_token_id_fk",
+          "tableFrom": "mcp_platform_token_scope",
+          "tableTo": "mcp_agent_token",
+          "columnsFrom": ["token_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "mcp_platform_token_scope_token_scope_unique": {
+          "name": "mcp_platform_token_scope_token_scope_unique",
+          "nullsNotDistinct": false,
+          "columns": ["token_id", "scope"]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -1543,6 +2536,169 @@
       },
       "policies": {},
       "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.mcp_platform_security_event": {
+      "name": "mcp_platform_security_event",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "token_id": {
+          "name": "token_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "token_prefix": {
+          "name": "token_prefix",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "event_type": {
+          "name": "event_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scopes": {
+          "name": "scopes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "server_id": {
+          "name": "server_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "mcp_platform_security_event_user_created_idx": {
+          "name": "mcp_platform_security_event_user_created_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "mcp_platform_security_event_created_idx": {
+          "name": "mcp_platform_security_event_created_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "mcp_platform_security_event_token_id_idx": {
+          "name": "mcp_platform_security_event_token_id_idx",
+          "columns": [
+            {
+              "expression": "token_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "mcp_platform_security_event_user_id_user_id_fk": {
+          "name": "mcp_platform_security_event_user_id_user_id_fk",
+          "tableFrom": "mcp_platform_security_event",
+          "tableTo": "user",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "mcp_platform_security_event_token_id_mcp_agent_token_id_fk": {
+          "name": "mcp_platform_security_event_token_id_mcp_agent_token_id_fk",
+          "tableFrom": "mcp_platform_security_event",
+          "tableTo": "mcp_agent_token",
+          "columnsFrom": ["token_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "mcp_platform_security_event_server_id_mcp_server_id_fk": {
+          "name": "mcp_platform_security_event_server_id_mcp_server_id_fk",
+          "tableFrom": "mcp_platform_security_event",
+          "tableTo": "mcp_server",
+          "columnsFrom": ["server_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "mcp_platform_security_event_type_check": {
+          "name": "mcp_platform_security_event_type_check",
+          "value": "\"mcp_platform_security_event\".\"event_type\" in ('token_issued', 'token_rotated', 'token_revoked', 'scope_denied', 'resource_denied', 'step_up_failed', 'destructive_action', 'mutating_invocation')"
+        },
+        "mcp_platform_security_event_outcome_check": {
+          "name": "mcp_platform_security_event_outcome_check",
+          "value": "\"mcp_platform_security_event\".\"outcome\" in ('success', 'denied', 'failure')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.session": {

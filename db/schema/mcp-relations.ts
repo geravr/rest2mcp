@@ -6,6 +6,11 @@ import { mcpPlatformStepUpGrant } from "./mcp-platform-step-up-grant";
 import { mcpPlatformTokenScope } from "./mcp-platform-token-scope";
 import { mcpPlatformTokenServerGrant } from "./mcp-platform-token-server-grant";
 import { mcpServer } from "./mcp-server";
+import {
+  mcpServerRevision,
+  mcpServerRevisionConfig,
+  mcpServerRevisionTool,
+} from "./mcp-server-revision";
 import { mcpServerVariable } from "./mcp-server-variable";
 import { mcpStorageAsset } from "./mcp-storage-asset";
 import { mcpTool } from "./mcp-tool";
@@ -24,7 +29,44 @@ export const mcpServerRelations = relations(mcpServer, ({ one, many }) => ({
   variables: many(mcpServerVariable),
   agentTokens: many(mcpAgentToken),
   callLogs: many(mcpCallLog),
+  revisions: many(mcpServerRevision),
+  publishedRevision: one(mcpServerRevision, {
+    fields: [mcpServer.publishedRevisionId],
+    references: [mcpServerRevision.id],
+  }),
 }));
+
+export const mcpServerRevisionRelations = relations(
+  mcpServerRevision,
+  ({ one, many }) => ({
+    server: one(mcpServer, {
+      fields: [mcpServerRevision.serverId],
+      references: [mcpServer.id],
+    }),
+    tools: many(mcpServerRevisionTool),
+    configs: many(mcpServerRevisionConfig),
+  }),
+);
+
+export const mcpServerRevisionToolRelations = relations(
+  mcpServerRevisionTool,
+  ({ one }) => ({
+    revision: one(mcpServerRevision, {
+      fields: [mcpServerRevisionTool.revisionId],
+      references: [mcpServerRevision.id],
+    }),
+  }),
+);
+
+export const mcpServerRevisionConfigRelations = relations(
+  mcpServerRevisionConfig,
+  ({ one }) => ({
+    revision: one(mcpServerRevision, {
+      fields: [mcpServerRevisionConfig.revisionId],
+      references: [mcpServerRevision.id],
+    }),
+  }),
+);
 
 export const mcpStorageAssetRelations = relations(
   mcpStorageAsset,

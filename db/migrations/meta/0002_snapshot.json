@@ -135,12 +135,8 @@
           "name": "mcp_agent_token_user_id_user_id_fk",
           "tableFrom": "mcp_agent_token",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -148,12 +144,8 @@
           "name": "mcp_agent_token_server_id_mcp_server_id_fk",
           "tableFrom": "mcp_agent_token",
           "tableTo": "mcp_server",
-          "columnsFrom": [
-            "server_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["server_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -242,12 +234,8 @@
           "name": "mcp_server_variable_server_id_mcp_server_id_fk",
           "tableFrom": "mcp_server_variable",
           "tableTo": "mcp_server",
-          "columnsFrom": [
-            "server_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["server_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -257,10 +245,7 @@
         "mcp_server_variable_server_name_unique": {
           "name": "mcp_server_variable_server_name_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "server_id",
-            "name"
-          ]
+          "columns": ["server_id", "name"]
         }
       },
       "policies": {},
@@ -377,12 +362,8 @@
           "name": "mcp_tool_server_id_mcp_server_id_fk",
           "tableFrom": "mcp_tool",
           "tableTo": "mcp_server",
-          "columnsFrom": [
-            "server_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["server_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -392,10 +373,7 @@
         "mcp_tool_server_name_unique": {
           "name": "mcp_tool_server_name_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "server_id",
-            "name"
-          ]
+          "columns": ["server_id", "name"]
         }
       },
       "policies": {},
@@ -525,12 +503,8 @@
           "name": "mcp_server_user_id_user_id_fk",
           "tableFrom": "mcp_server",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -540,10 +514,7 @@
         "mcp_server_user_slug_unique": {
           "name": "mcp_server_user_slug_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "user_id",
-            "slug"
-          ]
+          "columns": ["user_id", "slug"]
         }
       },
       "policies": {},
@@ -630,12 +601,8 @@
           "name": "user_config_user_id_user_id_fk",
           "tableFrom": "user_config",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -645,9 +612,7 @@
         "user_config_userId_unique": {
           "name": "user_config_userId_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "user_id"
-          ]
+          "columns": ["user_id"]
         }
       },
       "policies": {},
@@ -778,12 +743,8 @@
           "name": "mcp_call_log_server_id_mcp_server_id_fk",
           "tableFrom": "mcp_call_log",
           "tableTo": "mcp_server",
-          "columnsFrom": [
-            "server_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["server_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -791,12 +752,8 @@
           "name": "mcp_call_log_tool_id_mcp_tool_id_fk",
           "tableFrom": "mcp_call_log",
           "tableTo": "mcp_tool",
-          "columnsFrom": [
-            "tool_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["tool_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -921,12 +878,8 @@
           "name": "platform_invitation_invited_by_user_id_fk",
           "tableFrom": "platform_invitation",
           "tableTo": "user",
-          "columnsFrom": [
-            "invited_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["invited_by"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -936,9 +889,7 @@
         "platform_invitation_token_unique": {
           "name": "platform_invitation_token_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "token"
-          ]
+          "columns": ["token"]
         }
       },
       "policies": {},
@@ -1098,12 +1049,8 @@
           "name": "admin_audit_log_actor_id_user_id_fk",
           "tableFrom": "admin_audit_log",
           "tableTo": "user",
-          "columnsFrom": [
-            "actor_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["actor_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1221,12 +1168,8 @@
           "name": "identity_user_id_user_id_fk",
           "tableFrom": "identity",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1236,10 +1179,7 @@
         "identity_provider_account_unique": {
           "name": "identity_provider_account_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "provider_id",
-            "account_id"
-          ]
+          "columns": ["provider_id", "account_id"]
         }
       },
       "policies": {},
@@ -1323,12 +1263,8 @@
           "name": "session_user_id_user_id_fk",
           "tableFrom": "session",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1338,9 +1274,7 @@
         "session_token_unique": {
           "name": "session_token_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "token"
-          ]
+          "columns": ["token"]
         }
       },
       "policies": {},
@@ -1423,9 +1357,7 @@
         "user_email_unique": {
           "name": "user_email_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "email"
-          ]
+          "columns": ["email"]
         }
       },
       "policies": {},
@@ -1528,10 +1460,7 @@
         "verification_identifier_value_unique": {
           "name": "verification_identifier_value_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "identifier",
-            "value"
-          ]
+          "columns": ["identifier", "value"]
         }
       },
       "policies": {},
