@@ -6,6 +6,39 @@ Owner-scoped control plane for mapping REST APIs to hosted MCP tools: servers, t
 
 ## Requirements
 
+### Requirement: Studio loads persisted typed origins
+
+The Studio SHALL load request origins, stable ids, types, order, and metadata directly from the persisted versioned request definition. It SHALL NOT infer an origin from literal text, server-value display names, or another derived representation. Human-readable request summaries SHALL be derived for display only and SHALL NOT become writable authoring state.
+
+#### Scenario: Typed definition survives catalog changes
+
+- **WHEN** a server value is added with the same name as an existing fixed or agent binding
+- **THEN** reopening the tool preserves its persisted sources and stable ids
+
+#### Scenario: Literal binding-like text remains literal
+
+- **WHEN** a saved literal contains text such as `{{api_token}}`
+- **THEN** Studio displays and resaves it as literal text without offering an inferred conversion
+
+#### Scenario: Path summary is derived
+
+- **WHEN** Studio displays a tool path in a list or dialog header
+- **THEN** it derives a sanitized summary from typed path segments without reading or writing a separate path template
+
+### Requirement: Studio binding errors identify canonical locations
+
+When Studio preview, save, or playground execution reports a binding or compilation failure, the SPA SHALL render localized copy in English and Spanish using structured issue codes, stable node or entry ids, and safe public names when available. It SHALL NOT parse an English server message or require a placeholder string to identify the problem.
+
+#### Scenario: Missing agent input names its location
+
+- **WHEN** a query entry references an absent agent-input id
+- **THEN** Studio identifies the affected query entry and stable input reference in the active locale
+
+#### Scenario: Secret-safe binding error
+
+- **WHEN** a secret server-value reference cannot be resolved
+- **THEN** the error identifies the safe reference location without including plaintext or ciphertext
+
 ### Requirement: Owner can create and list MCP servers
 
 The system SHALL let an authenticated user create MCP servers they own, each with a name, optional description, an optional server icon asset (`iconAssetId`, with its resolved `iconUrl`), required HTTPS or HTTP `baseUrl`, and a slug unique among that user's servers. The stored `baseUrl` SHALL preserve any path prefix (e.g. `https://api.example.com/v2` keeps `/v2`) and SHALL strip query and fragment. Collection list endpoints SHALL return the `@repo/core` pagination envelope (`items`, `page`, `pageSize`, `total`). Each list item SHALL carry the traffic light, enabled tool count, the timestamp of the most recent call log (or null), and its resolved `iconUrl`. A user SHALL NOT read or mutate another user's server.
@@ -162,7 +195,7 @@ The system SHALL provide a dry-run curl parse that validates origin and base-pat
 
 ### Requirement: Owner can edit and delete tools
 
-The system SHALL let the owner update any typed tool field and delete a tool on a server they own. Editing SHALL preserve definition-local ids for unchanged nodes and SHALL compile and persist the request definition atomically with its effective plan. Duplicating SHALL generate new definition-local ids and rewrite internal references while preserving valid server-value ids. Legacy fields SHALL NOT override a typed definition. Deleting a tool SHALL keep historical call logs with null `toolId`, and tool names SHALL remain unique per server.
+The system SHALL let the owner update any typed tool field and delete a tool on a server they own. Editing SHALL preserve definition-local ids for unchanged nodes and SHALL compile and persist the request definition atomically with its effective plan. Duplicating SHALL generate new definition-local ids and rewrite internal references while preserving valid server-value ids. Commands SHALL use strict typed schemas and reject unknown fields before compilation. Deleting a tool SHALL keep historical call logs with null `toolId`, and tool names SHALL remain unique per server.
 
 #### Scenario: Edit origin without text inference
 
@@ -174,10 +207,10 @@ The system SHALL let the owner update any typed tool field and delete a tool on 
 - **WHEN** the owner duplicates a typed tool
 - **THEN** the new tool has distinct entry and agent-input ids with all internal references valid and the same external server-value references
 
-#### Scenario: Legacy fields cannot downgrade typed data
+#### Scenario: Unknown field is rejected without writes
 
-- **WHEN** an outdated client submits legacy fields for a tool that already has a typed definition
-- **THEN** the system rejects the downgrade and preserves the typed definition and compiled plan
+- **WHEN** a tool edit includes a field outside the typed update schema
+- **THEN** the system rejects the command and preserves the request definition and compiled plan
 
 #### Scenario: Delete tool keeps history
 
@@ -205,7 +238,7 @@ The system SHALL let the owner delete a server they own in one transaction: that
 
 ### Requirement: Owner can test server connectivity
 
-The system SHALL provide a connectivity probe that issues a GET to the server's `baseUrl` through the same SSRF guard and host allowlist as execution, rendering server default headers and query (secret variables included), with a 5 second timeout. The probe SHALL return `{ ok, httpStatus, durationMs, appCode? }`, SHALL NOT create a call-log row, and SHALL treat any HTTP response (including 401) as reachable.
+The system SHALL provide a connectivity probe that issues a GET to the server's `baseUrl` through the same SSRF guard and host allowlist as execution, rendering canonical common entries and explicit authentication configuration with secret values resolved only at execution, with a 5 second timeout. The probe SHALL return `{ ok, httpStatus, durationMs, appCode? }`, SHALL NOT create a call-log row, and SHALL treat any completed HTTP response, including 401, as reachable.
 
 #### Scenario: Reachable with auth failure
 
@@ -216,6 +249,11 @@ The system SHALL provide a connectivity probe that issues a GET to the server's 
 
 - **WHEN** the server `baseUrl` resolves to a private address
 - **THEN** the probe returns `ok: false` with `MCP_HOST_NOT_ALLOWED` and no upstream connection is made
+
+#### Scenario: Explicit auth is rendered
+
+- **WHEN** the server has Bearer auth referencing an auth-owned secret id
+- **THEN** the probe resolves that id for the protected Authorization header without inspecting common-entry text
 
 ### Requirement: Owner can copy a connection snippet
 
@@ -233,21 +271,26 @@ The system SHALL let the owner create a server-scoped agent token, display the r
 
 ### Requirement: Records are recipe-ready without secrets
 
-Server, tool, and variable-definition fields SHALL be sufficient to reconstruct a template later: name, description, baseUrl, allowedHosts, defaultHeaders, defaultQuery, tool templates, params, and variable names with their `isSecret` flags. Secret values, ciphertext, agent tokens, and call logs SHALL NOT be part of that template shape.
+Server, tool, and server-value metadata SHALL be sufficient to reconstruct a canonical typed recipe later: server identity and network policy, ordered common entries, explicit authentication shape with secret references removed or declared as required inputs, versioned request definitions, tool behavior metadata, and server-value names with `kind` and `owner`. Secret values, ciphertext, agent tokens, compiled runtime artifacts, and call logs SHALL NOT be part of that recipe shape.
 
-#### Scenario: Template shape excludes secrets
+#### Scenario: Recipe shape excludes secret material
 
-- **WHEN** a server has tools, variables, and defaults
-- **THEN** the exportable template includes variable names and flags but no secret values, ciphertext, or tokens
+- **WHEN** a server has typed tools, common entries, authentication, and server values
+- **THEN** its recipe contains canonical authoring metadata and required-secret declarations but no plaintext, ciphertext, token, or runtime log
+
+#### Scenario: Recipe round-trip keeps origins
+
+- **WHEN** a secret-free recipe is recreated with required secrets supplied separately
+- **THEN** its request bindings and common entries preserve their explicit origin types and stable internal relationships
 
 ### Requirement: Studio tool fields choose a value origin
 
-The SPA SHALL represent every structured request value as exactly one typed origin: Fixed, Server configuration, Server secret, or Agent input. Fixed values SHALL retain their literal or JSON primitive value. Server origins SHALL retain a server-value id and optional prefix/suffix. Agent origins SHALL retain an agent-input id whose metadata is stored once in the definition. The SPA SHALL submit these bindings directly and SHALL load them directly on reopen without compiling or inferring `{{placeholder}}` strings.
+The SPA SHALL represent every structured request value as exactly one typed origin: Fixed, Server configuration, Server secret, or Agent input. Fixed values SHALL retain their literal or JSON primitive value. Server origins SHALL retain a server-value id and optional prefix/suffix. Agent origins SHALL retain an agent-input id whose metadata is stored once in the definition. The SPA SHALL submit and reload these bindings directly without text classification.
 
 #### Scenario: Server secret is persisted by id
 
 - **WHEN** the owner selects secret `api_token` with prefix `Bearer ` for a header
-- **THEN** the request payload and stored definition reference the secret id and never serialize its display name as a placeholder
+- **THEN** the request payload and stored definition reference the secret id and never serialize its display name as a binding token
 
 #### Scenario: Typed JSON literal stays typed
 
@@ -261,7 +304,7 @@ The SPA SHALL represent every structured request value as exactly one typed orig
 
 ### Requirement: Studio tool dialog is a request builder
 
-The create/edit/duplicate tool dialog SHALL mirror the versioned request-definition model for path, ordered query/header/form entries, structured JSON, raw bodies, and the shared agent-input registry. It SHALL NOT build legacy template maps as its save payload. Structured fields SHALL reference agent inputs rather than duplicate their metadata. Advanced raw bodies SHALL insert explicit binding-id tokens and SHALL treat undeclared brace text literally. Compile issues SHALL attach to stable node ids when available.
+The create/edit/duplicate tool dialog SHALL mirror the versioned request-definition model for path, ordered query/header/form entries, structured JSON, raw bodies, and the shared agent-input registry. Its save payload SHALL contain only the strict typed command. Structured fields SHALL reference agent inputs rather than duplicate their metadata. Advanced raw bodies SHALL insert explicit binding-id tokens and SHALL treat undeclared brace text literally. Compile issues SHALL attach to stable node ids when available.
 
 #### Scenario: Shared agent input is edited once
 
@@ -288,28 +331,9 @@ The create/edit/duplicate tool dialog SHALL mirror the versioned request-definit
 - **WHEN** the owner opens and saves a typed nested JSON body
 - **THEN** its recursive nodes, primitive types, binding ids, and field order remain unchanged
 
-### Requirement: Studio infers origins when opening a saved tool
-
-For a versioned request definition, the SPA SHALL load persisted origins, ids, types, order, and metadata exactly and SHALL NOT run template inference. For a legacy-only tool, the backend SHALL return either an unambiguous typed conversion draft or blocking location-aware diagnostics. Saving an accepted draft SHALL convert the record permanently; ambiguous tools SHALL remain disabled until the owner resolves each source.
-
-#### Scenario: Typed definition survives catalog changes
-
-- **WHEN** a server value is added with the same name as an existing fixed or agent binding
-- **THEN** reopening the typed tool preserves its persisted sources
-
-#### Scenario: Unambiguous legacy tool is converted once
-
-- **WHEN** the owner opens an unambiguous legacy tool and saves the proposed typed draft
-- **THEN** later opens use the persisted definition without invoking legacy analysis
-
-#### Scenario: Ambiguous legacy placeholder is not guessed
-
-- **WHEN** a legacy placeholder could refer to both an agent input and server value
-- **THEN** the Studio shows a blocking source-selection issue and does not enable the tool automatically
-
 ### Requirement: Studio can edit a server variable
 
-The Settings variables list SHALL offer an edit action that opens a dialog. The name SHALL be read-only. The owner SHALL be able to replace the value and change `isSecret`. Secret values SHALL NOT be shown. Rotating a secret or turning a secret into a non-secret SHALL require a newly entered value. Turning a non-secret into a secret MAY reuse the visible current value.
+The Settings server-values list SHALL offer an edit action that opens a dialog. The name and ownership SHALL be read-only. The owner SHALL be able to replace the value and change its kind between `config` and `secret`. Secret values SHALL NOT be shown. Rotating a secret or turning a secret into a config SHALL require a newly entered value. Turning a config into a secret MAY reuse the visible current value.
 
 #### Scenario: Rotate secret
 
@@ -318,8 +342,13 @@ The Settings variables list SHALL offer an edit action that opens a dialog. The 
 
 #### Scenario: Secret value stays hidden
 
-- **WHEN** the owner opens the edit dialog for a secret variable
+- **WHEN** the owner opens the edit dialog for a secret server value
 - **THEN** the value field is empty and the previous secret is not displayed
+
+#### Scenario: Ownership remains unchanged
+
+- **WHEN** the owner edits a manual config or secret
+- **THEN** the value remains manual and the dialog does not offer auth ownership
 
 ### Requirement: Studio confirms variable deletion
 
@@ -335,7 +364,7 @@ The Settings server-values list SHALL require destructive confirmation before de
 - **WHEN** a secret is referenced by auth or any tool binding
 - **THEN** deletion is rejected with structured reference details and no request definition is left dangling
 
-### Requirement: Server defaults use Fixed or Variable origins
+### Requirement: Server common entries use Fixed or Server Value origins
 
 The Settings editor SHALL read and write typed ordered common entries. Each entry SHALL have a stable id and a Fixed, Server configuration, or Server secret origin; Agent input is forbidden. Saving SHALL preserve stable server-value ids and SHALL atomically recompile affected enabled tools. Auth-owned keys SHALL be displayed as protected and editable only through the Auth card.
 
@@ -351,22 +380,27 @@ The Settings editor SHALL read and write typed ordered common entries. Each entr
 
 ### Requirement: Owner chooses authentication when creating a server
 
-The create-server dialog SHALL ask which authentication to use: None, Bearer token, API key header, API key query, or Basic. Only the fields required by the selected type SHALL be visible. Bearer SHALL collect a token. Header SHALL collect a header name (default `X-API-Key`) and a value. Query SHALL collect a query parameter name (default `api_key`) and a value. Basic SHALL collect a username and a password. The owner SHALL NOT choose `isSecret`, SHALL NOT name the backing variable, and SHALL NOT type `{{placeholders}}`. Empty credentials for a non-None type SHALL be rejected. The create request SHALL persist the server and the mapped secret in one transaction.
+The create-server dialog SHALL ask which authentication to use: None, Bearer token, API key header, API key query, or Basic. Only the fields required by the selected type SHALL be visible. Bearer SHALL collect a token. Header SHALL collect a header name with default `X-API-Key` and a value. Query SHALL collect a query parameter name with default `api_key`, a value, and required exposure acknowledgement. Basic SHALL collect a username and a password. The owner SHALL NOT choose storage fields, name backing values, or type binding syntax. Empty credentials for a non-None type SHALL be rejected. The create request SHALL persist the server, auth-owned secret values, and explicit authentication configuration in one transaction.
 
 #### Scenario: Bearer on create
 
 - **WHEN** the owner creates a server with type Bearer and token `sk_live_123`
-- **THEN** the server exists with a secret variable used from a default `Authorization` header, and later reads do not include `sk_live_123`
+- **THEN** the server has an explicit Bearer configuration referencing an auth-owned secret and later reads do not include `sk_live_123`
 
 #### Scenario: None on create
 
 - **WHEN** the owner creates a server with type None
-- **THEN** the server has no auth secret variable and no auth default header or query from this flow
+- **THEN** the server has no auth-owned secret value or authentication configuration from this flow
 
 #### Scenario: Header fields appear only for that type
 
 - **WHEN** the owner selects API key header
 - **THEN** the dialog shows header name and value inputs and does not show Basic username/password
+
+#### Scenario: Query auth requires acknowledgement
+
+- **WHEN** the owner selects API key query without acknowledging URL exposure
+- **THEN** creation is rejected before any server or secret is written
 
 ### Requirement: Studio Settings expose the same authentication recipe
 
@@ -389,7 +423,7 @@ The Settings Auth card SHALL edit an explicit auth configuration with owned secr
 
 ### Requirement: Connection test runs only when the owner asks
 
-The SPA SHALL NOT probe connectivity as a side effect of creating a server. Create success and the Settings Auth card SHALL offer an explicit Test connection control that calls the existing probe.
+The SPA SHALL NOT probe connectivity as a side effect of creating a server. Create success and the Settings Auth card SHALL offer an explicit Test connection control that calls the existing probe using the committed common entries and explicit authentication configuration.
 
 #### Scenario: Create does not auto-test
 
@@ -399,7 +433,7 @@ The SPA SHALL NOT probe connectivity as a side effect of creating a server. Crea
 #### Scenario: Settings test uses current auth
 
 - **WHEN** the owner has saved Bearer auth and clicks Test connection
-- **THEN** the probe sends the rendered default Authorization header
+- **THEN** the probe sends the protected Authorization header resolved from the committed auth-owned secret
 
 ### Requirement: Studio playground shows upstream HTTP results
 
@@ -415,18 +449,9 @@ When playground invoke returns an executor result (including non-2xx `httpStatus
 - **WHEN** the owner selects a tool with `enabled` false
 - **THEN** invoke is disabled and the copy states the tool is disabled
 
-### Requirement: Unresolved template errors name the placeholder
-
-When a playground or studio request fails with `MCP_TEMPLATE_UNRESOLVED`, the SPA SHALL show localized copy (en and es) that includes the unresolved placeholder name. The name SHALL come from structured error details, not from parsing the English server `message`.
-
-#### Scenario: Playground toast names the missing placeholder
-
-- **WHEN** invoke fails because query placeholder `limit` cannot be resolved
-- **THEN** the owner sees an error that includes `limit` in the active locale
-
 ### Requirement: Studio shows an effective request preview
 
-Before enabling a tool, the SPA SHALL submit the unsaved typed request definition to the same backend compiler used by persistence. The preview SHALL show the compiled method, URL shape, query, headers, and body with secret values redacted, inherited common entries, protected auth injection, omitted optional entries, and location-aware issues. Preview SHALL perform no writes and SHALL NOT translate the definition through legacy templates.
+Before enabling a tool, the SPA SHALL submit the unsaved typed request definition to the same backend compiler used by persistence. The preview SHALL show the compiled method, URL shape, query, headers, and body with secret values redacted, inherited common entries, protected auth injection, omitted optional entries, and location-aware issues. Preview SHALL perform no writes and SHALL compile the submitted definition directly.
 
 #### Scenario: Preview matches subsequent save
 

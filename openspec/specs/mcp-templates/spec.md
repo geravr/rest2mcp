@@ -2,9 +2,28 @@
 
 ## Purpose
 
-Server variables with secrecy, request templates with context-aware escaping, declared tool params, and server-level default headers/query — the model that lets one studio express any REST API without per-auth-scheme special cases.
+Server values with explicit `kind`/`owner` secrecy, versioned typed request definitions with context-aware escaping, declared tool params, and ordered server-level common entries — the single canonical model that lets one studio express any REST API without per-auth-scheme special cases or legacy compatibility projections.
 
 ## Requirements
+
+### Requirement: Canonical MCP authoring state is structurally complete
+
+The system SHALL persist MCP authoring state using only versioned request definitions, canonical compiled artifacts, ordered common entries, explicit authentication configuration, and server values with non-null `kind` and `owner`. The persistence model SHALL NOT contain alternate request-template projections, default string maps, boolean secrecy aliases, or a legacy compile status. Config server values SHALL use readable value storage, secret server values SHALL use encrypted storage, and the unused storage form SHALL be empty.
+
+#### Scenario: New records contain canonical state only
+
+- **WHEN** a server and typed tool are created successfully
+- **THEN** their rows contain the canonical typed fields and no alternate compatibility representation is written
+
+#### Scenario: Server value storage matches its kind
+
+- **WHEN** a config value and a secret value are persisted
+- **THEN** the config uses readable storage only and the secret uses encrypted storage only
+
+#### Scenario: Structurally incomplete tool cannot become runnable
+
+- **WHEN** a tool lacks a valid request definition or canonical compiled artifact
+- **THEN** it cannot be enabled, advertised, or invoked
 
 ### Requirement: Owner can manage server variables
 
@@ -32,17 +51,17 @@ The system SHALL let the owner manage server values scoped to an owned server. E
 
 ### Requirement: Requests are defined as templates
 
-A tool SHALL store a versioned request definition as its canonical authoring source, composed of literal, server-value, and agent-input bindings for ordered path segments, query entries, headers, form fields, and body nodes. Tool create, update, duplicate, and preview commands SHALL accept this definition directly and SHALL reject a payload that mixes it with legacy template fields. Literal bindings SHALL never be rescanned for placeholders. JSON bodies SHALL use typed recursive nodes rather than string substitution. Raw advanced bodies SHALL replace only explicitly declared binding ids. GET and HEAD definitions SHALL reject bodies.
+A tool SHALL store a versioned request definition as its only authoring source, composed of literal, server-value, and agent-input bindings for ordered path segments, query entries, headers, form fields, and body nodes. Tool create, update, duplicate, and preview commands SHALL accept this definition directly and SHALL reject unknown authoring fields. Literal bindings SHALL never be scanned for binding syntax. JSON bodies SHALL use typed recursive nodes rather than string substitution. Raw advanced bodies SHALL replace only explicitly declared binding ids. GET and HEAD definitions SHALL reject bodies.
 
 #### Scenario: Typed command is persisted without inference
 
-- **WHEN** an author submits a literal containing `{{api_token}}`, a server-value binding by id, and an agent-input binding by id
+- **WHEN** an author submits literal text containing braces, a server-value binding by id, and an agent-input binding by id
 - **THEN** the stored request definition preserves all three sources exactly without classifying them by text
 
-#### Scenario: Mixed authoring contracts are rejected
+#### Scenario: Unknown authoring field is rejected
 
-- **WHEN** a create or update command includes both `requestDefinition` and legacy `pathTemplate` or `params`
-- **THEN** validation rejects the command and writes nothing
+- **WHEN** a create or update command includes a field outside the typed command schema
+- **THEN** validation rejects the command before compilation and writes nothing
 
 #### Scenario: Ordered repeated query entries remain distinct
 
@@ -124,7 +143,7 @@ Each tool SHALL persist each agent input once with an opaque definition-local id
 
 ### Requirement: Server default headers and query
 
-A server SHALL persist ordered common header/query entries as the canonical `commonEntries` definition using explicit literal or server-value bindings with stable entry ids. Studio and Platform writes SHALL submit this typed shape directly and SHALL NOT reconstruct it from legacy string maps. Agent-input bindings are forbidden. An update SHALL compile every affected enabled tool against the candidate entries before commit; if any tool becomes invalid, the update SHALL fail atomically with per-tool diagnostics. Auth-owned keys remain protected and are injected after ordinary entries.
+A server SHALL persist ordered common header/query entries as its only server-wide request definition, using explicit literal or server-value bindings with stable entry ids. Studio and Platform writes SHALL submit this typed shape directly. Agent-input bindings are forbidden. An update SHALL compile every affected enabled tool against the candidate entries before commit; if any tool becomes invalid, the update SHALL fail atomically with per-tool diagnostics. Auth-owned keys remain protected and are injected after ordinary entries.
 
 #### Scenario: Common entry keeps its source
 
@@ -191,17 +210,27 @@ The system SHALL persist authentication as an explicit auth configuration refere
 
 ### Requirement: Variable update can rotate value and secrecy
 
-The system SHALL accept an owner update of an existing variable by `name` that replaces the stored value and MAY set `isSecret`. Secret values SHALL remain write-only in the response (`name`, `isSecret`, `hasValue` only). Turning a secret variable into a non-secret SHALL require a new value in the same request. Turning a non-secret variable into a secret MAY encrypt the submitted value (including the previously readable value). A secret variable SHALL NOT accept an update that omits `value` while requesting `isSecret: false`.
+The system SHALL update an existing server value by stable id while treating `kind` (`config` or `secret`) as the only secrecy classification and preserving its `owner`. Secret values SHALL remain write-only in responses. Turning a secret into a config SHALL require a new value in the same request. Turning a config into a secret MAY encrypt either a newly submitted value or its currently readable value. Generic value editing SHALL NOT change auth ownership.
 
 #### Scenario: Rotate secret keeps write-only response
 
 - **WHEN** the owner updates secret `api_token` with a new value
 - **THEN** the stored ciphertext changes and the response does not include the new value
 
-#### Scenario: Clear secrecy without a value is rejected
+#### Scenario: Change secret to config requires replacement
 
-- **WHEN** the owner updates secret `api_token` with `isSecret: false` and no value
-- **THEN** the system rejects the request and the variable remains secret
+- **WHEN** the owner changes secret `api_token` to kind `config` without submitting a new value
+- **THEN** the system rejects the request and the value remains secret
+
+#### Scenario: Change config to secret clears readable storage
+
+- **WHEN** the owner changes a config value to kind `secret`
+- **THEN** the resulting value is encrypted and its prior readable storage is removed
+
+#### Scenario: Generic edit cannot adopt auth ownership
+
+- **WHEN** a manual server value is edited through the ordinary value command
+- **THEN** it remains manual and cannot become auth-owned through that command
 
 ### Requirement: Deleting a variable does not rewrite templates
 
@@ -216,30 +245,6 @@ Deleting a server value SHALL be rejected while any tool, common request value, 
 
 - **WHEN** no definition references a config value
 - **THEN** the owner can delete it without rewriting any tool
-
-### Requirement: Legacy template compilation is explicit
-
-The system SHALL run legacy template analysis only for a record or explicit compatibility command that lacks a typed request definition. It SHALL convert only unambiguous bindings, preserve legacy source material, and mark ambiguous or unsafe tools invalid and disabled with actionable diagnostics. After a typed definition is saved, reads, previews, edits, and execution SHALL NOT re-run origin inference even when server-value names change. A typed definition SHALL produce legacy compatibility fields only when the projection is semantically lossless.
-
-#### Scenario: Typed record bypasses legacy inference
-
-- **WHEN** a typed record contains fixed text matching a newly created server-value name
-- **THEN** loading or resaving the record keeps the fixed binding and does not invoke name-based analysis
-
-#### Scenario: Ambiguous legacy name is disabled
-
-- **WHEN** legacy placeholder `name` matches both stored param metadata and a server value
-- **THEN** compatibility analysis leaves the tool disabled and records a diagnostic requiring owner selection
-
-#### Scenario: Lossy projection is not approximated
-
-- **WHEN** a typed definition contains semantics that legacy template fields cannot represent safely
-- **THEN** the typed definition remains canonical and the system marks it non-projectable instead of writing an approximate legacy request
-
-#### Scenario: Unambiguous legacy tool is migrated
-
-- **WHEN** every legacy placeholder has exactly one valid source and all compiler checks pass
-- **THEN** the compatibility flow produces an equivalent typed definition for owner acceptance or backfill
 
 ### Requirement: Dependent compiled plans change atomically
 
