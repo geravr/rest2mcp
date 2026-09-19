@@ -1,0 +1,1 @@
+ALTER TABLE "mcp_tool" ADD COLUMN "title" text;

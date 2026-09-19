@@ -33,6 +33,8 @@ export type McpToolParam = {
   minLength?: number;
   maxLength?: number;
   pattern?: string;
+  /** Supported string format preserved in the agent-visible schema. */
+  format?: "date" | "date-time" | "email" | "uri" | "uuid";
   enum?: Array<string | number | boolean>;
   examples?: unknown[];
   allowEmpty?: boolean;
@@ -64,6 +66,8 @@ export const mcpTool = pgTable(
       .notNull()
       .references(() => mcpServer.id, { onDelete: "cascade" }),
     name: text().notNull(),
+    /** Human-facing agent title; required before a tool can be enabled. */
+    title: text(),
     description: text(),
     method: text().notNull(),
     pathTemplate: text().notNull(),
