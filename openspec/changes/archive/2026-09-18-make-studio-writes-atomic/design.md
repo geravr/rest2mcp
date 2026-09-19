@@ -50,13 +50,13 @@ External network calls, telemetry export, and object deletion never occur while 
 
 Commands produce an in-memory candidate aggregate, compile its affected enabled tools, and persist the candidate plus compiled plans in the same transaction. The invalidation rules are:
 
-| Change | Compilation closure |
-| --- | --- |
-| Tool request definition, bindings, enabled state, or agent parameters | That tool; promotion is evaluated in the same command |
-| Base URL, allowed hosts, authentication, or common entries | Every enabled tool |
-| Variable kind, ownership, or removal | Every enabled tool that references it, plus auth/common validation; recompiling all enabled tools is allowed |
-| Variable plaintext/ciphertext rotation with unchanged metadata | No structural recompile; reference and secret invariants are still validated |
-| Description, display name, or icon | No tool recompile |
+| Change                                                                | Compilation closure                                                                                          |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Tool request definition, bindings, enabled state, or agent parameters | That tool; promotion is evaluated in the same command                                                        |
+| Base URL, allowed hosts, authentication, or common entries            | Every enabled tool                                                                                           |
+| Variable kind, ownership, or removal                                  | Every enabled tool that references it, plus auth/common validation; recompiling all enabled tools is allowed |
+| Variable plaintext/ciphertext rotation with unchanged metadata        | No structural recompile; reference and secret invariants are still validated                                 |
+| Description, display name, or icon                                    | No tool recompile                                                                                            |
 
 If any enabled tool in the closure is invalid, the command fails and persists neither the source change nor any compiled plan. Disabled invalid drafts may retain explicit invalid compile diagnostics where existing product behavior allows them. Adding or enabling the first valid tool and promoting a draft server is one commit. This design does not introduce automatic demotion.
 

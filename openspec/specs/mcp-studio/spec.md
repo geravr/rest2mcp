@@ -8,12 +8,12 @@ Owner-scoped control plane for mapping REST APIs to hosted MCP tools: servers, t
 
 ### Requirement: Owner can create and list MCP servers
 
-The system SHALL let an authenticated user create MCP servers they own, each with a name, optional description, optional `iconImage` (a storage access URL or null), required HTTPS or HTTP `baseUrl`, and a slug unique among that user's servers. The stored `baseUrl` SHALL preserve any path prefix (e.g. `https://api.example.com/v2` keeps `/v2`) and SHALL strip query and fragment. Collection list endpoints SHALL return the `@repo/core` pagination envelope (`items`, `page`, `pageSize`, `total`). Each list item SHALL carry the traffic light, enabled tool count, the timestamp of the most recent call log (or null), and `iconImage`. A user SHALL NOT read or mutate another user's server.
+The system SHALL let an authenticated user create MCP servers they own, each with a name, optional description, an optional server icon asset (`iconAssetId`, with its resolved `iconUrl`), required HTTPS or HTTP `baseUrl`, and a slug unique among that user's servers. The stored `baseUrl` SHALL preserve any path prefix (e.g. `https://api.example.com/v2` keeps `/v2`) and SHALL strip query and fragment. Collection list endpoints SHALL return the `@repo/core` pagination envelope (`items`, `page`, `pageSize`, `total`). Each list item SHALL carry the traffic light, enabled tool count, the timestamp of the most recent call log (or null), and its resolved `iconUrl`. A user SHALL NOT read or mutate another user's server.
 
 #### Scenario: Create server
 
 - **WHEN** the owner creates a server with name "CRM" and base URL `https://api.example.com`
-- **THEN** the system stores a server owned by that user, derives `allowedHosts` to include `api.example.com`, sets `iconImage` to null, and returns the server id and slug
+- **THEN** the system stores a server owned by that user, derives `allowedHosts` to include `api.example.com`, leaves `iconAssetId` null, and returns the server id and slug
 
 #### Scenario: Path prefix preserved
 
@@ -28,7 +28,7 @@ The system SHALL let an authenticated user create MCP servers they own, each wit
 #### Scenario: List items carry activity metadata
 
 - **WHEN** the owner lists servers and one server has three enabled tools and a call logged yesterday
-- **THEN** that item reports an enabled tool count of 3, a `lastCallAt` matching that log, and its current `iconImage`
+- **THEN** that item reports an enabled tool count of 3, a `lastCallAt` matching that log, and its current `iconUrl`
 
 #### Scenario: Slug conflict
 
@@ -37,40 +37,40 @@ The system SHALL let an authenticated user create MCP servers they own, each wit
 
 ### Requirement: Owner can set a custom server icon
 
-The system SHALL let the owner set or clear `iconImage` on a server they own via `updateServer`. The value SHALL be null or a URL pointing at an object the owner uploaded through the existing authenticated storage upload flow under their user scope. The system SHALL NOT accept arbitrary external URLs on update. Clearing `iconImage` SHALL revert the server to automatic icon resolution in the SPA.
+The system SHALL let the owner attach or clear a server icon via `updateServer` using an opaque, owner-scoped storage asset id. The asset SHALL be attached only when it belongs to the caller, has the icon purpose, is `ready`, and has not expired; attaching it SHALL mark it `attached` and the resolved `iconUrl` SHALL be returned by `getServer` and list responses. The system SHALL NOT accept or read a legacy icon URL field. Clearing the icon SHALL detach the asset for durable cleanup and revert the SPA to automatic icon resolution.
 
-#### Scenario: Upload and persist icon
+#### Scenario: Attach an uploaded asset
 
-- **WHEN** the owner uploads a PNG to storage and updates the server with the returned access URL
-- **THEN** subsequent `getServer` and list responses include that `iconImage` value
+- **WHEN** the owner uploads a PNG through the authenticated storage flow and updates the server with the returned `assetId`
+- **THEN** subsequent `getServer` and list responses include the resolved `iconUrl` for that asset
 
 #### Scenario: Remove custom icon
 
-- **WHEN** the owner updates the server with `iconImage: null`
-- **THEN** the stored value is null and the SPA shows the automatic fallback icon
+- **WHEN** the owner updates the server with `iconAssetId: null`
+- **THEN** the server icon is detached for cleanup and the SPA shows the automatic fallback icon
 
-#### Scenario: Reject foreign storage URL
+#### Scenario: Reject foreign or unready asset
 
-- **WHEN** the owner updates `iconImage` to a storage URL scoped to another user
+- **WHEN** the owner submits an asset id owned by another user, a staging asset, an expired asset, or a legacy icon URL field
 - **THEN** the system rejects the request with a validation error and does not change the server
 
 ### Requirement: Server icon display uses custom image or DiceBear rings
 
-The SPA SHALL render each owned server's icon using, in order: (1) `iconImage` when set, otherwise (2) a locally generated DiceBear **rings** SVG data URI seeded by the server id. The SPA SHALL NOT use Google's s2 favicon service or text initials as the automatic fallback.
+The SPA SHALL render each owned server's icon using, in order: (1) the resolved `iconUrl` of the attached asset when set, otherwise (2) a locally generated DiceBear **rings** SVG data URI seeded by the server id. The SPA SHALL NOT use Google's s2 favicon service or text initials as the automatic fallback.
 
 #### Scenario: Custom icon wins
 
-- **WHEN** a server has `iconImage` set
-- **THEN** list and detail views show that image for the server icon
+- **WHEN** a server has an attached icon asset
+- **THEN** list and detail views show its resolved `iconUrl` for the server icon
 
 #### Scenario: Rings fallback is deterministic
 
-- **WHEN** a server has no `iconImage`
-- **THEN** list and detail views show the same rings icon for that server id on every render until an icon is uploaded
+- **WHEN** a server has no attached icon asset
+- **THEN** list and detail views show the same rings icon for that server id on every render until an icon is attached
 
 #### Scenario: Rings fallback replaces initials
 
-- **WHEN** a server has no `iconImage` and an unparseable `baseUrl`
+- **WHEN** a server has no attached icon asset and an unparseable `baseUrl`
 - **THEN** the SPA still shows the rings icon seeded by server id (not text initials)
 
 ### Requirement: Owner can add REST tools manually
@@ -499,3 +499,89 @@ Before enabling a tool, Studio SHALL provide a backend-generated preview of the 
 
 - **WHEN** contract compilation fails
 - **THEN** preview returns location-aware diagnostics without modifying the tool, compiled plan, server values, or enabled state
+
+### Requirement: Studio configuration commands are atomic
+
+The system SHALL execute each server-scoped Studio mutation as one transaction that includes ownership validation, invariant checks, all related database writes, and the server revision increment.
+
+#### Scenario: Tool creation promotes a draft server atomically
+
+- **WHEN** an owner creates the first enabled valid tool on a draft server
+- **THEN** the tool insertion, compiled plan, draft-to-live promotion, and revision increment commit together
+- **AND** a failure in any step leaves the tool absent and the server unchanged
+
+#### Scenario: Concurrent tool creation respects the capacity limit
+
+- **WHEN** concurrent create or duplicate commands would exceed the maximum tool count
+- **THEN** the system serializes the capacity check for that server
+- **AND** only commands that fit within the limit commit
+
+#### Scenario: Server deletion excludes concurrent child writes
+
+- **WHEN** a server deletion races with a tool, variable, authentication, token, or settings mutation
+- **THEN** the commands serialize on the same server aggregate
+- **AND** the final state is either the complete non-deleted mutation followed by deletion or no server aggregate at all
+
+### Requirement: Studio rejects stale configuration writes
+
+The system SHALL require the last observed server configuration revision for mutations of an existing server and SHALL reject a stale revision without changing persistent state.
+
+#### Scenario: Current revision commits once
+
+- **WHEN** a mutation supplies the current configuration revision and passes validation
+- **THEN** the system commits the command and increments the server revision exactly once
+- **AND** the response includes the new revision
+
+#### Scenario: Stale form cannot overwrite a newer change
+
+- **WHEN** a Studio form submits an expected revision older than the current server revision
+- **THEN** the system returns the stable `MCP_WRITE_CONFLICT` application code and the current revision
+- **AND** no portion of the stale mutation is persisted
+
+#### Scenario: Studio recovers visibly from a conflict
+
+- **WHEN** the SPA receives `MCP_WRITE_CONFLICT`
+- **THEN** it reloads the current server aggregate and presents localized conflict guidance
+- **AND** it does not report the stale mutation as successful
+
+### Requirement: Runtime readers observe one committed server revision
+
+The system SHALL materialize gateway tool listings and invocation configuration from a single committed database snapshot before performing external work.
+
+#### Scenario: Invocation overlaps a configuration commit
+
+- **WHEN** an invocation loads configuration while a Studio command is committing
+- **THEN** the invocation uses either the complete previous revision or the complete new revision
+- **AND** it never combines server settings, compiled plans, authentication, or values from different revisions
+
+#### Scenario: Upstream HTTP does not hold the snapshot transaction
+
+- **WHEN** invocation preparation has materialized a valid immutable snapshot
+- **THEN** the read transaction ends before the upstream HTTP request begins
+
+### Requirement: Server icon changes are commit-aware
+
+The system SHALL represent server icons only as user-owned staged assets referenced by opaque asset id and SHALL make attachment and replacement visible only through a committed server mutation. Server mutation contracts SHALL NOT accept or read a legacy icon URL field.
+
+#### Scenario: Legacy icon URL is not accepted
+
+- **WHEN** a caller submits the superseded icon URL field instead of a ready owned asset id
+- **THEN** validation rejects the request and no compatibility write or fallback read is performed
+
+#### Scenario: Uploaded asset is not attached after a failed mutation
+
+- **WHEN** an icon upload succeeds but the server mutation fails or conflicts
+- **THEN** the current server icon remains unchanged
+- **AND** the unattached asset remains eligible for durable garbage collection
+
+#### Scenario: Replacing an icon preserves the committed icon until commit
+
+- **WHEN** an owner replaces a server icon
+- **THEN** attaching the new asset and marking the prior asset for deletion commit with the server revision increment
+- **AND** object deletion starts only after the database commit
+
+#### Scenario: Object deletion failure is recoverable
+
+- **WHEN** deletion of a replaced or abandoned object fails
+- **THEN** the committed server configuration remains valid
+- **AND** durable cleanup state retains enough information for an idempotent retry without exposing another user's object

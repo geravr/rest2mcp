@@ -92,15 +92,6 @@ Platform MCP SHALL never accept new plaintext secret values or raw auth credenti
 - **WHEN** a Platform authoring command includes a new plaintext credential instead of an existing secret id
 - **THEN** the operation is rejected and directs the owner to the secure Studio secret flow
 
-### Requirement: Platform token replacement is atomic
-
-Creating a replacement platform token SHALL revoke previous active tokens and insert the new scoped token in one transaction. If creation fails, the previous token SHALL remain active.
-
-#### Scenario: Replacement insert fails
-
-- **WHEN** database insertion of a new token fails
-- **THEN** the existing active token is not revoked
-
 ### Requirement: Platform tool authoring exposes typed bindings
 
 Platform MCP SHALL describe tool authoring with discriminated literal, server-value, and agent-input bindings, stable definition-local ids, an agent-input registry, and typed body variants. Responses SHALL return the canonical stored request definition and location-aware compile issues so an AI agent can repair a draft without parsing legacy placeholder strings or English error messages.
@@ -167,3 +158,62 @@ Every completed Platform MCP tool call SHALL return MCP `content` text and `stru
 
 - **WHEN** an unexpected exception occurs inside a Platform operation
 - **THEN** the result is a redacted internal-error envelope that validates against the advertised output schema
+
+### Requirement: Platform mutations share Studio write semantics
+
+The system SHALL route Platform MCP mutations through the same atomic, revision-aware service commands used by the first-party Studio and SHALL not maintain a weaker agent-specific write path.
+
+#### Scenario: Agent mutation commits completely
+
+- **WHEN** an authorized Platform MCP command supplies the current server revision and valid input
+- **THEN** all related configuration, compilation, lifecycle, and revision writes commit together
+- **AND** the structured result includes the new revision without secret values
+
+#### Scenario: Agent retry after an unknown outcome is safe
+
+- **WHEN** an agent retries a server-scoped mutation with the same previously observed revision after losing the first response
+- **THEN** the retry cannot create a duplicate or overwrite a committed result
+- **AND** a revision conflict directs the agent to reread the aggregate before taking further action
+
+#### Scenario: Concurrent browser and agent edits conflict explicitly
+
+- **WHEN** a Studio user and Platform agent mutate the same server from one observed revision
+- **THEN** at most one command commits from that revision
+- **AND** the losing command receives `MCP_WRITE_CONFLICT` with no partial state or secret material
+
+### Requirement: Platform PAT rotation is concurrency-safe
+
+The system SHALL rotate one explicitly selected active Platform PAT using a user-locked compare-and-swap operation. The system SHALL permit multiple unrelated named PATs to remain active, while database invariants SHALL prevent duplicate hashes and duplicate active names rather than enforcing a singleton token.
+
+#### Scenario: Concurrent selected-token rotation has one winner
+
+- **WHEN** two rotation commands name the same previously observed active Platform PAT
+- **THEN** only one successor rotation commits
+- **AND** the other command returns a conflict without revoking the winner or any unrelated PAT
+
+#### Scenario: Creating another PAT preserves existing PATs
+
+- **WHEN** the owner creates a distinct PAT within the active-token limit
+- **THEN** the new PAT commits without revoking or modifying unrelated active PATs
+
+#### Scenario: Token failure returns no recoverable plaintext
+
+- **WHEN** token creation or replacement rolls back or its response is lost
+- **THEN** no plaintext token is stored in a command receipt, log, error, or telemetry event
+- **AND** the caller must inspect token metadata and explicitly revoke or create again
+
+### Requirement: Platform conflicts are recoverable agent outcomes
+
+The system SHALL expose write conflicts and transient fully rolled-back database failures as stable structured Platform MCP outcomes that distinguish reread-required conflicts from retryable infrastructure failures.
+
+#### Scenario: Stale revision requires reread
+
+- **WHEN** a Platform mutation uses a stale revision
+- **THEN** the outcome identifies the conflict code, current revision, and affected server
+- **AND** it does not instruct the agent to repeat the same mutation blindly
+
+#### Scenario: Fully rolled-back transient failure is retryable
+
+- **WHEN** a transient database failure is known to have rolled back the entire command and automatic retries are exhausted
+- **THEN** the outcome marks the failure as retryable
+- **AND** it contains no partial-success claim or secret-bearing diagnostic
