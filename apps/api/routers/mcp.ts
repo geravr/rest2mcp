@@ -215,9 +215,10 @@ export const mcpRouter = router({
 
   tools: protectedProcedure
     .input(
-      serverIdInput
-        .extend(paginationInputSchema.shape)
-        .extend({ group: toolGroupFilterSchema }),
+      serverIdInput.extend(paginationInputSchema.shape).extend({
+        group: toolGroupFilterSchema,
+        q: z.string().max(200).optional(),
+      }),
     )
     .query(({ ctx, input }) =>
       listTools(ctx.db, ctx.user.id, input.serverId, input),

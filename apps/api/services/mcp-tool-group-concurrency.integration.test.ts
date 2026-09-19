@@ -493,6 +493,56 @@ describeIntegration("tool group concurrency and pagination parity", () => {
     expect(filtered.items.some((tool) => tool.groupId === groupB)).toBe(false);
   });
 
+  it("filters by name with one predicate for rows and count", async () => {
+    const serverId = await createServer(ownerId, "Name search");
+    const groupId = await insertGroup(serverId, "Search Group");
+    const baseTime = new Date("2026-02-01T00:00:00.000Z").getTime();
+    const seeded = [
+      { name: "fb_get_ad_account", groupId },
+      { name: "fb_pause_ad", groupId },
+      { name: "fb_get_ad_accounts", groupId: null },
+      { name: "100%_reliable", groupId: null },
+    ];
+    let index = 0;
+    for (const row of seeded) {
+      index += 1;
+      await insertTool(serverId, {
+        name: row.name,
+        groupId: row.groupId,
+        createdAt: new Date(baseTime + index * 1000),
+      });
+    }
+
+    const search = (q: string | undefined, group?: string) =>
+      listTools(db as never, ownerId, serverId, {
+        page: 1,
+        pageSize: PAGE_SIZE,
+        q,
+        group,
+      });
+
+    const matching = await search("AD_ACC");
+    expect(matching.total).toBe(2);
+    expect(matching.items.map((tool) => tool.name).sort()).toEqual([
+      "fb_get_ad_account",
+      "fb_get_ad_accounts",
+    ]);
+
+    const combined = await search("fb_", groupId);
+    expect(combined.total).toBe(2);
+    expect(combined.items.every((tool) => tool.groupId === groupId)).toBe(true);
+
+    const literal = await search("100%_");
+    expect(literal.total).toBe(1);
+    expect(literal.items[0]?.name).toBe("100%_reliable");
+
+    for (const blank of [undefined, "", "   "]) {
+      const unfiltered = await search(blank);
+      expect(unfiltered.total).toBe(seeded.length);
+      expect(unfiltered.items).toHaveLength(seeded.length);
+    }
+  });
+
   it("conceals another owner's server and groups from every group command", async () => {
     const ownerServerId = await createServer(ownerId, "Owner server");
     const strangerServerId = await createServer(strangerId, "Stranger server");

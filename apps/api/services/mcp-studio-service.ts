@@ -16,7 +16,7 @@ import {
   type McpServer,
   type McpServerVariable,
 } from "@repo/db";
-import { and, count, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, count, desc, eq, ilike, inArray, isNull } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import {
   APP_ERROR_CODES,
@@ -46,6 +46,7 @@ import {
   type CurlImportPreview,
 } from "../lib/mcp-curl-import.js";
 import { encryptCredential } from "../lib/mcp-crypto.js";
+import { likeContainsPattern, normalizeSearchQuery } from "../lib/like.js";
 import {
   MCP_TOOL_GROUP_FILTER_ALL,
   MCP_TOOL_GROUP_FILTER_UNGROUPED,
@@ -1545,10 +1546,14 @@ export async function listTools(
   db: DB,
   userId: string,
   serverId: string,
-  input: PaginationInput & { group?: string },
+  input: PaginationInput & { group?: string; q?: string },
 ) {
   await requireOwnedServer(db, userId, serverId);
-  const conditions = [eq(mcpTool.serverId, serverId)];
+  const q = normalizeSearchQuery(input.q);
+  const conditions = [
+    eq(mcpTool.serverId, serverId),
+    q ? ilike(mcpTool.name, likeContainsPattern(q)) : undefined,
+  ];
   if (input.group === MCP_TOOL_GROUP_FILTER_UNGROUPED) {
     conditions.push(isNull(mcpTool.groupId));
   } else if (
