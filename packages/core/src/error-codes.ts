@@ -74,6 +74,29 @@ export const APP_ERROR_CODES = {
   /** A known fully-rolled-back transient database failure after retries were exhausted. */
   MCP_TRANSIENT_WRITE_FAILURE: "MCP_TRANSIENT_WRITE_FAILURE",
 
+  /** The draft contains blocking readiness errors and cannot be published. */
+  MCP_PUBLISH_NOT_READY: "MCP_PUBLISH_NOT_READY",
+  /** The draft changed after the caller observed it; re-preview before publishing. */
+  MCP_PUBLISH_STALE_DRAFT: "MCP_PUBLISH_STALE_DRAFT",
+  /** The active published revision changed after the caller observed it. */
+  MCP_PUBLISH_STALE_REVISION: "MCP_PUBLISH_STALE_REVISION",
+  /** The candidate fingerprint no longer matches the draft that was previewed. */
+  MCP_PUBLISH_CANDIDATE_CHANGED: "MCP_PUBLISH_CANDIDATE_CHANGED",
+  /** Preview warnings for the exact candidate fingerprint were not acknowledged. */
+  MCP_PUBLISH_WARNINGS_UNACKNOWLEDGED: "MCP_PUBLISH_WARNINGS_UNACKNOWLEDGED",
+  /** The canonical candidate is identical to the active revision. */
+  MCP_PUBLISH_NO_CHANGES: "MCP_PUBLISH_NO_CHANGES",
+  /** A `publishRequestId` was already committed with different content. */
+  MCP_PUBLISH_IDEMPOTENCY_CONFLICT: "MCP_PUBLISH_IDEMPOTENCY_CONFLICT",
+  /** A referenced secret slot is missing or structurally incompatible. */
+  MCP_PUBLISH_MISSING_SECRET: "MCP_PUBLISH_MISSING_SECRET",
+  /** The requested published revision id does not exist for the owner server. */
+  MCP_REVISION_NOT_FOUND: "MCP_REVISION_NOT_FOUND",
+  /** The requested revision cannot be restored to the draft as-is. */
+  MCP_REVISION_NOT_RESTORABLE: "MCP_REVISION_NOT_RESTORABLE",
+  /** Deleting this secret slot would break the active published revision. */
+  MCP_ACTIVE_SECRET_IN_USE: "MCP_ACTIVE_SECRET_IN_USE",
+
   /** Requested Platform PAT scopes are unknown, duplicated, or dependency-invalid. */
   MCP_PAT_SCOPE_INVALID: "MCP_PAT_SCOPE_INVALID",
   /** A high-risk Platform grant requires a fresh, matching step-up approval. */
@@ -112,6 +135,22 @@ export type AppErrorDetails = {
   currentRevision?: number;
   /** Server aggregate affected by a structured conflict, when known. */
   serverId?: string;
+  /** Observed publishable draft revision at the time of a publication conflict. */
+  draftRevision?: number;
+  /** Active published revision id at the time of a publication conflict. */
+  publishedRevisionId?: string | null;
+  /** Active published revision number at the time of a publication conflict. */
+  publishedRevisionNumber?: number | null;
+  /** Canonical aggregate fingerprint of the current draft candidate. */
+  candidateFingerprint?: string;
+  /** Canonical aggregate fingerprint of the active published revision. */
+  currentFingerprint?: string;
+  /** Warning codes that must be acknowledged for the candidate fingerprint. */
+  warningCodes?: string[];
+  /** Safe tool names affected by a conflict, readiness error, or destructive change. */
+  toolNames?: string[];
+  /** Whether the client should refresh published contract metadata before retrying. */
+  refreshRequired?: boolean;
   /** Whether a fully-rolled-back infrastructure failure may be retried safely. */
   retryable?: boolean;
   /** Platform policy version involved in a grant validation failure. */
