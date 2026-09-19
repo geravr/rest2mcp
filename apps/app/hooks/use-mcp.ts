@@ -122,9 +122,20 @@ export function useMcpCallLogs(serverId: string, input: PaginationInput) {
   });
 }
 
-export function usePlatformToken() {
+export function usePlatformTokens(
+  input: { page?: number; pageSize?: 10 | 20 | 50 } = {},
+) {
   return useQuery({
-    ...api.mcp.platformToken.queryOptions(),
+    ...api.mcp.platformTokens.queryOptions(input),
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function usePlatformSecurityEvents(
+  input: { page?: number; pageSize?: 10 | 20 | 50 } = {},
+) {
+  return useQuery({
+    ...api.mcp.platformSecurityEvents.queryOptions(input),
     placeholderData: keepPreviousData,
   });
 }
@@ -148,7 +159,10 @@ function useInvalidateMcp() {
       queryClient.invalidateQueries(api.mcp.serverCommon.pathFilter()),
       queryClient.invalidateQueries(api.mcp.toolEditorState.pathFilter()),
       queryClient.invalidateQueries(api.mcp.callLogs.pathFilter()),
-      queryClient.invalidateQueries(api.mcp.platformToken.pathFilter()),
+      queryClient.invalidateQueries(api.mcp.platformTokens.pathFilter()),
+      queryClient.invalidateQueries(
+        api.mcp.platformSecurityEvents.pathFilter(),
+      ),
     ]);
   };
 }
@@ -519,6 +533,25 @@ export function useCreatePlatformToken() {
   });
 }
 
+export function useRotatePlatformToken() {
+  const { t } = useTranslations();
+  const handleError = useMcpMutationError();
+  const invalidate = useInvalidateMcp();
+  const baseOptions = api.mcp.rotatePlatformToken.mutationOptions();
+  return useMutation({
+    ...baseOptions,
+    onSuccess: async (...args) => {
+      baseOptions.onSuccess?.(...args);
+      await invalidate();
+      toast.success(t.toasts.platform.tokenCreated);
+    },
+    onError: (error, ...rest) => {
+      baseOptions.onError?.(error, ...rest);
+      handleError(error);
+    },
+  });
+}
+
 export function useRevokePlatformToken() {
   const { t } = useTranslations();
   const handleError = useMcpMutationError();
@@ -534,6 +567,28 @@ export function useRevokePlatformToken() {
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);
       handleError(error);
+    },
+  });
+}
+
+export function useRequestPlatformStepUp() {
+  const handleError = useMcpMutationError();
+  return useMutation({
+    ...api.mcp.requestPlatformStepUp.mutationOptions(),
+    onError: (error, ...rest) => {
+      handleError(error);
+      void rest;
+    },
+  });
+}
+
+export function useVerifyPlatformStepUp() {
+  const handleError = useMcpMutationError();
+  return useMutation({
+    ...api.mcp.verifyPlatformStepUp.mutationOptions(),
+    onError: (error, ...rest) => {
+      handleError(error);
+      void rest;
     },
   });
 }

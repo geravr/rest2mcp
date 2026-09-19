@@ -136,6 +136,20 @@ export const esErrors = {
         "Este servidor cambio en otro lugar. Recarga la configuracion mas reciente e intentalo de nuevo.",
       [APP_ERROR_CODES.MCP_TRANSIENT_WRITE_FAILURE]:
         "El cambio no se guardo por un problema temporal de base de datos. Es seguro reintentar.",
+      [APP_ERROR_CODES.MCP_PAT_SCOPE_INVALID]:
+        "Estos alcances no son válidos juntos. Agrega la dependencia requerida o quita el alcance extra.",
+      [APP_ERROR_CODES.MCP_STEP_UP_REQUIRED]:
+        "Este token de alto riesgo necesita un código de confirmación por correo nuevo.",
+      [APP_ERROR_CODES.MCP_STEP_UP_EXPIRED]:
+        "Ese código de confirmación expiró o ya se usó. Solicita uno nuevo.",
+      [APP_ERROR_CODES.MCP_PAT_LIMIT_REACHED]:
+        "Alcanzaste el máximo de tokens de plataforma activos.",
+      [APP_ERROR_CODES.MCP_POLICY_CONFLICT]:
+        "La política solicitada del token no es consistente. Revisa los alcances y el modo de recursos.",
+      [APP_ERROR_CODES.MCP_RESOURCE_DENIED]:
+        "Este token no tiene permitido acceder a ese recurso.",
+      [APP_ERROR_CODES.MCP_POLICY_VERSION_UNSUPPORTED]:
+        "Este token de plataforma usa una versión de política no compatible y debe recrearse.",
 
       [APP_ERROR_CODES.ROUTE_NOT_FOUND]: "Esta ruta de API no existe.",
       [APP_ERROR_CODES.INTERNAL_ERROR]:

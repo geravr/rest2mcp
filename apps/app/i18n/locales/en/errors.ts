@@ -123,6 +123,20 @@ export const enErrors = {
         "This server changed elsewhere. Reload the latest configuration and try again.",
       [APP_ERROR_CODES.MCP_TRANSIENT_WRITE_FAILURE]:
         "The change did not save because of a temporary database issue. It is safe to retry.",
+      [APP_ERROR_CODES.MCP_PAT_SCOPE_INVALID]:
+        "These token scopes are not valid together. Add the required dependency or remove the extra scope.",
+      [APP_ERROR_CODES.MCP_STEP_UP_REQUIRED]:
+        "This high-risk token needs a fresh email confirmation code.",
+      [APP_ERROR_CODES.MCP_STEP_UP_EXPIRED]:
+        "That confirmation code expired or was already used. Request a new one.",
+      [APP_ERROR_CODES.MCP_PAT_LIMIT_REACHED]:
+        "You reached the maximum number of active platform tokens.",
+      [APP_ERROR_CODES.MCP_POLICY_CONFLICT]:
+        "The requested token policy is not consistent. Review the scopes and resource mode.",
+      [APP_ERROR_CODES.MCP_RESOURCE_DENIED]:
+        "This token is not allowed to access that resource.",
+      [APP_ERROR_CODES.MCP_POLICY_VERSION_UNSUPPORTED]:
+        "This platform token uses an unsupported policy version and must be recreated.",
 
       [APP_ERROR_CODES.ROUTE_NOT_FOUND]: "This API route does not exist.",
       [APP_ERROR_CODES.INTERNAL_ERROR]:
