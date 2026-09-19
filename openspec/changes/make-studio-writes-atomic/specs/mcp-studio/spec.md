@@ -49,7 +49,11 @@ The system SHALL materialize gateway tool listings and invocation configuration 
 - **THEN** the read transaction ends before the upstream HTTP request begins
 
 ### Requirement: Server icon changes are commit-aware
-The system SHALL represent newly uploaded server icons as user-owned staged assets and SHALL make attachment and replacement visible only through a committed server mutation.
+The system SHALL represent server icons only as user-owned staged assets referenced by opaque asset id and SHALL make attachment and replacement visible only through a committed server mutation. Server mutation contracts SHALL NOT accept or read a legacy icon URL field.
+
+#### Scenario: Legacy icon URL is not accepted
+- **WHEN** a caller submits the superseded icon URL field instead of a ready owned asset id
+- **THEN** validation rejects the request and no compatibility write or fallback read is performed
 
 #### Scenario: Uploaded asset is not attached after a failed mutation
 - **WHEN** an icon upload succeeds but the server mutation fails or conflicts
@@ -65,4 +69,3 @@ The system SHALL represent newly uploaded server icons as user-owned staged asse
 - **WHEN** deletion of a replaced or abandoned object fails
 - **THEN** the committed server configuration remains valid
 - **AND** durable cleanup state retains enough information for an idempotent retry without exposing another user's object
-

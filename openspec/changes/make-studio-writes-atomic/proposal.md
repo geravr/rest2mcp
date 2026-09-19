@@ -1,6 +1,6 @@
 ## Why
 
-Studio mutations currently mix strong transactional paths with multi-step writes whose validation, compilation, lifecycle changes, or dependent cleanup happen outside the transaction. Concurrent browser actions, Platform MCP calls, retries, and failures between statements can therefore leave inserted tools without the expected server promotion, exceed limits, retain stale compiled request plans, lose another editor's update, or orphan uploaded assets. The product needs one consistent write boundary so a successful response means the complete configuration change committed and a failure means no partial configuration became visible.
+Studio mutations mix transactional paths with multi-step writes whose validation, compilation, lifecycle changes, or cleanup happen outside the transaction. Concurrent browser actions, Platform MCP calls, retries, and failures can leave partial tools, exceed limits, retain stale plans, lose another edit, or orphan assets. The product needs one write boundary where success means the complete change committed and failure exposes no partial configuration.
 
 ## What Changes
 
@@ -12,6 +12,7 @@ Studio mutations currently mix strong transactional paths with multi-step writes
 - Strengthen token replacement and destructive server operations against concurrent writes with transactional locking and database constraints where an invariant can be enforced structurally.
 - Treat object storage as an explicit non-transactional boundary: stage icon uploads, claim the selected asset during the database commit, and reconcile unclaimed or replaced objects through durable post-commit cleanup.
 - Add failure-injection and concurrency coverage proving that commands have no partial outcomes and that Platform MCP mutations use the same service semantics as the Studio UI.
+- **BREAKING**: require revisions and opaque icon asset ids immediately across all first-party writes; remove legacy icon URLs, mutation inputs, direct write paths, dual reads/writes, and compatibility flags in the same change.
 
 Non-goals: changing tool schemas or runtime execution contracts, redesigning Studio screens, introducing a distributed transaction across PostgreSQL and object storage, or guaranteeing replay of one-time plaintext credentials after a response is lost.
 
@@ -29,8 +30,8 @@ None.
 
 ## Impact
 
-- Backend services in `apps/api/services`, Studio and Platform tRPC routers, stable application error codes, and request-plan compilation orchestration.
-- Drizzle schemas and migrations for revisions, durable asset state/cleanup, and any uniqueness constraints required to protect write invariants.
-- Studio mutation inputs and cache reconciliation in `apps/app`, primarily to send expected revisions and recover visibly from conflicts.
+- Backend services, Studio and Platform routers, stable application error codes, and request-plan compilation.
+- Drizzle schemas and a clean generated migration for revisions, durable asset state/cleanup, removal of superseded icon storage, and uniqueness constraints required to protect write invariants.
+- Studio mutation inputs and cache reconciliation to send expected revisions and recover visibly from conflicts.
 - Object-storage upload/finalization flows and background or opportunistic cleanup of staged/replaced assets.
-- Integration tests using PostgreSQL concurrency and injected failures, plus focused service/router tests for atomic rollback and secret-safe errors.
+- PostgreSQL concurrency, failure-injection, atomic rollback, and secret-safe error tests.

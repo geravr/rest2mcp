@@ -1,12 +1,12 @@
 ## 1. Persistence and Contract Foundations
 
 - [ ] 1.1 Add `configRevision` to the MCP server schema and expose it in server detail/list service result types.
-- [ ] 1.2 Add the user-owned storage-asset schema, lifecycle state constraints, indexes, and nullable server icon asset reference while retaining legacy icon reads.
-- [ ] 1.3 Add the partial database uniqueness invariant for active Platform tokens and any supporting token metadata required for compare-and-swap replacement.
+- [ ] 1.2 Add the user-owned storage-asset schema, lifecycle state constraints, indexes, and nullable server icon asset reference as the only icon source.
+- [ ] 1.3 Add multi-PAT-safe hash and active-name uniqueness plus supporting metadata for user-locked selected-token rotation without a singleton-token constraint.
 - [ ] 1.4 Add stable `MCP_WRITE_CONFLICT` and fully-rolled-back transient failure application codes with secret-safe metadata shapes in `packages/core` and the API error layer.
-- [ ] 1.5 Generate the Drizzle migration for the additive schema changes and inspect its forward and rollback safety without hand-editing generated migration SQL.
-- [ ] 1.6 Add a restartable backfill for initial server revisions and owned legacy icon URLs, leaving unparseable legacy icons readable and untouched.
-- [ ] 1.7 Add schema and backfill tests for revision defaults, asset ownership/state, icon compatibility, and the active Platform-token invariant.
+- [ ] 1.5 Generate the Drizzle migration for revisions/assets and removal of the superseded icon URL field, then inspect it without hand-editing generated SQL.
+- [ ] 1.6 Update canonical seeds and fixtures for initial revisions and asset ids, documenting reset/reseed for disposable development records instead of adding a backfill.
+- [ ] 1.7 Add schema and clean-migration tests for revision defaults, asset ownership/state, absence of icon URL storage, and multi-PAT invariants.
 
 ## 2. Server Aggregate Command Boundary
 
@@ -62,7 +62,7 @@
 - [ ] 6.5 Implement a bounded reconciler for expired staging/ready assets and `delete_pending` objects that records retryable failures.
 - [ ] 6.6 Add opportunistic post-commit reconciliation and an operator command with dry-run output, then register and document that command in the repository command sources of truth.
 - [ ] 6.7 Add tests for upload crashes before and after S3 success, failed icon mutation, cross-user asset rejection, replacement, clearing, server deletion, and repeated cleanup.
-- [ ] 6.8 Verify the legacy icon dual-read/backfill path against existing owned URLs before enabling destructive cleanup.
+- [ ] 6.8 Remove legacy icon URL validators, serializers, service branches, UI inputs, tests, and documentation; verify no runtime path reads or writes them.
 
 ## 7. Studio and Platform Mutation Contracts
 
@@ -87,8 +87,9 @@
 
 - [ ] 9.1 Document the server aggregate, lock order, transaction-client-only rule, runtime snapshot boundary, and no-external-I/O invariant in `apps/api/AGENTS.md`.
 - [ ] 9.2 Add instrumentation for aggregate lock wait/duration, revision conflicts, compile duration, transient retries, and oldest pending asset cleanup age without secret-bearing labels.
-- [ ] 9.3 Exercise the compatibility switch by first exposing revisions, then updating first-party clients, then enforcing required revisions in tests.
-- [ ] 9.4 Run the backfill and asset reconciler in dry-run mode against representative data and record rollback checks before enabling object deletion.
+- [ ] 9.3 Enforce required revisions and asset-id-only icon writes immediately after updating every first-party caller; add tests rejecting missing revisions and old input shapes.
+- [ ] 9.4 Run the asset reconciler in dry-run mode against newly staged test assets and verify reset/reseed plus forward-migration recovery without legacy data conversion.
 - [ ] 9.5 Run focused service, router, gateway, executor, storage, Platform MCP, and SPA tests for all touched paths.
 - [ ] 9.6 Run `bun typecheck`, `bun lint`, and `bun test`, fixing all regressions attributable to this change.
 - [ ] 9.7 Run `bunx prettier --write .`, inspect the final diff for unrelated or secret-bearing changes, and confirm every delta-spec scenario has test coverage.
+- [ ] 9.8 Search source, schema, routers, clients, fixtures, and docs for direct server writes, compatibility flags, legacy icon URL fields, or singleton Platform-token assumptions and remove every remaining occurrence.

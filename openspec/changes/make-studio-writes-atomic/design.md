@@ -42,7 +42,7 @@ Alternatives considered:
 
 All server-scoped commands acquire the server lock before child reads. Capacity counts, uniqueness prechecks, variable-reference checks, lifecycle decisions, confirmation checks, and compilation use the same transaction. All commands use the lock order `user/account -> server -> child rows` when more than one aggregate is involved; a command must never acquire these in reverse order.
 
-Database constraints remain the last line of defense. Existing owner/slug, server/tool-name, and server/value-name uniqueness constraints stay in place. Account-scoped Platform-token replacement uses a user-row lock plus compare-and-swap against the previously observed active token identity; a partial uniqueness constraint ensures no more than one unrevoked Platform token survives. Server-token changes use the server aggregate boundary. Constraint failures are translated to stable `AppError` codes rather than leaking database details.
+Database constraints remain the last line of defense. Existing owner/slug, server/tool-name, and server/value-name uniqueness constraints stay in place. Platform PAT creation, selected-token rotation, and revocation use a user-row lock plus compare-and-swap against the previously observed token identity; hash and active-name constraints protect multiple concurrent PATs without imposing a singleton-active-token invariant. Server-token changes use the server aggregate boundary. Constraint failures are translated to stable `AppError` codes rather than leaking database details.
 
 External network calls, telemetry export, and object deletion never occur while locks are held. Pure validation, encryption, and compilation may run inside the transaction because the server has a bounded maximum number of tools.
 
@@ -76,7 +76,7 @@ Add a user-owned storage-asset record containing the object key, purpose, state 
 
 The server stores an asset id rather than accepting an arbitrary access URL for new writes. `setServerIcon` uses the server command transaction to verify owner/purpose/readiness, attach the new asset, detach the previous asset into `delete_pending`, and increment `configRevision`. Clearing or deleting a server follows the same state transition. After commit, a bounded reconciler attempts `DeleteObject` for pending assets and garbage-collects expired staging/ready assets. Failed deletion remains pending for the next opportunistic or operator-triggered reconciliation run.
 
-Existing `iconImage` URLs remain readable during migration. Owned storage URLs are backfilled to asset records; unparseable legacy values remain display-only until replaced. S3 success never makes an icon visible before the database commit, and S3 cleanup failure never rolls back a committed configuration.
+The new asset reference is the only persisted icon source. The generated migration removes the superseded `iconImage` URL field instead of dual-reading or backfilling it; disposable development icon data may be cleared and reseeded. S3 success never makes an icon visible before the database commit, and S3 cleanup failure never rolls back a committed configuration.
 
 ### 6. Define conflict and failure behavior as part of the contract
 
@@ -91,22 +91,21 @@ Database failures, compiler failures, and injected failures after any statement 
 - **[A missed write path could bypass locking]** -> Centralize exported mutations, prohibit direct router writes, add service-contract tests, and document the aggregate invariant in `apps/api/AGENTS.md`.
 - **[Runtime snapshot transactions add database work]** -> End them before upstream I/O and select only required rows/columns. Compare latency in integration tests.
 - **[Asset cleanup is eventually consistent]** -> Keep durable state, use idempotent deletes, run bounded opportunistic sweeps, and provide an operator command with metrics for oldest pending assets.
-- **[Required revisions can break stale clients]** -> Roll out additive response fields first, update first-party clients and Platform tool descriptions, then enforce `expectedRevision` with a clear structured error.
+- **[Required revisions break stale development clients]** -> Update every first-party caller and Platform tool schema in the same change and reject missing revisions immediately with a clear structured error.
 - **[Concurrent token replacement can surprise callers]** -> Use compare-and-swap on the observed active token and let only one replacement commit; never silently invalidate a token created by a losing concurrent request.
-- **[Migration rollback leaves new metadata]** -> Keep changes additive and dual-read legacy icon fields until the new path is stable; rollback code can ignore revision and asset tables without deleting data.
+- **[Destructive development migration discards old icon URLs]** -> Treat existing records as disposable, document reset/reseed, and verify the clean schema from an empty database rather than retaining a runtime fallback.
 
 ## Migration Plan
 
-1. Add `configRevision`, storage-asset state, the server asset reference, and token uniqueness support through generated Drizzle migrations. Backfill server revisions and parse owned legacy icon URLs into ready/attached asset records without deleting objects.
-2. Add aggregate command and execution-snapshot helpers, stable error codes, and tests while responses expose revisions but legacy mutation inputs remain temporarily accepted behind a compatibility switch.
-3. Move every Studio and Platform write path to the command helpers, including tool, auth, common-entry, variable, token, icon, and server deletion paths. Add post-commit telemetry and asset reconciliation.
-4. Update the SPA and Platform MCP schemas to read and send revisions, handle conflicts, and use staged asset ids. Then enable required revision enforcement.
-5. Run the asset reconciler in dry-run/report mode, enable deletion after metrics are verified, and retain dual reads for legacy icons through one rollback window.
-6. Remove the compatibility switch and legacy icon-write path in a later cleanup only after production verification.
+1. Add `configRevision`, storage-asset state, the server asset reference, multi-PAT-safe uniqueness support, and removal of the superseded icon URL through one generated Drizzle migration.
+2. Add aggregate command and execution-snapshot helpers, stable error codes, and tests as the only server-scoped write/read boundary.
+3. Move every Studio and Platform write path to the command helpers, including tool, auth, common-entry, variable, token, icon, and server deletion paths; delete direct mutation exports in the same change.
+4. Update the SPA and Platform MCP schemas atomically to require revisions, handle conflicts, and use staged asset ids; reject missing or old mutation shapes immediately.
+5. Add post-commit telemetry and asset reconciliation, then remove old icon URL helpers, input schemas, tests, and documentation.
+6. Verify a database created from migrations and seeds plus a reset development database both use only the new revision and asset contracts.
 
-Rollback disables revision enforcement and new icon writes while retaining additive columns and asset records. It must not delete asset metadata or attempt bulk S3 deletion.
+If development rollback is needed before the migration is shared, revert the code and regenerate the migration or reset the database. Once shared, use a forward generated migration; do not retain dual reads or old mutation handlers.
 
 ## Open Questions
 
-- What production scheduler will invoke the storage reconciler in addition to opportunistic API runs? The implementation can ship an operator command and bounded opportunistic execution without blocking the atomic database work, but deployment ownership must be recorded before enabling destructive cleanup.
-
+- Production scheduling for the asset reconciler is intentionally deferred until the owner declares a deployment model. The pre-production implementation uses bounded post-commit reconciliation plus an explicit root operator command without preserving any legacy icon path.

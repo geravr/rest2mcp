@@ -18,13 +18,17 @@ The system SHALL route Platform MCP mutations through the same atomic, revision-
 - **THEN** at most one command commits from that revision
 - **AND** the losing command receives `MCP_WRITE_CONFLICT` with no partial state or secret material
 
-### Requirement: Platform token replacement is concurrency-safe
-The system SHALL replace an account's active Platform token using a locked compare-and-swap operation and a database invariant that prevents multiple unrevoked Platform tokens.
+### Requirement: Platform PAT rotation is concurrency-safe
+The system SHALL rotate one explicitly selected active Platform PAT using a user-locked compare-and-swap operation. The system SHALL permit multiple unrelated named PATs to remain active, while database invariants SHALL prevent duplicate hashes and duplicate active names rather than enforcing a singleton token.
 
-#### Scenario: Concurrent replacement has one winner
-- **WHEN** two replacement commands name the same previously observed active Platform token
-- **THEN** only one replacement commits
-- **AND** the other command returns a conflict instead of silently revoking the winner's newly issued token
+#### Scenario: Concurrent selected-token rotation has one winner
+- **WHEN** two rotation commands name the same previously observed active Platform PAT
+- **THEN** only one successor rotation commits
+- **AND** the other command returns a conflict without revoking the winner or any unrelated PAT
+
+#### Scenario: Creating another PAT preserves existing PATs
+- **WHEN** the owner creates a distinct PAT within the active-token limit
+- **THEN** the new PAT commits without revoking or modifying unrelated active PATs
 
 #### Scenario: Token failure returns no recoverable plaintext
 - **WHEN** token creation or replacement rolls back or its response is lost
@@ -43,4 +47,3 @@ The system SHALL expose write conflicts and transient fully rolled-back database
 - **WHEN** a transient database failure is known to have rolled back the entire command and automatic retries are exhausted
 - **THEN** the outcome marks the failure as retryable
 - **AND** it contains no partial-success claim or secret-bearing diagnostic
-
