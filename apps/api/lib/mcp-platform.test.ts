@@ -258,6 +258,7 @@ describe("platform MCP", () => {
         baseUrl: "https://api.example.com",
         allowedHosts: ["api.example.com"],
         status: "draft",
+        configRevision: 1,
         trafficLight: "draft",
         enabledToolCount: 0,
         lastCallAt: null,
@@ -332,6 +333,7 @@ describe("platform MCP", () => {
         const result = await client.callTool({
           name: "create_tool",
           arguments: {
+            expectedRevision: 1,
             serverId: "mcs_1",
             name: "get_contact",
             method: "GET",
@@ -369,12 +371,149 @@ describe("platform MCP", () => {
       }
     });
 
+    it("returns a secret-free structured conflict with the current revision", async () => {
+      listVariables.mockResolvedValue([]);
+      updateTool.mockRejectedValue(
+        appError({
+          appCode: APP_ERROR_CODES.MCP_WRITE_CONFLICT,
+          message:
+            "The server configuration changed elsewhere. Reload before retrying.",
+          status: 409,
+          details: { currentRevision: 7, serverId: "mcs_1" },
+        }),
+      );
+      const client = await connectClient(["author"]);
+      try {
+        const result = await client.callTool({
+          name: "update_tool",
+          arguments: {
+            expectedRevision: 3,
+            serverId: "mcs_1",
+            toolId: "mct_1",
+            name: "get_contact",
+            method: "GET",
+            requestDefinition: {
+              version: 1,
+              pathSegments: [],
+              query: [],
+              headers: [],
+              body: { bodyType: "none" },
+              agentInputs: [],
+            },
+          },
+        });
+        expect(result.isError).toBe(true);
+        expect(result.structuredContent).toMatchObject({
+          ok: false,
+          error: {
+            category: "conflict",
+            code: APP_ERROR_CODES.MCP_WRITE_CONFLICT,
+            retryable: false,
+            currentRevision: 7,
+            serverId: "mcs_1",
+          },
+        });
+        expect(JSON.stringify(result.structuredContent)).not.toContain("rmcp_");
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("marks exhausted fully-rolled-back transient failures retryable", async () => {
+      listVariables.mockResolvedValue([]);
+      updateTool.mockRejectedValue(
+        appError({
+          appCode: APP_ERROR_CODES.MCP_TRANSIENT_WRITE_FAILURE,
+          message: "The write failed after retries with no partial change.",
+          status: 503,
+          details: { retryable: true, serverId: "mcs_1" },
+        }),
+      );
+      const client = await connectClient(["author"]);
+      try {
+        const result = await client.callTool({
+          name: "update_tool",
+          arguments: {
+            expectedRevision: 3,
+            serverId: "mcs_1",
+            toolId: "mct_1",
+            name: "get_contact",
+            method: "GET",
+            requestDefinition: {
+              version: 1,
+              pathSegments: [],
+              query: [],
+              headers: [],
+              body: { bodyType: "none" },
+              agentInputs: [],
+            },
+          },
+        });
+        expect(result.structuredContent).toMatchObject({
+          ok: false,
+          error: {
+            code: APP_ERROR_CODES.MCP_TRANSIENT_WRITE_FAILURE,
+            retryable: true,
+          },
+        });
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("returns the committed revision on a successful agent mutation", async () => {
+      listVariables.mockResolvedValue([]);
+      createTool.mockResolvedValue({
+        id: "mct_1",
+        name: "get_contact",
+        title: "Get contact",
+        description: "Fetch one contact.",
+        method: "GET",
+        requestDefinition: { version: 1 },
+        compileStatus: "valid",
+        compileIssues: [],
+        annotations: null,
+        allowMutation: false,
+        enabled: true,
+        source: "manual",
+        revision: 6,
+      });
+      const client = await connectClient(["author"]);
+      try {
+        const result = await client.callTool({
+          name: "create_tool",
+          arguments: {
+            expectedRevision: 5,
+            serverId: "mcs_1",
+            name: "get_contact",
+            method: "GET",
+            requestDefinition: {
+              version: 1,
+              pathSegments: [],
+              query: [],
+              headers: [],
+              body: { bodyType: "none" },
+              agentInputs: [],
+            },
+          },
+        });
+        expect(result.isError).toBeFalsy();
+        expect(result.structuredContent).toMatchObject({
+          ok: true,
+          data: { id: "mct_1", revision: 6 },
+        });
+      } finally {
+        await client.close();
+      }
+    });
+
     it("rejects mixed typed and legacy create_tool payloads", async () => {
       const client = await connectClient(["author"]);
       try {
         const result = await client.callTool({
           name: "create_tool",
           arguments: {
+            expectedRevision: 1,
             serverId: "mcs_1",
             name: "get_contact",
             method: "GET",
@@ -405,6 +544,7 @@ describe("platform MCP", () => {
         const result = await client.callTool({
           name: "create_tool",
           arguments: {
+            expectedRevision: 1,
             serverId: "mcs_1",
             name: "secure_get",
             method: "GET",
@@ -461,6 +601,7 @@ describe("platform MCP", () => {
         const result = await client.callTool({
           name: "create_tool",
           arguments: {
+            expectedRevision: 1,
             serverId: "mcs_1",
             name: "secure_get",
             method: "GET",
@@ -567,7 +708,11 @@ describe("platform MCP", () => {
 
         const dup = await client.callTool({
           name: "duplicate_tool",
-          arguments: { serverId: "mcs_1", toolId: "mct_1" },
+          arguments: {
+            expectedRevision: 1,
+            serverId: "mcs_1",
+            toolId: "mct_1",
+          },
         });
         expect(dup.isError).toBeFalsy();
         expect(duplicateTool).toHaveBeenCalled();
@@ -625,7 +770,11 @@ describe("platform MCP", () => {
       try {
         const result = await client.callTool({
           name: "duplicate_tool",
-          arguments: { serverId: "mcs_1", toolId: "mct_1" },
+          arguments: {
+            expectedRevision: 1,
+            serverId: "mcs_1",
+            toolId: "mct_1",
+          },
         });
         expect(result.isError).toBeFalsy();
         const text = (
@@ -655,6 +804,7 @@ describe("platform MCP", () => {
         const result = await client.callTool({
           name: "set_variable",
           arguments: {
+            expectedRevision: 1,
             serverId: "mcs_1",
             name: "api_token",
             kind: "secret",
@@ -679,6 +829,7 @@ describe("platform MCP", () => {
         const result = await client.callTool({
           name: "set_variable",
           arguments: {
+            expectedRevision: 1,
             serverId: "mcs_1",
             name: "region",
             kind: "config",
@@ -690,7 +841,7 @@ describe("platform MCP", () => {
           expect.anything(),
           "usr_1",
           "mcs_1",
-          { name: "region", isSecret: false, value: "mx" },
+          { expectedRevision: 1, name: "region", isSecret: false, value: "mx" },
           "s".repeat(32),
         );
       } finally {
@@ -707,6 +858,7 @@ describe("platform MCP", () => {
         const result = await client.callTool({
           name: "set_variable",
           arguments: {
+            expectedRevision: 1,
             serverId: "mcs_1",
             name: "api_token",
             kind: "config",
@@ -736,6 +888,7 @@ describe("platform MCP", () => {
         const result = await client.callTool({
           name: "add_tool_from_curl",
           arguments: {
+            expectedRevision: 1,
             serverId: "mcs_1",
             curl: `curl -H 'Authorization: Bearer secret' https://api.example.com/v1/items`,
             markings: [],
@@ -801,7 +954,11 @@ describe("platform MCP", () => {
       try {
         const result = await client.callTool({
           name: "delete_server",
-          arguments: { serverId: "mcs_1", confirm: "Not CRM" },
+          arguments: {
+            expectedRevision: 1,
+            serverId: "mcs_1",
+            confirm: "Not CRM",
+          },
         });
         expect(result.isError).toBe(true);
         const text = (
@@ -823,13 +980,14 @@ describe("platform MCP", () => {
       try {
         const result = await client.callTool({
           name: "delete_server",
-          arguments: { serverId: "mcs_1", confirm: "CRM" },
+          arguments: { expectedRevision: 1, serverId: "mcs_1", confirm: "CRM" },
         });
         expect(result.isError).toBeFalsy();
         expect(deleteServer).toHaveBeenCalledWith(
           expect.anything(),
           "usr_1",
           "mcs_1",
+          1,
         );
       } finally {
         await client.close();
@@ -843,6 +1001,7 @@ describe("platform MCP", () => {
         const result = await client.callTool({
           name: "delete_tool",
           arguments: {
+            expectedRevision: 1,
             serverId: "mcs_1",
             toolId: "mct_1",
             confirm: "wrong_name",
@@ -876,6 +1035,7 @@ describe("platform MCP", () => {
         const result = await client.callTool({
           name: "delete_variable",
           arguments: {
+            expectedRevision: 1,
             serverId: "mcs_1",
             name: "api_token",
             confirm: "api_token",
@@ -887,6 +1047,7 @@ describe("platform MCP", () => {
           "usr_1",
           "mcs_1",
           "api_token",
+          1,
         );
       } finally {
         await client.close();

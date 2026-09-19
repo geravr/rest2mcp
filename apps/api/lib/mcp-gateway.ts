@@ -4,9 +4,8 @@
  * limits per invocation, advertises only enabled contract-ready tools, and
  * returns the shared structured result envelope for every completion.
  */
-import { mcpServer, mcpTool, type McpTool } from "@repo/db";
+import type { McpTool } from "@repo/db";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppContext } from "./context.js";
 import { APP_ERROR_CODES, AppError, appJsonError } from "./app-error.js";
@@ -33,9 +32,8 @@ import {
 } from "./mcp-result.js";
 import { captureMcpTelemetry, MCP_TELEMETRY_EVENTS } from "./mcp-telemetry.js";
 import {
-  compilePlanForTool,
   executeMappedTool,
-  loadToolCompileInputs,
+  loadExecutionSnapshot,
   MUTATING_METHODS,
 } from "../services/mcp-executor-service.js";
 import { authenticateAgentToken } from "../services/mcp-studio-service.js";
@@ -135,31 +133,25 @@ export function createMcpGatewayRoutes() {
     }
 
     return handleMcpHttpRequest(mcpRequest, async () => {
-      const [server] = await db
-        .select()
-        .from(mcpServer)
-        .where(eq(mcpServer.id, serverId))
-        .limit(1);
+      const snapshot = await loadExecutionSnapshot(db, {
+        serverId,
+        credentialSecret: env.MCP_CREDENTIAL_SECRET,
+      });
 
       const mcp = new McpServer({
-        name: server?.name ?? "mcp-server",
+        name: snapshot?.server.name ?? "mcp-server",
         version: "1.0.0",
       });
 
       // Always install the tools handlers, even with zero tools, so
       // `tools/list` answers `[]` instead of "Method not found" for a paused
       // server or one with no contract-ready tools.
-      if (!server || server.status === "paused") {
+      if (!snapshot || snapshot.server.status === "paused") {
         installContractTools(mcp, []);
         return mcp;
       }
 
-      const enabledTools = await db
-        .select()
-        .from(mcpTool)
-        .where(and(eq(mcpTool.serverId, server.id), eq(mcpTool.enabled, true)));
-
-      const compileInputs = await loadToolCompileInputs(db, server);
+      const server = snapshot.server;
 
       const compiledTools: Array<{
         tool: McpTool;
@@ -168,11 +160,8 @@ export function createMcpGatewayRoutes() {
           ReturnType<typeof compileAgentToolContract>["contract"]
         >;
       }> = [];
-      for (const tool of enabledTools) {
-        let plan: McpCompiledPlan;
-        try {
-          plan = compilePlanForTool(tool, compileInputs);
-        } catch {
+      for (const { tool, plan } of snapshot.tools) {
+        if (!tool.enabled || !plan) {
           continue;
         }
         const contract = compileAgentToolContract({
@@ -189,6 +178,7 @@ export function createMcpGatewayRoutes() {
             properties: {
               serverId: server.id,
               toolId: tool.id,
+              configRevision: snapshot.configRevision,
               issueCodes: contract.issues
                 .filter((issue) => issue.severity === "error")
                 .map((issue) => issue.code)
@@ -212,6 +202,7 @@ export function createMcpGatewayRoutes() {
           properties: {
             serverId: server.id,
             toolId: tool.id,
+            configRevision: snapshot.configRevision,
             contractVersion: activeContract.contractVersion,
             fingerprint: activeContract.fingerprint,
           },
@@ -261,6 +252,7 @@ export function createMcpGatewayRoutes() {
                 args: parsed.data,
                 source: "agent",
                 credentialSecret: env.MCP_CREDENTIAL_SECRET,
+                snapshot,
               });
               return buildMcpToolResult(result.envelope, {
                 onDefect: (reason) =>
@@ -272,6 +264,7 @@ export function createMcpGatewayRoutes() {
                       properties: {
                         serverId: server.id,
                         toolId: tool.id,
+                        configRevision: snapshot.configRevision,
                         reason,
                       },
                     },

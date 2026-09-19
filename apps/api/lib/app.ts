@@ -34,6 +34,11 @@ import {
   resolveStorageBucket,
   uploadObject,
 } from "./storage.js";
+import {
+  createStagingAsset,
+  markAssetReady,
+  SERVER_ICON_PURPOSE,
+} from "../services/mcp-asset-service.js";
 import { router } from "./trpc.js";
 
 const TRPC_STATUS_MAP: Record<string, number> = {
@@ -153,6 +158,7 @@ app.post(
     const formData = await c.req.formData();
     const fileEntry = formData.get("file");
     const directoryEntry = formData.get("directory");
+    const purposeEntry = formData.get("purpose");
 
     if (
       typeof fileEntry !== "object" ||
@@ -176,6 +182,12 @@ app.post(
 
     const directory =
       typeof directoryEntry === "string" ? directoryEntry.trim() : undefined;
+
+    const purpose =
+      typeof purposeEntry === "string" &&
+      purposeEntry.trim() === SERVER_ICON_PURPOSE
+        ? SERVER_ICON_PURPOSE
+        : undefined;
 
     if (directory && !/^[a-z0-9/_-]*$/i.test(directory)) {
       return c.json(
@@ -220,6 +232,19 @@ app.post(
       { directory },
     );
     const fileBytes = new Uint8Array(await file.arrayBuffer());
+    const db = c.get("db");
+
+    let assetId: string | undefined;
+    if (purpose === SERVER_ICON_PURPOSE) {
+      const asset = await createStagingAsset(db, {
+        userId: user.id,
+        objectKey: object.key,
+        purpose,
+        contentType: file.type || "application/octet-stream",
+        byteSize: file.size,
+      });
+      assetId = asset.id;
+    }
 
     try {
       await uploadObject(env, {
@@ -234,7 +259,11 @@ app.post(
           scopeId: object.scope.id,
         },
       });
+      if (assetId) {
+        await markAssetReady(db, user.id, assetId);
+      }
     } catch (error) {
+      // A staged asset that never becomes ready is garbage-collected later.
       if (error instanceof AppError) {
         throw error;
       }
@@ -253,6 +282,7 @@ app.post(
       contentType: file.type || "application/octet-stream",
       contentLength: file.size,
       accessUrl: resolveStorageAccessUrl(env, object.key),
+      ...(assetId ? { assetId } : {}),
     });
   },
 );

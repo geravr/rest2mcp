@@ -42,6 +42,10 @@ export const mcpToolErrorSchema = z.strictObject({
   retryable: z.boolean(),
   retryAfterSeconds: z.number().optional(),
   indeterminate: z.boolean().optional(),
+  /** Current server configuration revision for a stale write conflict. */
+  currentRevision: z.number().int().optional(),
+  /** Server aggregate affected by a write conflict, when known. */
+  serverId: z.string().optional(),
   issues: z.array(mcpToolIssueSchema).optional(),
 });
 
@@ -115,6 +119,7 @@ const NOT_FOUND_CODES = new Set<string>([
 ]);
 
 const CONFLICT_CODES = new Set<string>([
+  APP_ERROR_CODES.MCP_WRITE_CONFLICT,
   APP_ERROR_CODES.MCP_TOOL_NAME_CONFLICT,
   APP_ERROR_CODES.MCP_SERVER_SLUG_CONFLICT,
   APP_ERROR_CODES.MCP_VARIABLE_NAME_CONFLICT,
@@ -128,6 +133,7 @@ const RATE_LIMIT_CODES = new Set<string>([
 ]);
 
 const UPSTREAM_CODES = new Set<string>([
+  APP_ERROR_CODES.MCP_TRANSIENT_WRITE_FAILURE,
   APP_ERROR_CODES.MCP_UPSTREAM_ERROR,
   APP_ERROR_CODES.MCP_UPSTREAM_HTTP_ERROR,
   APP_ERROR_CODES.MCP_REDIRECT_REJECTED,
@@ -205,10 +211,12 @@ export function toMcpToolError(
   const indeterminate =
     context.indeterminate === true ||
     error.appCode === APP_ERROR_CODES.MCP_MUTATION_INDETERMINATE;
-  const retryable = isRetryableFailure(category, {
-    indeterminate,
-    idempotent: context.idempotent,
-  });
+  const retryable =
+    error.details?.retryable === true ||
+    isRetryableFailure(category, {
+      indeterminate,
+      idempotent: context.idempotent,
+    });
   const retryAfterSeconds =
     context.retryAfterSeconds ?? error.details?.retryAfterSeconds;
   const issues = appErrorIssues(error, category);
@@ -221,6 +229,12 @@ export function toMcpToolError(
       ? { retryAfterSeconds }
       : {}),
     ...(indeterminate ? { indeterminate: true } : {}),
+    ...(error.details?.currentRevision !== undefined
+      ? { currentRevision: error.details.currentRevision }
+      : {}),
+    ...(error.details?.serverId !== undefined
+      ? { serverId: error.details.serverId }
+      : {}),
     ...(issues !== undefined ? { issues } : {}),
   };
 }

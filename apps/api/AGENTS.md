@@ -58,7 +58,21 @@ Follows **Router/Handler → Service → Database/Infrastructure**:
 - Business logic, Drizzle queries, transactional blocks, and external integrations (e.g. Resend for emails in [lib/email.ts](lib/email.ts), AWS S3 for storage in [lib/storage.ts](lib/storage.ts)) must live in services under `services/` (such as `admin-service.ts`).
 - Services, `lib/storage.ts`, and first-party Hono handlers throw `AppError` for request-facing failures. They must not throw `TRPCError` or import `@trpc/server`. tRPC procedure middleware and the Hono `errorHandler` translate `AppError` at the transport edge.
 
-## Global Invariants & Access Control
+## MCP Server Write Aggregate
+
+- Every mutation of an existing MCP server runs through `withOwnedServerWrite` in [services/mcp-server-command.ts](services/mcp-server-command.ts). It owns the transaction, locks the owned server row with `SELECT ... FOR UPDATE`, compares `expectedRevision`, and increments `configRevision` exactly once per committed command.
+- Command callbacks receive only the transaction handle (`tx`). They must never fall back to the global database client.
+- Lock order is `user/account -> server -> child rows`; never acquire these in reverse. Platform PAT writes lock the user row first.
+- Stale revisions surface as `MCP_WRITE_CONFLICT` with the current revision and no writes. Known fully-rolled-back transient database failures are retried with a bounded budget and, when exhausted, surface as retryable `MCP_TRANSIENT_WRITE_FAILURE`.
+- No external I/O (network calls, telemetry export, object deletion) may run while the server lock is held. Buffer it through `ctx.onCommit`, which runs only after commit and never fails the command.
+- Custom mutating SQL tables bypassed by direct `db.update(mcpServer)` writes are forbidden; add a command instead.
+
+## MCP Runtime Snapshots
+
+- Gateway tool listing and invocation preparation read from one immutable `loadExecutionSnapshot` (`REPEATABLE READ`, read-only) in [services/mcp-executor-service.ts](services/mcp-executor-service.ts). A runtime request must never combine server, plans, auth, or values from different committed revisions.
+- The snapshot transaction ends before any upstream HTTP begins. `executeMappedTool` accepts a preloaded snapshot for this reason; do not re-open database reads inside the request path.
+- Object storage is a non-transactional boundary: uploads stage an `mcp_storage_asset` as `staging`, then `ready`, and the server attach command claims it in the same commit as `configRevision`. Replaced/abandoned assets become `delete_pending` and are cleaned by the bounded reconciler.
+- Run `bun mcp:reconcile-assets --dry-run` to inspect pending cleanup; `bun mcp:reconcile-assets` performs it. Failed deletions stay pending and are safe to retry.
 
 - **Single-User Accounts**: Product accounts are single-user. Do not register the Better Auth `organization` plugin, mount an `organization` tRPC router, or reintroduce org tables / `activeOrganizationId`.
 - Platform invitations (`platform_invitation`) and super-admin flows remain. Do not conflate them with product workspaces.

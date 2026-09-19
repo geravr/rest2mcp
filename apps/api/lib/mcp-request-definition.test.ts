@@ -132,6 +132,7 @@ describe("mcpRequestDefinitionSchema hardening", () => {
   it("accepts a valid typed create command", () => {
     const result = createToolCommandSchema.safeParse({
       serverId: "mcs_1",
+      expectedRevision: 1,
       name: "get_contact",
       method: "GET",
       requestDefinition: definition(),

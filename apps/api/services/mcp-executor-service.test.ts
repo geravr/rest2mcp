@@ -71,6 +71,7 @@ function makeDb(input: {
         return Promise.resolve([]);
       },
     })),
+    transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(db)),
   };
   return { db, insertedValues };
 }
@@ -123,6 +124,28 @@ afterEach(() => {
 });
 
 describe("executeMappedTool: guards before contacting upstream", () => {
+  it("rejects a non-owner before loading or decrypting a snapshot", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { db } = makeDb({ server: [], tool: [getTool] });
+
+    await expect(
+      executeMappedTool(db as never, {
+        serverId: "mcs_other",
+        ownerUserId: "usr_owner",
+        toolId: "mct_1",
+        args: {},
+        source: "playground",
+        credentialSecret: SECRET,
+      }),
+    ).rejects.toMatchObject({
+      appCode: APP_ERROR_CODES.MCP_SERVER_NOT_FOUND,
+    });
+    // The snapshot transaction (which decrypts server values) never opens.
+    expect(db.transaction).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rejects paused servers", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -300,6 +323,37 @@ describe("executeMappedTool: envelope for completed responses", () => {
     expect(result.callLogId).toBeTruthy();
     const url = new URL(String(fetchMock.mock.calls[0]?.[0]));
     expect(url.pathname).toBe("/contacts/1");
+  });
+
+  it("closes the configuration transaction before upstream HTTP begins", async () => {
+    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
+    let transactionFinished = false;
+    const fetchMock = vi.fn().mockImplementation(async () => {
+      // No database transaction may be open while upstream HTTP runs.
+      expect(transactionFinished).toBe(true);
+      return jsonResponse({ ok: true });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { db } = makeDb({ server: [liveServer], tool: [getTool] });
+    const originalTransaction = db.transaction;
+    db.transaction = vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => {
+      const result = await originalTransaction(fn);
+      transactionFinished = true;
+      return result;
+    }) as typeof db.transaction;
+
+    const result = await executeMappedTool(db as never, {
+      serverId: "mcs_1",
+      ownerUserId: "usr_owner",
+      toolId: "mct_1",
+      args: { id: "1" },
+      source: "playground",
+      credentialSecret: SECRET,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(db.transaction).toHaveBeenCalled();
+    expect(transactionFinished).toBe(true);
   });
 
   it("returns a completed 4xx as ok:false with MCP_UPSTREAM_HTTP_ERROR, not a throw", async () => {

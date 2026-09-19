@@ -56,6 +56,7 @@
     "db:export:staging": "bun --cwd db export:staging",
     "db:export:prod": "bun --cwd db export:prod",
     "db:check": "bun --cwd db check",
+    "mcp:reconcile-assets": "bun --env-file .env apps/api/scripts/reconcile-mcp-assets.ts",
     "db:typecheck": "bun --cwd db typecheck"
   },
   "devDependencies": {

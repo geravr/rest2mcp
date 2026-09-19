@@ -102,6 +102,7 @@ const serverResource = z.object({
   baseUrl: z.string(),
   allowedHosts: z.array(z.string()),
   status: z.string(),
+  configRevision: z.number().int(),
   trafficLight: z.string(),
   hasSecret: z.boolean().optional(),
   enabledToolCount: z.number().int(),
@@ -124,6 +125,8 @@ const toolResource = z.object({
   allowMutation: z.boolean(),
   enabled: z.boolean(),
   source: z.string(),
+  /** Server configuration revision after the committed mutation. */
+  revision: z.number().int().optional(),
 });
 
 const variableResource = z.object({
@@ -159,6 +162,8 @@ const mutationAckResource = z.object({
   name: z.string().optional(),
   deleted: z.boolean().optional(),
   revoked: z.boolean().optional(),
+  /** Server configuration revision after the committed mutation. */
+  revision: z.number().int().optional(),
 });
 
 type PlatformToolContext = {
@@ -335,6 +340,7 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
           baseUrl: item.baseUrl,
           allowedHosts: item.allowedHosts,
           status: item.status,
+          configRevision: item.configRevision,
           trafficLight: item.trafficLight,
           ...(ctx.hasScope("secret_reference")
             ? { hasSecret: item.hasSecret }
@@ -493,6 +499,7 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
       });
       return redactToolRow(
         await createTool(ctx.db, ctx.userId, args.serverId, {
+          expectedRevision: args.expectedRevision,
           name: args.name,
           title: args.title,
           description: args.description,
@@ -537,6 +544,7 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
       }
       return redactToolRow(
         await updateTool(ctx.db, ctx.userId, args.serverId, args.toolId, {
+          expectedRevision: args.expectedRevision,
           name: args.name,
           title: args.title,
           description: args.description,
@@ -613,6 +621,7 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
       }
       return redactToolRow(
         await duplicateTool(ctx.db, ctx.userId, args.serverId, args.toolId, {
+          expectedRevision: args.expectedRevision,
           name: args.name,
           title: args.title,
           description: args.description,
@@ -706,7 +715,12 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
         ctx.db,
         ctx.userId,
         args.serverId,
-        { name: args.name, isSecret: false, value: args.value },
+        {
+          expectedRevision: args.expectedRevision,
+          name: args.name,
+          isSecret: false,
+          value: args.value,
+        },
         ctx.credentialSecret,
       );
     },
@@ -784,6 +798,11 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
     input: z
       .object({
         ...serverIdShape,
+        expectedRevision: z
+          .number()
+          .int()
+          .min(1)
+          .describe("Last observed server configuration revision."),
         confirm: z
           .string()
           .min(1)
@@ -799,7 +818,12 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
         args.serverId,
       );
       assertDestructiveConfirmation(args.confirm, currentName);
-      return deleteServer(ctx.db, ctx.userId, args.serverId);
+      return deleteServer(
+        ctx.db,
+        ctx.userId,
+        args.serverId,
+        args.expectedRevision,
+      );
     },
   }),
 
@@ -812,6 +836,11 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
     input: z
       .object({
         ...serverIdShape,
+        expectedRevision: z
+          .number()
+          .int()
+          .min(1)
+          .describe("Last observed server configuration revision."),
         toolId: z.string().min(1).describe("Tool id to delete."),
         confirm: z
           .string()
@@ -829,7 +858,13 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
         args.toolId,
       );
       assertDestructiveConfirmation(args.confirm, currentName);
-      return deleteTool(ctx.db, ctx.userId, args.serverId, args.toolId);
+      return deleteTool(
+        ctx.db,
+        ctx.userId,
+        args.serverId,
+        args.toolId,
+        args.expectedRevision,
+      );
     },
   }),
 
@@ -842,6 +877,11 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
     input: z
       .object({
         ...serverIdShape,
+        expectedRevision: z
+          .number()
+          .int()
+          .min(1)
+          .describe("Last observed server configuration revision."),
         name: z.string().min(1).describe("Server value name to delete."),
         confirm: z.string().min(1).describe("Must repeat the value name."),
       })
@@ -850,7 +890,13 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
     annotations: DESTRUCTIVE_ANNOTATIONS,
     run: async (ctx, args) => {
       assertDestructiveConfirmation(args.confirm, args.name);
-      return deleteVariable(ctx.db, ctx.userId, args.serverId, args.name);
+      return deleteVariable(
+        ctx.db,
+        ctx.userId,
+        args.serverId,
+        args.name,
+        args.expectedRevision,
+      );
     },
   }),
 ];

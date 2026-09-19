@@ -16,6 +16,12 @@ export const MCP_TELEMETRY_EVENTS = {
   contractReadinessFailed: "mcp_contract_readiness_failed",
   contractEmitted: "mcp_contract_emitted",
   schemaInvalidInternalResult: "mcp_schema_invalid_internal_result",
+  /** One committed server-scoped write with lock/duration/attempt counts. */
+  aggregateWrite: "mcp_aggregate_write",
+  /** A stale `expectedRevision` was rejected. */
+  aggregateConflict: "mcp_aggregate_conflict",
+  /** A fully-rolled-back transient failure was retried. */
+  aggregateRetry: "mcp_aggregate_retry",
 } as const;
 
 export type McpTelemetryEvent =

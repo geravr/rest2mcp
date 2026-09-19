@@ -75,6 +75,7 @@ const typedDefinition = {
 
 const createInput = {
   serverId: "mcs_1",
+  expectedRevision: 1,
   name: "get_contact",
   method: "GET" as const,
   requestDefinition: typedDefinition,

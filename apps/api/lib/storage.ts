@@ -1,4 +1,5 @@
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
   PutObjectCommand,
   S3Client,
@@ -141,6 +142,44 @@ export async function getObject(env: Env, params: GetObjectParams) {
       Key: params.key,
     }),
   );
+}
+
+/**
+ * Idempotently delete one object. Missing objects are treated as success so a
+ * repeated reconciliation run cannot fail on already-deleted keys.
+ */
+export async function deleteObject(
+  env: Env,
+  params: GetObjectParams,
+): Promise<{ deleted: boolean }> {
+  const client = createStorageClient(env);
+  try {
+    await client.send(
+      new DeleteObjectCommand({
+        Bucket: params.bucket,
+        Key: params.key,
+      }),
+    );
+    return { deleted: true };
+  } catch (error) {
+    if (isS3NotFound(error)) {
+      return { deleted: false };
+    }
+    throw appError({
+      appCode: APP_ERROR_CODES.FILE_UPLOAD_FAILED,
+      message: "Failed to delete stored object.",
+      status: 502,
+      cause: error,
+    });
+  }
+}
+
+function isS3NotFound(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const status = (error as { $metadata?: { httpStatusCode?: number } })
+    .$metadata?.httpStatusCode;
+  const name = (error as { name?: unknown }).name;
+  return status === 404 || name === "NoSuchKey" || name === "NotFound";
 }
 
 export function resolveStorageBucket(env: Env) {

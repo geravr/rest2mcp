@@ -73,6 +73,8 @@ export type ExecuteMappedToolInput = {
   args?: Record<string, unknown>;
   source: McpCallSource;
   credentialSecret: string;
+  /** Pre-materialized committed configuration; when omitted the executor loads one. */
+  snapshot?: McpExecutionSnapshot;
 };
 
 export type ExecuteMappedToolResult = {
@@ -217,6 +219,81 @@ export async function loadToolCompileInputs(
   };
 }
 
+/**
+ * One immutable, committed view of a server's executable configuration. It is
+ * materialized inside a single read-only `REPEATABLE READ` transaction so a
+ * runtime request can never combine a server row, compiled plan, or value set
+ * from different committed revisions. The transaction ends before any upstream
+ * HTTP begins.
+ */
+export type SnapshotTool = {
+  tool: McpTool;
+  plan: McpCompiledPlan | null;
+  compileError: AppError | null;
+};
+
+export type McpExecutionSnapshot = {
+  /** The server configuration revision all materialized rows belong to. */
+  configRevision: number;
+  server: McpServer;
+  /** All tools on the server; `plan` is null when the tool cannot compile. */
+  tools: SnapshotTool[];
+  serverValues: Map<string, ResolvedServerValue>;
+  compileInputs: ToolCompileInputs;
+};
+
+export async function loadExecutionSnapshot(
+  db: DB,
+  input: { serverId: string; credentialSecret: string },
+): Promise<McpExecutionSnapshot | null> {
+  return db.transaction(
+    async (tx) => {
+      const [server] = await tx
+        .select()
+        .from(mcpServer)
+        .where(eq(mcpServer.id, input.serverId))
+        .limit(1);
+      if (!server) return null;
+
+      const tools = await tx
+        .select()
+        .from(mcpTool)
+        .where(eq(mcpTool.serverId, server.id));
+      const compileInputs = await loadToolCompileInputs(tx, server);
+      const serverValues = await loadServerValues(
+        tx,
+        server.id,
+        input.credentialSecret,
+      );
+
+      const snapshotTools: SnapshotTool[] = tools.map((tool) => {
+        try {
+          return {
+            tool,
+            plan: compilePlanForTool(tool, compileInputs),
+            compileError: null,
+          };
+        } catch (error) {
+          return {
+            tool,
+            plan: null,
+            compileError: error instanceof AppError ? error : null,
+          };
+        }
+      });
+
+      return {
+        configRevision: server.configRevision,
+        server,
+        tools: snapshotTools,
+        serverValues,
+        compileInputs,
+      };
+    },
+    { isolationLevel: "repeatable read", accessMode: "read only" },
+  );
+}
+
 function throwFirstIssue(
   issues: McpCompileIssue[],
   fallbackMessage: string,
@@ -307,15 +384,6 @@ export function compilePlanForTool(
     allowMutation: tool.allowMutation,
   });
   return assertCompileSuccess(result);
-}
-
-async function resolveCompiledPlan(
-  db: DB,
-  server: McpServer,
-  tool: McpTool,
-): Promise<McpCompiledPlan> {
-  const inputs = await loadToolCompileInputs(db, server);
-  return compilePlanForTool(tool, inputs);
 }
 
 // ---------------------------------------------------------------------------
@@ -800,22 +868,59 @@ export async function executeMappedTool(
   db: DB,
   input: ExecuteMappedToolInput,
 ): Promise<ExecuteMappedToolResult> {
-  const started = Date.now();
-  const args = input.args ?? {};
+  // Verify ownership before materializing a snapshot, which resolves and
+  // decrypts the owner's server values, so another user's serverId cannot
+  // trigger decryption of tenant secrets.
+  if (input.source !== "agent") {
+    const [owned] = await db
+      .select({ id: mcpServer.id })
+      .from(mcpServer)
+      .where(
+        and(
+          eq(mcpServer.id, input.serverId),
+          eq(mcpServer.userId, input.ownerUserId ?? ""),
+        ),
+      )
+      .limit(1);
+    if (!owned) {
+      throw appError({
+        appCode: APP_ERROR_CODES.MCP_SERVER_NOT_FOUND,
+        message: "MCP server not found.",
+        status: 404,
+      });
+    }
+  }
 
-  const [server] = await db
-    .select()
-    .from(mcpServer)
-    .where(eq(mcpServer.id, input.serverId))
-    .limit(1);
+  const snapshot =
+    input.snapshot ??
+    (await loadExecutionSnapshot(db, {
+      serverId: input.serverId,
+      credentialSecret: input.credentialSecret,
+    }));
 
-  if (!server) {
+  if (!snapshot) {
     throw appError({
       appCode: APP_ERROR_CODES.MCP_SERVER_NOT_FOUND,
       message: "MCP server not found.",
       status: 404,
     });
   }
+
+  return runMappedTool(db, snapshot, input);
+}
+
+/**
+ * Executes one mapped tool entirely from a materialized snapshot. No database
+ * read occurs here, so no transaction is open while upstream HTTP runs.
+ */
+async function runMappedTool(
+  db: DB,
+  snapshot: McpExecutionSnapshot,
+  input: ExecuteMappedToolInput,
+): Promise<ExecuteMappedToolResult> {
+  const started = Date.now();
+  const args = input.args ?? {};
+  const server = snapshot.server;
 
   if (input.source !== "agent") {
     if (!input.ownerUserId || server.userId !== input.ownerUserId) {
@@ -827,13 +932,7 @@ export async function executeMappedTool(
     }
   }
 
-  const toolFilter = input.toolId
-    ? and(eq(mcpTool.serverId, server.id), eq(mcpTool.id, input.toolId))
-    : input.toolName
-      ? and(eq(mcpTool.serverId, server.id), eq(mcpTool.name, input.toolName))
-      : null;
-
-  if (!toolFilter) {
+  if (!input.toolId && !input.toolName) {
     throw appError({
       appCode: APP_ERROR_CODES.INVALID_INPUT,
       message: "A tool id or name is required.",
@@ -841,15 +940,21 @@ export async function executeMappedTool(
     });
   }
 
-  const [tool] = await db.select().from(mcpTool).where(toolFilter).limit(1);
+  const snapshotTool = input.toolId
+    ? snapshot.tools.find((candidate) => candidate.tool.id === input.toolId)
+    : snapshot.tools.find(
+        (candidate) => candidate.tool.name === input.toolName,
+      );
 
-  if (!tool) {
+  if (!snapshotTool) {
     throw appError({
       appCode: APP_ERROR_CODES.MCP_TOOL_NOT_FOUND,
       message: "MCP tool not found.",
       status: 404,
     });
   }
+
+  const tool = snapshotTool.tool;
 
   const callLogId = generateId("mcl");
   let requestSummary: string | null = null;
@@ -901,12 +1006,18 @@ export async function executeMappedTool(
       });
     }
 
-    const plan = await resolveCompiledPlan(db, server, tool);
-    const serverValues = await loadServerValues(
-      db,
-      server.id,
-      input.credentialSecret,
-    );
+    if (!snapshotTool.plan) {
+      throw (
+        snapshotTool.compileError ??
+        appError({
+          appCode: APP_ERROR_CODES.MCP_COMPILE_INVALID,
+          message: "The stored tool definition is invalid.",
+          status: 409,
+        })
+      );
+    }
+    const plan = snapshotTool.plan;
+    const serverValues = snapshot.serverValues;
     const argsByInputId = buildArgsByInputId(plan.agentInputs, args);
     const secretsUsed = new Set<string>();
     const bindingCtx: BindingContext = {

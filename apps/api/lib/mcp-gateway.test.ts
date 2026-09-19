@@ -104,7 +104,7 @@ function gatewayDb(
   serverRow: typeof SERVER_ROW | null = SERVER_ROW,
   toolRows: typeof TOOL_ROWS = TOOL_ROWS,
 ) {
-  return {
+  const db = {
     select: () => ({
       from: (table: unknown) => ({
         where: () => {
@@ -117,7 +117,9 @@ function gatewayDb(
         },
       }),
     }),
+    transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(db),
   };
+  return db;
 }
 
 function createApp(
@@ -332,6 +334,7 @@ describe("MCP round-trip", () => {
         args: { id: "1" },
         source: "agent",
         credentialSecret: "s".repeat(32),
+        snapshot: expect.anything(),
       });
     } finally {
       await client.close();

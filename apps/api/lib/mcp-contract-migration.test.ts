@@ -12,12 +12,12 @@ const MIGRATIONS_DIR = fileURLToPath(
   new URL("../../../db/migrations", import.meta.url),
 );
 
-function latestMigrationSql(): string {
-  const files = readdirSync(MIGRATIONS_DIR)
+function allMigrationsSql(): string {
+  return readdirSync(MIGRATIONS_DIR)
     .filter((file) => file.endsWith(".sql"))
-    .sort();
-  const latest = files[files.length - 1]!;
-  return readFileSync(join(MIGRATIONS_DIR, latest), "utf8");
+    .sort()
+    .map((file) => readFileSync(join(MIGRATIONS_DIR, file), "utf8"))
+    .join("\n");
 }
 
 const input: McpAgentInput = {
@@ -58,7 +58,7 @@ function planFor(agentInputs: McpAgentInput[]) {
 
 describe("contract persistence migration", () => {
   it("adds a nullable product-tool title column through a generated migration", () => {
-    expect(latestMigrationSql()).toContain(
+    expect(allMigrationsSql()).toContain(
       'ALTER TABLE "mcp_tool" ADD COLUMN "title" text;',
     );
     const columns = getTableColumns(mcpTool);

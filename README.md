@@ -51,6 +51,10 @@ bun db:generate       # Generates database schema migrations
 bun db:migrate        # Runs database migrations
 bun db:seed           # Populates the database with initial seed data
 bun db:studio         # Launches Drizzle Studio
+
+# Operations
+bun mcp:reconcile-assets           # Deletes replaced/abandoned MCP icon assets
+bun mcp:reconcile-assets --dry-run # Reports pending cleanup without deleting
 ```
 
 ## Local Development

@@ -42,6 +42,9 @@ const tables = vi.hoisted(() => ({
     status: "mcp_call_log.status",
     createdAt: "mcp_call_log.created_at",
   },
+  user: {
+    id: "user.id",
+  },
 }));
 
 const isUserBanned = vi.hoisted(() => vi.fn(async () => false));
@@ -69,6 +72,10 @@ vi.mock("drizzle-orm", () => ({
     right,
   })),
   isNull: vi.fn((value: unknown) => ({ kind: "isNull", value })),
+  gt: vi.fn((left: unknown, right: unknown) => ({ kind: "gt", left, right })),
+  lt: vi.fn((left: unknown, right: unknown) => ({ kind: "lt", left, right })),
+  isNotNull: vi.fn((value: unknown) => ({ kind: "isNotNull", value })),
+  or: vi.fn((...args: unknown[]) => ({ kind: "or", args })),
 }));
 
 import {
@@ -129,34 +136,39 @@ function makeDb(results: unknown[]) {
   let index = 0;
   const insertedValues: unknown[] = [];
   const updatedValues: unknown[] = [];
-  const next = () => {
+  const take = () => {
     const value = results[index] ?? [];
     index += 1;
     return makeChain(value);
   };
-  const capture =
-    (bucket: unknown[], factory: () => ReturnType<typeof makeChain>) => () => {
-      const chain = factory();
-      return new Proxy(
-        {},
-        {
-          get(_, prop) {
-            if (prop === "values" || prop === "set") {
-              return (payload: unknown) => {
-                bucket.push(payload);
-                return chain;
-              };
-            }
-            return Reflect.get(chain as object, prop);
-          },
-        },
-      );
-    };
   const db = {
-    select: vi.fn(() => next()),
-    insert: vi.fn(capture(insertedValues, next)),
-    update: vi.fn(capture(updatedValues, next)),
-    delete: vi.fn<(table: unknown) => unknown>(() => next()),
+    select: vi.fn(() => take()),
+    insert: vi.fn(() => ({
+      values: (payload: unknown) => {
+        insertedValues.push(payload);
+        return take();
+      },
+    })),
+    update: vi.fn(() => ({
+      set: (payload: Record<string, unknown>) => {
+        const isBoundaryRevision =
+          payload && typeof payload === "object" && "configRevision" in payload;
+        if (!isBoundaryRevision) {
+          updatedValues.push(payload);
+        }
+        const chain = isBoundaryRevision
+          ? makeChain([{ configRevision: payload.configRevision }])
+          : take();
+        return {
+          where: () => chain,
+          returning: () => chain,
+        };
+      },
+    })),
+    delete: vi.fn((table: unknown) => {
+      void table;
+      return take();
+    }),
     transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(db)),
     insertedValues,
     updatedValues,
@@ -258,6 +270,7 @@ describe("mcp-studio ownership", () => {
     const db = makeDb([[]]);
     await expect(
       createLegacyTool(db as never, "user-b", "mcs_a", {
+        expectedRevision: 1,
         name: "get_contact",
         method: "GET",
         pathTemplate: "/contacts/{{id}}",
@@ -296,6 +309,7 @@ describe("mcp-studio ownership", () => {
     const db = makeDb([
       [
         {
+          configRevision: 1,
           id: "mcs_1",
           userId: "user-a",
           name: "A1",
@@ -334,6 +348,7 @@ describe("mcp-studio ownership", () => {
     const db = makeDb([
       [
         {
+          configRevision: 1,
           id: "mcs_1",
           userId: "user-a",
           name: "A1",
@@ -469,6 +484,7 @@ describe("mcp-studio servers", () => {
     const db = makeDb([
       [
         {
+          configRevision: 1,
           id: "mcs_1",
           userId: "user-a",
           name: "CRM",
@@ -496,6 +512,7 @@ describe("mcp-studio servers", () => {
   it("creates a server with bearer auth as a secret variable", async () => {
     const secret = "s".repeat(32);
     const created = {
+      configRevision: 1,
       id: "mcs_1",
       userId: "user-a",
       name: "CRM",
@@ -551,6 +568,7 @@ describe("mcp-studio servers", () => {
     const db = makeDb([
       [
         {
+          configRevision: 1,
           id: "mcs_1",
           userId: "user-a",
           name: "CRM",
@@ -600,6 +618,7 @@ describe("mcp-studio servers", () => {
   it("switches bearer to header without dropping unrelated Version", async () => {
     const secret = "s".repeat(32);
     const server = {
+      configRevision: 1,
       id: "mcs_1",
       userId: "user-a",
       name: "CRM",
@@ -638,6 +657,8 @@ describe("mcp-studio servers", () => {
       db as never,
       "user-a",
       "mcs_1",
+
+      1,
       { type: "header", headerName: "X-API-Key", value: "key_123" },
       secret,
     );
@@ -651,6 +672,7 @@ describe("mcp-studio servers", () => {
 
   it("clears unreferenced api_token when set to none", async () => {
     const server = {
+      configRevision: 1,
       id: "mcs_1",
       userId: "user-a",
       name: "CRM",
@@ -680,6 +702,8 @@ describe("mcp-studio servers", () => {
       db as never,
       "user-a",
       "mcs_1",
+
+      1,
       { type: "none" },
       "s".repeat(32),
     );
@@ -690,6 +714,7 @@ describe("mcp-studio servers", () => {
 
   it("clears all Custom credential defaults when set to none", async () => {
     const server = {
+      configRevision: 1,
       id: "mcs_1",
       userId: "user-a",
       name: "CRM",
@@ -726,6 +751,8 @@ describe("mcp-studio servers", () => {
       db as never,
       "user-a",
       "mcs_1",
+
+      1,
       { type: "none" },
       "s".repeat(32),
     );
@@ -738,6 +765,7 @@ describe("mcp-studio servers", () => {
     const db = makeDb([
       [
         {
+          configRevision: 1,
           id: "mcs_1",
           userId: "user-a",
           status: "draft",
@@ -753,6 +781,8 @@ describe("mcp-studio servers", () => {
         db as never,
         "user-a",
         "mcs_1",
+
+        1,
         { type: "query", paramName: "api_key", value: "secret" },
         "s".repeat(32),
       ),
@@ -766,6 +796,7 @@ describe("mcp-studio servers", () => {
 
   it("never reuses or overwrites a manual value with a colliding name", async () => {
     const server = {
+      configRevision: 1,
       id: "mcs_1",
       userId: "user-a",
       status: "draft",
@@ -805,6 +836,8 @@ describe("mcp-studio servers", () => {
       db as never,
       "user-a",
       "mcs_1",
+
+      1,
       { type: "bearer", token: "sk_live_123" },
       "s".repeat(32),
     );
@@ -829,6 +862,7 @@ describe("mcp-studio servers", () => {
     const db = makeDb([
       [
         {
+          configRevision: 1,
           id: "mcs_1",
           userId: "user-a",
           name: "CRM",
@@ -837,22 +871,17 @@ describe("mcp-studio servers", () => {
           allowedHosts: ["api.example.com"],
         },
       ],
-      [{ id: "mcs_1" }],
+      [{ configRevision: 1, id: "mcs_1" }],
       [{ count: 0 }],
       [],
       [],
       [],
     ]);
 
-    await updateServer(
-      db as never,
-      "user-a",
-      "mcs_1",
-      {
-        baseUrl: "https://api.example.com/v3/",
-      },
-      "http://localhost:5173",
-    );
+    await updateServer(db as never, "user-a", "mcs_1", {
+      expectedRevision: 1,
+      baseUrl: "https://api.example.com/v3/",
+    });
 
     expect(db.updatedValues[0]).toMatchObject({
       baseUrl: "https://api.example.com/v3",
@@ -863,6 +892,7 @@ describe("mcp-studio servers", () => {
     const db = makeDb([
       [
         {
+          configRevision: 1,
           id: "mcs_1",
           userId: "user-a",
           name: "CRM",
@@ -874,15 +904,10 @@ describe("mcp-studio servers", () => {
     ]);
 
     await expect(
-      updateServer(
-        db as never,
-        "user-a",
-        "mcs_1",
-        {
-          defaultHeaders: { Authorization: "Bearer sk_live_123" },
-        },
-        "http://localhost:5173",
-      ),
+      updateServer(db as never, "user-a", "mcs_1", {
+        expectedRevision: 1,
+        defaultHeaders: { Authorization: "Bearer sk_live_123" },
+      }),
     ).rejects.toSatisfy(
       (error: unknown) =>
         error instanceof AppError &&
@@ -895,6 +920,7 @@ describe("mcp-studio servers", () => {
     const db = makeDb([
       [
         {
+          configRevision: 1,
           id: "mcs_1",
           userId: "user-a",
           name: "CRM",
@@ -906,15 +932,10 @@ describe("mcp-studio servers", () => {
     ]);
 
     await expect(
-      updateServer(
-        db as never,
-        "user-a",
-        "mcs_1",
-        {
-          defaultHeaders: { "X-Shopify-Access-Token": "shpat_123" },
-        },
-        "http://localhost:5173",
-      ),
+      updateServer(db as never, "user-a", "mcs_1", {
+        expectedRevision: 1,
+        defaultHeaders: { "X-Shopify-Access-Token": "shpat_123" },
+      }),
     ).rejects.toSatisfy(
       (error: unknown) =>
         error instanceof AppError &&
@@ -927,6 +948,7 @@ describe("mcp-studio servers", () => {
     const db = makeDb([
       [
         {
+          configRevision: 1,
           id: "mcs_1",
           userId: "user-a",
           name: "CRM",
@@ -935,126 +957,21 @@ describe("mcp-studio servers", () => {
           allowedHosts: ["api.example.com"],
         },
       ],
-      [{ id: "mcs_1" }],
+      [{ configRevision: 1, id: "mcs_1" }],
       [{ count: 0 }],
       [],
       [],
       [],
     ]);
 
-    await updateServer(
-      db as never,
-      "user-a",
-      "mcs_1",
-      {
-        defaultHeaders: { Authorization: "Bearer {{api_token}}" },
-      },
-      "http://localhost:5173",
-    );
+    await updateServer(db as never, "user-a", "mcs_1", {
+      expectedRevision: 1,
+      defaultHeaders: { Authorization: "Bearer {{api_token}}" },
+    });
 
     expect(db.updatedValues[0]).toMatchObject({
       defaultHeaders: { Authorization: "Bearer {{api_token}}" },
     });
-  });
-
-  it("persists a custom icon image URL scoped to the owner", async () => {
-    const iconImage =
-      "http://localhost:5173/api/storage/object?key=users%2Fuser-a%2Fserver-icons%2Ficon.png";
-
-    const db = makeDb([
-      [
-        {
-          id: "mcs_1",
-          userId: "user-a",
-          name: "CRM",
-          status: "draft",
-          baseUrl: "https://api.example.com",
-          allowedHosts: ["api.example.com"],
-          iconImage: null,
-        },
-      ],
-      [{ id: "mcs_1", iconImage }],
-      [{ count: 0 }],
-      [],
-      [],
-      [],
-    ]);
-
-    await updateServer(
-      db as never,
-      "user-a",
-      "mcs_1",
-      { iconImage },
-      "http://localhost:5173",
-    );
-
-    expect(db.updatedValues[0]).toMatchObject({ iconImage });
-  });
-
-  it("clears a custom icon image", async () => {
-    const db = makeDb([
-      [
-        {
-          id: "mcs_1",
-          userId: "user-a",
-          name: "CRM",
-          status: "draft",
-          baseUrl: "https://api.example.com",
-          allowedHosts: ["api.example.com"],
-          iconImage:
-            "http://localhost:5173/api/storage/object?key=users%2Fuser-a%2Fserver-icons%2Ficon.png",
-        },
-      ],
-      [{ id: "mcs_1", iconImage: null }],
-      [{ count: 0 }],
-      [],
-      [],
-      [],
-    ]);
-
-    await updateServer(
-      db as never,
-      "user-a",
-      "mcs_1",
-      { iconImage: null },
-      "http://localhost:5173",
-    );
-
-    expect(db.updatedValues[0]).toMatchObject({ iconImage: null });
-  });
-
-  it("rejects a foreign storage icon URL", async () => {
-    const db = makeDb([
-      [
-        {
-          id: "mcs_1",
-          userId: "user-a",
-          name: "CRM",
-          status: "draft",
-          baseUrl: "https://api.example.com",
-          allowedHosts: ["api.example.com"],
-          iconImage: null,
-        },
-      ],
-    ]);
-
-    await expect(
-      updateServer(
-        db as never,
-        "user-a",
-        "mcs_1",
-        {
-          iconImage:
-            "http://localhost:5173/api/storage/object?key=users%2Fuser-b%2Fserver-icons%2Ficon.png",
-        },
-        "http://localhost:5173",
-      ),
-    ).rejects.toSatisfy(
-      (error: unknown) =>
-        error instanceof AppError &&
-        error.appCode === APP_ERROR_CODES.INVALID_INPUT,
-    );
-    expect(db.update).not.toHaveBeenCalled();
   });
 });
 
@@ -1065,7 +982,14 @@ describe("mcp-studio tools", () => {
 
   it("defaults GET tools to enabled without mutation", async () => {
     const db = makeDb([
-      [{ id: "mcs_1", status: "live", baseUrl: "https://api.example.com" }],
+      [
+        {
+          configRevision: 1,
+          id: "mcs_1",
+          status: "live",
+          baseUrl: "https://api.example.com",
+        },
+      ],
       [{ count: 0 }],
       [], // listVariableNames
       [], // loadCompileServerValueRefs
@@ -1073,6 +997,7 @@ describe("mcp-studio tools", () => {
     ]);
 
     await createLegacyTool(db as never, "user-a", "mcs_1", {
+      expectedRevision: 1,
       name: "get_contact",
       method: "GET",
       pathTemplate: "/contacts/{{id}}",
@@ -1091,7 +1016,14 @@ describe("mcp-studio tools", () => {
 
   it("warns about placeholders without a matching param or variable", async () => {
     const db = makeDb([
-      [{ id: "mcs_1", status: "live", baseUrl: "https://api.example.com" }],
+      [
+        {
+          configRevision: 1,
+          id: "mcs_1",
+          status: "live",
+          baseUrl: "https://api.example.com",
+        },
+      ],
       [{ count: 0 }],
       [],
       [],
@@ -1099,6 +1031,7 @@ describe("mcp-studio tools", () => {
     ]);
 
     const created = await createLegacyTool(db as never, "user-a", "mcs_1", {
+      expectedRevision: 1,
       name: "get_contact",
       method: "GET",
       pathTemplate: "/contacts/{{contactId}}",
@@ -1120,7 +1053,14 @@ describe("mcp-studio tools", () => {
 
   it("maps duplicate tool names to MCP_TOOL_NAME_CONFLICT", async () => {
     const selectResults = [
-      [{ id: "mcs_1", status: "live", baseUrl: "https://api.example.com" }],
+      [
+        {
+          configRevision: 1,
+          id: "mcs_1",
+          status: "live",
+          baseUrl: "https://api.example.com",
+        },
+      ],
       [{ count: 0 }],
       [],
       [],
@@ -1135,10 +1075,14 @@ describe("mcp-studio tools", () => {
           },
         }),
       })),
+      transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
+        fn(db),
+      ),
     };
 
     await expect(
       createLegacyTool(db as never, "user-a", "mcs_1", {
+        expectedRevision: 1,
         name: "get_contact",
         method: "GET",
         pathTemplate: "/contacts",
@@ -1152,7 +1096,14 @@ describe("mcp-studio tools", () => {
 
   it("warns about params without a matching placeholder", async () => {
     const db = makeDb([
-      [{ id: "mcs_1", status: "live", baseUrl: "https://api.example.com" }],
+      [
+        {
+          configRevision: 1,
+          id: "mcs_1",
+          status: "live",
+          baseUrl: "https://api.example.com",
+        },
+      ],
       [{ count: 0 }],
       [],
       [],
@@ -1160,6 +1111,7 @@ describe("mcp-studio tools", () => {
     ]);
 
     const created = await createLegacyTool(db as never, "user-a", "mcs_1", {
+      expectedRevision: 1,
       name: "get_contact",
       method: "GET",
       pathTemplate: "/contacts",
@@ -1172,10 +1124,14 @@ describe("mcp-studio tools", () => {
   });
 
   it("rejects literal auth headers on tools", async () => {
-    const db = makeDb([[{ id: "mcs_1", status: "live" }], [{ count: 0 }]]);
+    const db = makeDb([
+      [{ configRevision: 1, id: "mcs_1", status: "live" }],
+      [{ count: 0 }],
+    ]);
 
     await expect(
       createLegacyTool(db as never, "user-a", "mcs_1", {
+        expectedRevision: 1,
         name: "get_contact",
         method: "GET",
         pathTemplate: "/contacts",
@@ -1196,6 +1152,7 @@ describe("mcp-studio typed tools", () => {
   });
 
   const serverRow = {
+    configRevision: 1,
     id: "mcs_1",
     status: "live",
     baseUrl: "https://api.example.com",
@@ -1238,6 +1195,7 @@ describe("mcp-studio typed tools", () => {
     ]);
 
     await createTool(db as never, "user-a", "mcs_1", {
+      expectedRevision: 1,
       name: "get_contact",
       title: "Get contact",
       description: "Fetch one contact.",
@@ -1274,6 +1232,7 @@ describe("mcp-studio typed tools", () => {
 
     await expect(
       updateLegacyTool(db as never, "user-a", "mcs_1", "mct_1", {
+        expectedRevision: 1,
         name: "renamed",
       }),
     ).rejects.toSatisfy(
@@ -1309,6 +1268,7 @@ describe("mcp-studio typed tools", () => {
     ]);
 
     await updateTool(db as never, "user-a", "mcs_1", "mct_1", {
+      expectedRevision: 1,
       name: "renamed",
       title: "Get contact",
       description: "Fetch one contact.",
@@ -1333,6 +1293,7 @@ describe("mcp-studio typed tools", () => {
 
     await expect(
       createTool(db as never, "user-a", "mcs_1", {
+        expectedRevision: 1,
         name: "secure_get",
         method: "GET",
         enabled: true,
@@ -1382,6 +1343,7 @@ describe("mcp-studio typed tools", () => {
     ]);
 
     await updateServerCommon(db as never, "user-a", "mcs_1", {
+      expectedRevision: 1,
       common: {
         headers: [
           {
@@ -1407,6 +1369,7 @@ describe("mcp-studio typed tools", () => {
 
     await expect(
       updateServerCommon(db as never, "user-a", "mcs_1", {
+        expectedRevision: 1,
         common: {
           headers: [
             {
@@ -1448,7 +1411,9 @@ describe("mcp-studio typed tools", () => {
       [{ id: "mct_2", name: "get_contact_copy" }],
     ]);
 
-    await duplicateTool(db as never, "user-a", "mcs_1", "mct_1");
+    await duplicateTool(db as never, "user-a", "mcs_1", "mct_1", {
+      expectedRevision: 1,
+    });
 
     const inserted = db.insertedValues[0] as {
       requestDefinition?: {
@@ -1468,6 +1433,7 @@ describe("mcp-studio typed tools", () => {
     ]);
 
     const result = await updateServerCommon(db as never, "user-a", "mcs_1", {
+      expectedRevision: 1,
       common: {
         headers: [
           {
@@ -1518,6 +1484,7 @@ describe("mcp-studio typed tools", () => {
 
     await expect(
       updateServerCommon(db as never, "user-a", "mcs_1", {
+        expectedRevision: 1,
         common: {
           headers: [
             {
@@ -1555,6 +1522,7 @@ describe("mcp-studio typed tools", () => {
 
     await expect(
       updateServerCommon(db as never, "user-a", "mcs_1", {
+        expectedRevision: 1,
         common: {
           headers: [
             {
@@ -1591,6 +1559,7 @@ describe("mcp-studio typed tools", () => {
 
     await expect(
       updateServerCommon(db as never, "user-a", "mcs_1", {
+        expectedRevision: 1,
         common: { headers: [], query: [] },
       }),
     ).rejects.toSatisfy(
@@ -1608,6 +1577,7 @@ describe("mcp-studio safe curl import", () => {
   });
 
   const server = {
+    configRevision: 1,
     id: "mcs_1",
     userId: "user-a",
     status: "live",
@@ -1634,6 +1604,7 @@ describe("mcp-studio safe curl import", () => {
     ]);
 
     const result = await createToolFromCurl(db as never, "user-a", "mcs_1", {
+      expectedRevision: 1,
       curl: `curl -H 'Authorization: Bearer super-secret' https://api.example.com/contacts`,
     });
 
@@ -1675,6 +1646,7 @@ describe("mcp-studio safe curl import", () => {
     ]);
 
     await createToolFromCurl(db as never, "user-a", "mcs_1", {
+      expectedRevision: 1,
       curl: `curl -H 'Authorization: Bearer other-secret' https://api.example.com/contacts`,
     });
 
@@ -1692,6 +1664,7 @@ describe("mcp-studio safe curl import", () => {
         "user-a",
         "mcs_1",
         {
+          expectedRevision: 1,
           curl: `curl -H 'Authorization: Bearer super-secret' https://api.example.com/contacts`,
         },
         { rejectCredentials: true },
@@ -1709,6 +1682,7 @@ describe("mcp-studio safe curl import", () => {
 
     await expect(
       createToolFromCurl(db as never, "user-a", "mcs_1", {
+        expectedRevision: 1,
         curl: `curl https://evil.example.com/contacts`,
       }),
     ).rejects.toSatisfy(
@@ -1736,6 +1710,7 @@ describe("mcp-studio safe curl import", () => {
     ]);
 
     await createToolFromCurl(db as never, "user-a", "mcs_1", {
+      expectedRevision: 1,
       curl: `curl -H 'X-Api-Version: v2' https://api.example.com/items`,
       markings: [
         {
@@ -1762,6 +1737,7 @@ describe("mcp-studio safe curl import", () => {
     ]);
 
     await createToolFromCurl(db as never, "user-a", "mcs_1", {
+      expectedRevision: 1,
       curl: `curl 'https://api.example.com/v1/items?locationId=loc_9'`,
       markings: [
         {
@@ -1811,6 +1787,7 @@ describe("mcp-studio safe curl import", () => {
 
     await expect(
       createToolFromCurl(db as never, "user-a", "mcs_1", {
+        expectedRevision: 1,
         curl: `curl https://api.example.com/items`,
       }),
     ).rejects.toSatisfy(
@@ -1828,7 +1805,7 @@ describe("mcp-studio variables", () => {
 
   it("stores secret variables encrypted without echoing the value", async () => {
     const db = makeDb([
-      [{ id: "mcs_1" }],
+      [{ configRevision: 1, id: "mcs_1" }],
       [
         {
           id: "msv_1",
@@ -1844,7 +1821,12 @@ describe("mcp-studio variables", () => {
       db as never,
       "user-a",
       "mcs_1",
-      { name: "api_token", isSecret: true, value: "sk_live_123" },
+      {
+        expectedRevision: 1,
+        name: "api_token",
+        isSecret: true,
+        value: "sk_live_123",
+      },
       "s".repeat(32),
     );
 
@@ -1860,7 +1842,7 @@ describe("mcp-studio variables", () => {
 
   it("stores plain variables in readable plaintext", async () => {
     const db = makeDb([
-      [{ id: "mcs_1" }],
+      [{ configRevision: 1, id: "mcs_1" }],
       [
         {
           id: "msv_1",
@@ -1876,7 +1858,12 @@ describe("mcp-studio variables", () => {
       db as never,
       "user-a",
       "mcs_1",
-      { name: "location_id", isSecret: false, value: "loc_9" },
+      {
+        expectedRevision: 1,
+        name: "location_id",
+        isSecret: false,
+        value: "loc_9",
+      },
       "s".repeat(32),
     );
 
@@ -1888,14 +1875,14 @@ describe("mcp-studio variables", () => {
   });
 
   it("rejects invalid variable names", async () => {
-    const db = makeDb([[{ id: "mcs_1" }]]);
+    const db = makeDb([[{ configRevision: 1, id: "mcs_1" }]]);
 
     await expect(
       createVariable(
         db as never,
         "user-a",
         "mcs_1",
-        { name: "1Bad-Name", isSecret: false, value: "x" },
+        { expectedRevision: 1, name: "1Bad-Name", isSecret: false, value: "x" },
         "s".repeat(32),
       ),
     ).rejects.toSatisfy(
@@ -1908,7 +1895,7 @@ describe("mcp-studio variables", () => {
 
   it("maps duplicate names to MCP_VARIABLE_NAME_CONFLICT", async () => {
     const db = {
-      select: vi.fn(() => makeChain([{ id: "mcs_1" }])),
+      select: vi.fn(() => makeChain([{ configRevision: 1, id: "mcs_1" }])),
       insert: vi.fn(() => ({
         values: () => ({
           returning: async () => {
@@ -1916,6 +1903,9 @@ describe("mcp-studio variables", () => {
           },
         }),
       })),
+      transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
+        fn(db),
+      ),
     };
 
     await expect(
@@ -1923,7 +1913,7 @@ describe("mcp-studio variables", () => {
         db as never,
         "user-a",
         "mcs_1",
-        { name: "api_token", isSecret: true, value: "sk" },
+        { expectedRevision: 1, name: "api_token", isSecret: true, value: "sk" },
         "s".repeat(32),
       ),
     ).rejects.toSatisfy(
@@ -1935,7 +1925,7 @@ describe("mcp-studio variables", () => {
 
   it("lists variables with hasValue metadata and no secret values", async () => {
     const db = makeDb([
-      [{ id: "mcs_1" }],
+      [{ configRevision: 1, id: "mcs_1" }],
       [
         {
           id: "msv_1",
@@ -1982,7 +1972,7 @@ describe("mcp-studio variables", () => {
 
   it("deletes variables by name", async () => {
     const db = makeDb([
-      [{ id: "mcs_1" }],
+      [{ configRevision: 1, id: "mcs_1" }],
       [{ id: "msv_1", name: "api_token" }],
       [], // findServerValueReferences: no referencing tools
       [{ id: "msv_1" }],
@@ -1993,15 +1983,23 @@ describe("mcp-studio variables", () => {
       "user-a",
       "mcs_1",
       "api_token",
+      1,
     );
 
-    expect(result).toEqual({ name: "api_token", deleted: true });
+    expect(result).toEqual({ name: "api_token", deleted: true, revision: 2 });
     expect(db.delete).toHaveBeenCalled();
   });
 
   it("blocks deletion when a variable is still referenced by a tool", async () => {
     const db = makeDb([
-      [{ id: "mcs_1", authConfiguration: null, commonEntries: null }],
+      [
+        {
+          configRevision: 1,
+          id: "mcs_1",
+          authConfiguration: null,
+          commonEntries: null,
+        },
+      ],
       [{ id: "msv_1", name: "api_token" }],
       [
         {
@@ -2017,7 +2015,7 @@ describe("mcp-studio variables", () => {
     ]);
 
     await expect(
-      deleteVariable(db as never, "user-a", "mcs_1", "api_token"),
+      deleteVariable(db as never, "user-a", "mcs_1", "api_token", 1),
     ).rejects.toSatisfy(
       (error: unknown) =>
         error instanceof AppError &&
@@ -2032,6 +2030,7 @@ describe("mcp-studio variables", () => {
     const db = makeDb([
       [
         {
+          configRevision: 1,
           id: "mcs_1",
           authConfiguration: {
             kind: "bearer",
@@ -2051,7 +2050,7 @@ describe("mcp-studio variables", () => {
     ]);
 
     await expect(
-      deleteVariable(db as never, "user-a", "mcs_1", "api_token"),
+      deleteVariable(db as never, "user-a", "mcs_1", "api_token", 1),
     ).rejects.toSatisfy(
       (error: unknown) =>
         error instanceof AppError &&
@@ -2064,7 +2063,7 @@ describe("mcp-studio variables", () => {
 
   it("rotates secret variables with fresh encryption and no echo", async () => {
     const db = makeDb([
-      [{ id: "mcs_1" }],
+      [{ configRevision: 1, id: "mcs_1" }],
       [{ id: "msv_1", name: "api_token", isSecret: true }],
       [],
     ]);
@@ -2074,7 +2073,7 @@ describe("mcp-studio variables", () => {
       "user-a",
       "mcs_1",
       "api_token",
-      { value: "sk_rotated" },
+      { expectedRevision: 1, value: "sk_rotated" },
       "s".repeat(32),
     );
 
@@ -2091,7 +2090,7 @@ describe("mcp-studio variables", () => {
 
   it("updates plain variables in readable plaintext", async () => {
     const db = makeDb([
-      [{ id: "mcs_1" }],
+      [{ configRevision: 1, id: "mcs_1" }],
       [{ id: "msv_2", name: "region", isSecret: false }],
       [],
     ]);
@@ -2101,7 +2100,7 @@ describe("mcp-studio variables", () => {
       "user-a",
       "mcs_1",
       "region",
-      { value: "mx-2" },
+      { expectedRevision: 1, value: "mx-2" },
       "s".repeat(32),
     );
 
@@ -2109,6 +2108,7 @@ describe("mcp-studio variables", () => {
       name: "region",
       isSecret: false,
       hasValue: true,
+      revision: 2,
     });
     expect(db.updatedValues[0]).toMatchObject({
       isSecret: false,
@@ -2119,7 +2119,7 @@ describe("mcp-studio variables", () => {
 
   it("rejects clearing secrecy without a new value", async () => {
     const db = makeDb([
-      [{ id: "mcs_1" }],
+      [{ configRevision: 1, id: "mcs_1" }],
       [{ id: "msv_1", name: "api_token", isSecret: true }],
     ]);
 
@@ -2129,7 +2129,7 @@ describe("mcp-studio variables", () => {
         "user-a",
         "mcs_1",
         "api_token",
-        { isSecret: false },
+        { expectedRevision: 1, isSecret: false },
         "s".repeat(32),
       ),
     ).rejects.toSatisfy(
@@ -2143,7 +2143,7 @@ describe("mcp-studio variables", () => {
 
   it("encrypts the current plaintext when flipping a variable to secret", async () => {
     const db = makeDb([
-      [{ id: "mcs_1" }],
+      [{ configRevision: 1, id: "mcs_1" }],
       [
         {
           id: "msv_2",
@@ -2161,7 +2161,7 @@ describe("mcp-studio variables", () => {
       "user-a",
       "mcs_1",
       "region",
-      { isSecret: true },
+      { expectedRevision: 1, isSecret: true },
       "s".repeat(32),
     );
 
@@ -2169,6 +2169,7 @@ describe("mcp-studio variables", () => {
       name: "region",
       isSecret: true,
       hasValue: true,
+      revision: 2,
     });
     expect(JSON.stringify(result)).not.toContain("mx-visible");
     const update = db.updatedValues[0] as Record<string, unknown>;
@@ -2181,7 +2182,7 @@ describe("mcp-studio variables", () => {
   });
 
   it("rejects updates to variables that do not exist", async () => {
-    const db = makeDb([[{ id: "mcs_1" }], []]);
+    const db = makeDb([[{ configRevision: 1, id: "mcs_1" }], []]);
 
     await expect(
       updateVariable(
@@ -2189,7 +2190,7 @@ describe("mcp-studio variables", () => {
         "user-a",
         "mcs_1",
         "missing",
-        { value: "x" },
+        { expectedRevision: 1, value: "x" },
         "s".repeat(32),
       ),
     ).rejects.toSatisfy(
@@ -2203,9 +2204,9 @@ describe("mcp-studio variables", () => {
 
   it("setVariable transitions an existing secret variable to plain", async () => {
     const db = makeDb([
-      [{ id: "mcs_1" }],
+      [{ configRevision: 1, id: "mcs_1" }],
       [{ name: "api_token" }],
-      [{ id: "mcs_1" }],
+      [{ configRevision: 1, id: "mcs_1" }],
       [{ id: "msv_1", name: "api_token", isSecret: true }],
       [],
     ]);
@@ -2214,7 +2215,12 @@ describe("mcp-studio variables", () => {
       db as never,
       "user-a",
       "mcs_1",
-      { name: "api_token", isSecret: false, value: "now-plain" },
+      {
+        expectedRevision: 1,
+        name: "api_token",
+        isSecret: false,
+        value: "now-plain",
+      },
       "s".repeat(32),
     );
 
@@ -2229,9 +2235,9 @@ describe("mcp-studio variables", () => {
 
   it("setVariable transitions an existing plain variable to secret", async () => {
     const db = makeDb([
-      [{ id: "mcs_1" }],
+      [{ configRevision: 1, id: "mcs_1" }],
       [{ name: "region" }],
-      [{ id: "mcs_1" }],
+      [{ configRevision: 1, id: "mcs_1" }],
       [{ id: "msv_2", name: "region", isSecret: false }],
       [],
     ]);
@@ -2240,7 +2246,12 @@ describe("mcp-studio variables", () => {
       db as never,
       "user-a",
       "mcs_1",
-      { name: "region", isSecret: true, value: "now-secret" },
+      {
+        expectedRevision: 1,
+        name: "region",
+        isSecret: true,
+        value: "now-secret",
+      },
       "s".repeat(32),
     );
 
@@ -2255,9 +2266,8 @@ describe("mcp-studio variables", () => {
 
   it("setVariable creates the variable when it does not exist", async () => {
     const db = makeDb([
-      [{ id: "mcs_1" }],
+      [{ configRevision: 1, id: "mcs_1" }],
       [],
-      [{ id: "mcs_1" }],
       [
         {
           id: "msv_3",
@@ -2273,7 +2283,12 @@ describe("mcp-studio variables", () => {
       db as never,
       "user-a",
       "mcs_1",
-      { name: "location_id", isSecret: false, value: "loc_9" },
+      {
+        expectedRevision: 1,
+        name: "location_id",
+        isSecret: false,
+        value: "loc_9",
+      },
       "s".repeat(32),
     );
 
@@ -2293,7 +2308,7 @@ describe("mcp-studio deleteServer", () => {
 
   it("deletes the server and its related rows in one transaction", async () => {
     const db = makeDb([
-      [{ id: "mcs_1", userId: "user-a" }],
+      [{ configRevision: 1, id: "mcs_1", userId: "user-a" }],
       [],
       [],
       [],
@@ -2301,9 +2316,9 @@ describe("mcp-studio deleteServer", () => {
       [],
     ]);
 
-    const result = await deleteServer(db as never, "user-a", "mcs_1");
+    const result = await deleteServer(db as never, "user-a", "mcs_1", 1);
 
-    expect(result).toEqual({ id: "mcs_1", deleted: true });
+    expect(result).toEqual({ id: "mcs_1", deleted: true, revision: 2 });
     expect(db.transaction).toHaveBeenCalledTimes(1);
     expect(db.delete.mock.calls.map((call) => call[0])).toEqual([
       mcpCallLog,
@@ -2318,13 +2333,13 @@ describe("mcp-studio deleteServer", () => {
     const db = makeDb([[]]);
 
     await expect(
-      deleteServer(db as never, "user-b", "mcs_a"),
+      deleteServer(db as never, "user-b", "mcs_a", 1),
     ).rejects.toSatisfy(
       (error: unknown) =>
         error instanceof AppError &&
         error.appCode === APP_ERROR_CODES.MCP_SERVER_NOT_FOUND,
     );
-    expect(db.transaction).not.toHaveBeenCalled();
+    expect(db.transaction).toHaveBeenCalledTimes(1);
     expect(db.delete).not.toHaveBeenCalled();
   });
 });
@@ -2335,20 +2350,23 @@ describe("mcp-studio deleteTool", () => {
   });
 
   it("deletes only the tool row so call logs survive", async () => {
-    const db = makeDb([[{ id: "mcs_1" }], [{ id: "mct_1" }]]);
+    const db = makeDb([
+      [{ configRevision: 1, id: "mcs_1" }],
+      [{ id: "mct_1" }],
+    ]);
 
-    const result = await deleteTool(db as never, "user-a", "mcs_1", "mct_1");
+    const result = await deleteTool(db as never, "user-a", "mcs_1", "mct_1", 1);
 
-    expect(result).toEqual({ id: "mct_1", deleted: true });
+    expect(result).toEqual({ id: "mct_1", deleted: true, revision: 2 });
     expect(db.delete).toHaveBeenCalledTimes(1);
     expect(db.delete.mock.calls[0][0]).toBe(mcpTool);
   });
 
   it("returns not found for a missing tool", async () => {
-    const db = makeDb([[{ id: "mcs_1" }], []]);
+    const db = makeDb([[{ configRevision: 1, id: "mcs_1" }], []]);
 
     await expect(
-      deleteTool(db as never, "user-a", "mcs_1", "mct_missing"),
+      deleteTool(db as never, "user-a", "mcs_1", "mct_missing", 1),
     ).rejects.toSatisfy(
       (error: unknown) =>
         error instanceof AppError &&
@@ -2360,7 +2378,7 @@ describe("mcp-studio deleteTool", () => {
     const db = makeDb([[]]);
 
     await expect(
-      deleteTool(db as never, "user-b", "mcs_a", "mct_1"),
+      deleteTool(db as never, "user-b", "mcs_a", "mct_1", 1),
     ).rejects.toSatisfy(
       (error: unknown) =>
         error instanceof AppError &&
@@ -2382,6 +2400,7 @@ describe("mcp-studio updateTool", () => {
         .mockImplementationOnce(() =>
           makeChain([
             {
+              configRevision: 1,
               id: "mcs_1",
               status: "live",
               baseUrl: "https://api.example.com",
@@ -2413,10 +2432,14 @@ describe("mcp-studio updateTool", () => {
           }),
         }),
       })),
+      transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
+        fn(db),
+      ),
     };
 
     await expect(
       updateLegacyTool(db as never, "user-a", "mcs_1", "mct_1", {
+        expectedRevision: 1,
         name: "list_contacts",
       }),
     ).rejects.toSatisfy(
@@ -2433,7 +2456,9 @@ describe("mcp-studio curl preview", () => {
   });
 
   it("returns a sanitized preview and requires ownership", async () => {
-    const db = makeDb([[{ id: "mcs_1", baseUrl: "https://api.example.com" }]]);
+    const db = makeDb([
+      [{ configRevision: 1, id: "mcs_1", baseUrl: "https://api.example.com" }],
+    ]);
 
     const preview = await previewCurlImport(
       db as never,
@@ -2467,7 +2492,9 @@ describe("mcp-studio curl preview", () => {
   });
 
   it("rejects an unparseable curl with MCP_CURL_INVALID", async () => {
-    const db = makeDb([[{ id: "mcs_1", baseUrl: "https://api.example.com" }]]);
+    const db = makeDb([
+      [{ configRevision: 1, id: "mcs_1", baseUrl: "https://api.example.com" }],
+    ]);
 
     await expect(
       previewCurlImport(db as never, "user-a", "mcs_1", "not a curl"),
@@ -2490,6 +2517,7 @@ describe("mcp-studio testConnection", () => {
   });
 
   const server = {
+    configRevision: 1,
     id: "mcs_1",
     userId: "user-a",
     baseUrl: "https://api.example.com",
@@ -2626,9 +2654,11 @@ describe("mcp-studio createPlatformToken", () => {
     vi.clearAllMocks();
   });
 
-  it("defaults to the standard scope set and TTL, replacing atomically", async () => {
+  it("creates a new PAT with default scopes without revoking others", async () => {
     const db = makeDb([
-      [], // revoke previous active tokens
+      [], // user lock
+      [], // revoke expired platform tokens
+      [{ count: 0 }], // active count
       [
         {
           id: "mtk_1",
@@ -2650,11 +2680,19 @@ describe("mcp-studio createPlatformToken", () => {
     ]);
     expect(db.transaction).toHaveBeenCalledTimes(1);
     expect(typeof result.token).toBe("string");
+    // Added rather than replaced: no successor lineage is set.
+    expect(db.insertedValues).toHaveLength(1);
+    expect(
+      (db.insertedValues[0] as Record<string, unknown>).replacedByTokenId ??
+        null,
+    ).toBeNull();
   });
 
   it("accepts explicit scopes and a custom expiry window", async () => {
     const db = makeDb([
       [],
+      [], // revoke expired platform tokens
+      [{ count: 0 }],
       [
         {
           id: "mtk_1",
@@ -2677,15 +2715,35 @@ describe("mcp-studio createPlatformToken", () => {
     expect(insertPayload.kind).toBe("platform");
   });
 
-  it("performs the revoke and the insert inside one atomic transaction", async () => {
-    // A real Postgres transaction rolls both statements back together on
-    // failure; this asserts the revoke and insert are coupled in the same
-    // transaction callback rather than issued as two independent statements.
-    const revoke = vi.fn(() => ({
-      set: () => ({ where: () => Promise.resolve() }),
+  it("rotates the observed token and couples revoke with insert in one transaction", async () => {
+    const observed = {
+      id: "mtk_old",
+      userId: "user-a",
+      kind: "platform",
+      revokedAt: null,
+      expiresAt: null,
+    };
+    const update = vi.fn(() => ({
+      set: () => ({ where: () => Promise.resolve([]) }),
     }));
+    let selectIndex = 0;
     const db = {
-      update: revoke,
+      select: vi.fn(() => {
+        const rows =
+          [[{ id: "usr_1" }], [observed], [{ count: 0 }]][selectIndex++] ?? [];
+        return {
+          from: () => ({
+            where: () => {
+              const promise = Promise.resolve(rows);
+              return Object.assign(promise, {
+                limit: () => Promise.resolve(rows),
+                for: () => ({ limit: () => Promise.resolve(rows) }),
+              });
+            },
+          }),
+        };
+      }),
+      update,
       insert: vi.fn(() => ({
         values: () => ({
           returning: async () => {
@@ -2698,11 +2756,39 @@ describe("mcp-studio createPlatformToken", () => {
       ),
     };
 
-    await expect(createPlatformToken(db as never, "user-a")).rejects.toThrow(
-      "insert failed",
-    );
+    await expect(
+      createPlatformToken(db as never, "user-a", {
+        replacesTokenId: "mtk_old",
+      }),
+    ).rejects.toThrow("insert failed");
     expect(db.transaction).toHaveBeenCalledTimes(1);
-    expect(revoke).toHaveBeenCalledTimes(1);
+    // Expired-token cleanup + revoke of the observed token.
+    expect(update).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects rotating a token that is no longer active", async () => {
+    const db = makeDb([
+      [], // user lock
+      [], // revoke expired platform tokens
+      [
+        {
+          id: "mtk_old",
+          userId: "user-a",
+          kind: "platform",
+          revokedAt: new Date(),
+          expiresAt: null,
+        },
+      ],
+    ]);
+
+    await expect(
+      createPlatformToken(db as never, "user-a", {
+        replacesTokenId: "mtk_old",
+      }),
+    ).rejects.toMatchObject({
+      appCode: APP_ERROR_CODES.MCP_WRITE_CONFLICT,
+    });
+    expect(db.insert).not.toHaveBeenCalled();
   });
 });
 

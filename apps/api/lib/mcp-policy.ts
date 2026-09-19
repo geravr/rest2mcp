@@ -64,6 +64,9 @@ export const MCP_AUDIT_QUEUE_CAPACITY = 256;
 /** Default Platform MCP token lifetime. */
 export const MCP_PLATFORM_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 
+/** Max concurrently active Platform PATs for one user. */
+export const MCP_MAX_PLATFORM_TOKENS = 20;
+
 export const MCP_REQUEST_DEFINITION_VERSION = 1 as const;
 
 export {

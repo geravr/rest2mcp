@@ -8,12 +8,14 @@ import {
   createToolCommandSchema,
   curlConfirmCommandSchema,
   duplicateToolCommandSchema,
+  expectedRevisionSchema,
   previewLegacyToolCompileCommandSchema,
   previewToolCompileCommandSchema,
   updateLegacyToolCommandSchema,
   updateToolCommandSchema,
 } from "../lib/mcp-domain-commands.js";
 import { protectedProcedure, router } from "../lib/trpc.js";
+import { reconcileServerIconAssetsWithEnv } from "../services/mcp-asset-service.js";
 import { executeMappedTool } from "../services/mcp-executor-service.js";
 import {
   createLegacyTool,
@@ -33,6 +35,7 @@ import {
   getToolEditorState,
   createPlatformToken,
   listCallLogs,
+  listPlatformTokens,
   listServerTokens,
   listServers,
   listTools,
@@ -96,6 +99,7 @@ export const mcpRouter = router({
   setServerAuth: protectedProcedure
     .input(
       serverIdInput.extend({
+        expectedRevision: expectedRevisionSchema,
         auth: serverAuthRecipeSchema,
       }),
     )
@@ -104,6 +108,7 @@ export const mcpRouter = router({
         ctx.dbDirect,
         ctx.user.id,
         input.serverId,
+        input.expectedRevision,
         input.auth,
         ctx.env.MCP_CREDENTIAL_SECRET,
       ),
@@ -115,31 +120,45 @@ export const mcpRouter = router({
 
   updateServer: protectedProcedure
     .input(
-      serverIdInput.extend({
-        name: z.string().trim().min(1).max(120).optional(),
-        description: z.string().trim().max(2000).nullable().optional(),
-        iconImage: z.url().nullable().optional(),
-        baseUrl: z.url().optional(),
-        status: z.enum(["draft", "live", "paused"]).optional(),
-        allowedHosts: z.array(z.string().min(1)).optional(),
-        defaultHeaders: templateMapSchema.nullable().optional(),
-        defaultQuery: templateMapSchema.nullable().optional(),
-      }),
+      serverIdInput
+        .extend({
+          expectedRevision: expectedRevisionSchema,
+          name: z.string().trim().min(1).max(120).optional(),
+          description: z.string().trim().max(2000).nullable().optional(),
+          iconAssetId: z.string().min(1).nullable().optional(),
+          baseUrl: z.url().optional(),
+          status: z.enum(["draft", "live", "paused"]).optional(),
+          allowedHosts: z.array(z.string().min(1)).optional(),
+          defaultHeaders: templateMapSchema.nullable().optional(),
+          defaultQuery: templateMapSchema.nullable().optional(),
+        })
+        .strict(),
     )
-    .mutation(({ ctx, input }) =>
-      updateServer(
+    .mutation(async ({ ctx, input }) => {
+      const result = await updateServer(
         ctx.dbDirect,
         ctx.user.id,
         input.serverId,
         input,
-        ctx.env.APP_ORIGIN,
-      ),
-    ),
+      );
+      // Opportunistic post-commit sweep for replaced/abandoned icon assets.
+      if (input.iconAssetId !== undefined) {
+        void reconcileServerIconAssetsWithEnv(ctx.dbDirect, ctx.env).catch(
+          () => {},
+        );
+      }
+      return result;
+    }),
 
   deleteServer: protectedProcedure
-    .input(serverIdInput)
+    .input(serverIdInput.extend({ expectedRevision: expectedRevisionSchema }))
     .mutation(({ ctx, input }) =>
-      deleteServer(ctx.dbDirect, ctx.user.id, input.serverId),
+      deleteServer(
+        ctx.dbDirect,
+        ctx.user.id,
+        input.serverId,
+        input.expectedRevision,
+      ),
     ),
 
   testConnection: protectedProcedure
@@ -223,6 +242,7 @@ export const mcpRouter = router({
     .input(duplicateToolCommandSchema)
     .mutation(({ ctx, input }) =>
       duplicateTool(ctx.dbDirect, ctx.user.id, input.serverId, input.toolId, {
+        expectedRevision: input.expectedRevision,
         name: input.name,
         title: input.title,
         description: input.description,
@@ -231,9 +251,20 @@ export const mcpRouter = router({
     ),
 
   deleteTool: protectedProcedure
-    .input(serverIdInput.extend({ toolId: z.string().min(1) }))
+    .input(
+      serverIdInput.extend({
+        toolId: z.string().min(1),
+        expectedRevision: expectedRevisionSchema,
+      }),
+    )
     .mutation(({ ctx, input }) =>
-      deleteTool(ctx.dbDirect, ctx.user.id, input.serverId, input.toolId),
+      deleteTool(
+        ctx.dbDirect,
+        ctx.user.id,
+        input.serverId,
+        input.toolId,
+        input.expectedRevision,
+      ),
     ),
 
   previewToolCompile: protectedProcedure
@@ -269,9 +300,15 @@ export const mcpRouter = router({
     ),
 
   updateServerCommon: protectedProcedure
-    .input(serverIdInput.extend({ common: mcpCommonEntriesSchema }))
+    .input(
+      serverIdInput.extend({
+        expectedRevision: expectedRevisionSchema,
+        common: mcpCommonEntriesSchema,
+      }),
+    )
     .mutation(({ ctx, input }) =>
       updateServerCommon(ctx.dbDirect, ctx.user.id, input.serverId, {
+        expectedRevision: input.expectedRevision,
         common: input.common,
       }),
     ),
@@ -285,6 +322,7 @@ export const mcpRouter = router({
   createVariable: protectedProcedure
     .input(
       serverIdInput.extend({
+        expectedRevision: expectedRevisionSchema,
         name: variableNameSchema,
         isSecret: z.boolean(),
         value: z.string().max(8_000),
@@ -295,7 +333,12 @@ export const mcpRouter = router({
         ctx.dbDirect,
         ctx.user.id,
         input.serverId,
-        input,
+        {
+          expectedRevision: input.expectedRevision,
+          name: input.name,
+          isSecret: input.isSecret,
+          value: input.value,
+        },
         ctx.env.MCP_CREDENTIAL_SECRET,
       ),
     ),
@@ -303,6 +346,7 @@ export const mcpRouter = router({
   updateVariable: protectedProcedure
     .input(
       serverIdInput.extend({
+        expectedRevision: expectedRevisionSchema,
         name: variableNameSchema,
         value: z.string().max(8_000).optional(),
         isSecret: z.boolean().optional(),
@@ -314,15 +358,30 @@ export const mcpRouter = router({
         ctx.user.id,
         input.serverId,
         input.name,
-        { value: input.value, isSecret: input.isSecret },
+        {
+          expectedRevision: input.expectedRevision,
+          value: input.value,
+          isSecret: input.isSecret,
+        },
         ctx.env.MCP_CREDENTIAL_SECRET,
       ),
     ),
 
   deleteVariable: protectedProcedure
-    .input(serverIdInput.extend({ name: variableNameSchema }))
+    .input(
+      serverIdInput.extend({
+        expectedRevision: expectedRevisionSchema,
+        name: variableNameSchema,
+      }),
+    )
     .mutation(({ ctx, input }) =>
-      deleteVariable(ctx.dbDirect, ctx.user.id, input.serverId, input.name),
+      deleteVariable(
+        ctx.dbDirect,
+        ctx.user.id,
+        input.serverId,
+        input.name,
+        input.expectedRevision,
+      ),
     ),
 
   tokens: protectedProcedure
@@ -332,19 +391,36 @@ export const mcpRouter = router({
     ),
 
   createToken: protectedProcedure
-    .input(serverIdInput.extend({ name: z.string().trim().max(80).optional() }))
+    .input(
+      serverIdInput.extend({
+        expectedRevision: expectedRevisionSchema,
+        name: z.string().trim().max(80).optional(),
+      }),
+    )
     .mutation(({ ctx, input }) =>
-      createServerToken(ctx.dbDirect, ctx.user.id, input.serverId, input.name),
+      createServerToken(
+        ctx.dbDirect,
+        ctx.user.id,
+        input.serverId,
+        input.expectedRevision,
+        input.name,
+      ),
     ),
 
   revokeToken: protectedProcedure
-    .input(serverIdInput.extend({ tokenId: z.string().min(1) }))
+    .input(
+      serverIdInput.extend({
+        tokenId: z.string().min(1),
+        expectedRevision: expectedRevisionSchema,
+      }),
+    )
     .mutation(({ ctx, input }) =>
       revokeServerToken(
         ctx.dbDirect,
         ctx.user.id,
         input.serverId,
         input.tokenId,
+        input.expectedRevision,
       ),
     ),
 
@@ -400,9 +476,15 @@ export const mcpRouter = router({
       createPlatformToken(ctx.dbDirect, ctx.user.id, input ?? {}),
     ),
 
-  revokePlatformToken: protectedProcedure.mutation(({ ctx }) =>
-    revokePlatformToken(ctx.dbDirect, ctx.user.id),
+  platformTokens: protectedProcedure.query(({ ctx }) =>
+    listPlatformTokens(ctx.db, ctx.user.id),
   ),
+
+  revokePlatformToken: protectedProcedure
+    .input(z.object({ tokenId: z.string().min(1).optional() }).optional())
+    .mutation(({ ctx, input }) =>
+      revokePlatformToken(ctx.dbDirect, ctx.user.id, input?.tokenId),
+    ),
 
   platformSnippet: protectedProcedure.query(({ ctx }) => {
     const origin = resolveApiOrigin(ctx.req, ctx.env.API_ORIGIN);

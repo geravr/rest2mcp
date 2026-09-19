@@ -23,6 +23,17 @@ export const mcpHttpMethodSchema = z.enum([
   "HEAD",
 ]);
 
+/**
+ * Last observed server configuration revision. Required on every mutation of
+ * an existing server so stale writes fail with `MCP_WRITE_CONFLICT` instead of
+ * silently overwriting newer configuration.
+ */
+export const expectedRevisionSchema = z
+  .number()
+  .int()
+  .min(1)
+  .describe("Last observed server configuration revision.");
+
 export const createServerCommandSchema = z.object({
   name: z.string().trim().min(1).max(MCP_FIELD_LIMITS.name),
   slug: z.string().trim().min(1).max(MCP_FIELD_LIMITS.name).optional(),
@@ -38,6 +49,7 @@ export const createServerCommandSchema = z.object({
 export const updateServerCommandSchema = z
   .strictObject({
     serverId: z.string().min(1),
+    expectedRevision: expectedRevisionSchema,
     name: z.string().trim().min(1).max(MCP_FIELD_LIMITS.name).optional(),
     description: z
       .string()
@@ -47,7 +59,7 @@ export const updateServerCommandSchema = z
     baseUrl: z.string().trim().url().max(2048).optional(),
     allowedHosts: z.array(z.string().min(1).max(253)).max(20).optional(),
     status: z.enum(["draft", "live", "paused"]).optional(),
-    iconImage: z.string().max(2048).optional().nullable(),
+    iconAssetId: z.string().min(1).optional().nullable(),
     common: mcpCommonEntriesSchema.optional(),
     /** Legacy compatibility maps during dual-write window. */
     defaultHeaders: z.record(z.string(), z.string()).optional().nullable(),
@@ -95,6 +107,7 @@ export const legacyRequestTemplateSchema = z.object({
 
 export const createLegacyToolCommandSchema = z.strictObject({
   serverId: z.string().min(1),
+  expectedRevision: expectedRevisionSchema,
   name: z.string().trim().min(1).max(MCP_FIELD_LIMITS.name),
   description: z
     .string()
@@ -122,10 +135,12 @@ export const updateLegacyToolCommandSchema = createLegacyToolCommandSchema
   .extend({
     toolId: z.string().min(1),
     serverId: z.string().min(1),
+    expectedRevision: expectedRevisionSchema,
   });
 
 export const createToolCommandSchema = z.strictObject({
   serverId: z.string().min(1).describe("Owning server id."),
+  expectedRevision: expectedRevisionSchema,
   name: z
     .string()
     .trim()
@@ -166,11 +181,13 @@ export const updateToolCommandSchema = createToolCommandSchema
   .extend({
     toolId: z.string().min(1),
     serverId: z.string().min(1),
+    expectedRevision: expectedRevisionSchema,
   });
 
 /** Create a copy of an existing tool with regenerated definition-local ids. */
 export const duplicateToolCommandSchema = z.strictObject({
   serverId: z.string().min(1).describe("Owning server id."),
+  expectedRevision: expectedRevisionSchema,
   toolId: z.string().min(1).describe("Source tool id to copy."),
   name: z
     .string()
@@ -198,6 +215,7 @@ export const duplicateToolCommandSchema = z.strictObject({
 
 export const setServerValueCommandSchema = z.strictObject({
   serverId: z.string().min(1).describe("Owning server id."),
+  expectedRevision: expectedRevisionSchema,
   name: mcpValueNameSchema.describe("Server value name."),
   kind: mcpServerValueKindSchema.describe(
     "Whether the value is config or secret.",
@@ -215,6 +233,7 @@ export const setServerValueCommandSchema = z.strictObject({
 
 export const updateServerValueCommandSchema = z.object({
   serverId: z.string().min(1),
+  expectedRevision: expectedRevisionSchema,
   valueId: z.string().min(1),
   name: mcpValueNameSchema.optional(),
   value: z.string().max(MCP_FIELD_LIMITS.body).optional(),
@@ -227,6 +246,7 @@ export const updateServerValueCommandSchema = z.object({
 
 export const setAuthConfigurationCommandSchema = z.object({
   serverId: z.string().min(1),
+  expectedRevision: expectedRevisionSchema,
   configuration: mcpAuthConfigurationSchema,
   /** Plaintext secret payloads for auth-owned values keyed by binding role. */
   secrets: z
@@ -241,6 +261,7 @@ export const curlPreviewCommandSchema = z.object({
 
 export const curlConfirmCommandSchema = z.strictObject({
   serverId: z.string().min(1).describe("Owning server id."),
+  expectedRevision: expectedRevisionSchema,
   curl: z
     .string()
     .min(1)
@@ -282,6 +303,12 @@ export const createPlatformTokenCommandSchema = z.object({
     .min(1)
     .default([...MCP_DEFAULT_PLATFORM_SCOPES]),
   expiresInDays: z.number().int().min(1).max(365).optional(),
+  /** Rotate this observed active PAT instead of adding another. */
+  replacesTokenId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Observed active Platform token id to rotate."),
 });
 
 /** Dry-run compile preview: same typed definition the Studio tool form builds, no persistence. */

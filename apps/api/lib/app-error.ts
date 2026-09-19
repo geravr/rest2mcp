@@ -99,11 +99,50 @@ export function extractDetailsFromTrpcCause(
   if (!cause || typeof cause !== "object") return undefined;
   const details = (cause as { details?: unknown }).details;
   if (!details || typeof details !== "object") return undefined;
-  const placeholder = (details as { placeholder?: unknown }).placeholder;
-  if (typeof placeholder === "string") {
-    return { placeholder };
+  const source = details as Record<string, unknown>;
+  const result: AppErrorDetails = {};
+
+  if (typeof source.placeholder === "string") {
+    result.placeholder = source.placeholder;
   }
-  return undefined;
+  if (typeof source.path === "string") result.path = source.path;
+  if (typeof source.nodeId === "string") result.nodeId = source.nodeId;
+  if (typeof source.issueCode === "string") result.issueCode = source.issueCode;
+  if (typeof source.httpStatus === "number") {
+    result.httpStatus = source.httpStatus;
+  }
+  if (typeof source.retryAfterSeconds === "number") {
+    result.retryAfterSeconds = source.retryAfterSeconds;
+  }
+  if (typeof source.currentRevision === "number") {
+    result.currentRevision = source.currentRevision;
+  }
+  if (typeof source.serverId === "string") result.serverId = source.serverId;
+  if (typeof source.retryable === "boolean")
+    result.retryable = source.retryable;
+  if (Array.isArray(source.references)) {
+    result.references = source.references
+      .filter(
+        (reference): reference is { kind: string; id: string; name?: string } =>
+          !!reference &&
+          typeof reference === "object" &&
+          typeof (reference as { kind?: unknown }).kind === "string" &&
+          typeof (reference as { id?: unknown }).id === "string",
+      )
+      .map((reference) => ({
+        kind: reference.kind,
+        id: reference.id,
+        ...(typeof reference.name === "string" ? { name: reference.name } : {}),
+      }));
+  }
+  if (Array.isArray(source.scopes)) {
+    const scopes = source.scopes.filter(
+      (scope): scope is string => typeof scope === "string",
+    );
+    if (scopes.length > 0) result.scopes = scopes;
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 export const SAAS_LANG_COOKIE = "saas-lang";
