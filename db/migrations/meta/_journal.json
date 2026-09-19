@@ -36,6 +36,13 @@
       "when": 1789780011375,
       "tag": "0004_brainy_selene",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789789179126,
+      "tag": "0005_atomic_studio_writes",
+      "breakpoints": true
     }
   ]
 }

@@ -5,6 +5,7 @@ export * from "./mcp-call-log";
 export * from "./mcp-relations";
 export * from "./mcp-server";
 export * from "./mcp-server-variable";
+export * from "./mcp-storage-asset";
 export * from "./mcp-tool";
 export * from "./platform-invitation";
 export * from "./platform-settings";

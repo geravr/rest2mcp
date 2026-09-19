@@ -1,5 +1,6 @@
 import {
   index,
+  integer,
   jsonb,
   pgTable,
   text,
@@ -7,6 +8,7 @@ import {
   unique,
 } from "drizzle-orm/pg-core";
 import { generateId } from "./id";
+import { mcpStorageAsset } from "./mcp-storage-asset";
 import { user } from "./user";
 
 export type McpNamedEntryRow = {
@@ -42,8 +44,10 @@ export const mcpServer = pgTable(
     name: text().notNull(),
     slug: text().notNull(),
     description: text(),
-    /** User-uploaded icon URL from scoped storage, or null for automatic rings fallback. */
-    iconImage: text(),
+    /** Owner-scoped icon asset id; the only persisted icon source. */
+    iconAssetId: text().references(() => mcpStorageAsset.id, {
+      onDelete: "set null",
+    }),
     baseUrl: text().notNull(),
     /** Hostnames allowed for upstream fetch. Default: host derived from baseUrl. */
     allowedHosts: jsonb().$type<string[]>().notNull(),
@@ -60,6 +64,8 @@ export const mcpServer = pgTable(
     authConfiguration: jsonb().$type<McpAuthConfigurationRow>(),
     /** "draft" | "live" | "paused" */
     status: text().default("draft").notNull(),
+    /** Monotonic configuration revision; incremented once per committed write command. */
+    configRevision: integer().default(1).notNull(),
     createdAt: timestamp({ withTimezone: true, mode: "date" })
       .defaultNow()
       .notNull(),

@@ -3,6 +3,7 @@ import { mcpAgentToken } from "./mcp-agent-token";
 import { mcpCallLog } from "./mcp-call-log";
 import { mcpServer } from "./mcp-server";
 import { mcpServerVariable } from "./mcp-server-variable";
+import { mcpStorageAsset } from "./mcp-storage-asset";
 import { mcpTool } from "./mcp-tool";
 import { user } from "./user";
 
@@ -11,11 +12,26 @@ export const mcpServerRelations = relations(mcpServer, ({ one, many }) => ({
     fields: [mcpServer.userId],
     references: [user.id],
   }),
+  iconAsset: one(mcpStorageAsset, {
+    fields: [mcpServer.iconAssetId],
+    references: [mcpStorageAsset.id],
+  }),
   tools: many(mcpTool),
   variables: many(mcpServerVariable),
   agentTokens: many(mcpAgentToken),
   callLogs: many(mcpCallLog),
 }));
+
+export const mcpStorageAssetRelations = relations(
+  mcpStorageAsset,
+  ({ one, many }) => ({
+    user: one(user, {
+      fields: [mcpStorageAsset.userId],
+      references: [user.id],
+    }),
+    servers: many(mcpServer),
+  }),
+);
 
 export const mcpToolRelations = relations(mcpTool, ({ one, many }) => ({
   server: one(mcpServer, {
