@@ -30,6 +30,18 @@ export const MCP_TELEMETRY_EVENTS = {
   platformHighRiskGrant: "mcp_platform_high_risk_grant",
   /** Active Platform PAT inventory snapshot (counts only). */
   platformTokenInventory: "mcp_platform_token_inventory",
+  /** A publication preview failed before returning a candidate. */
+  publishPreviewFailed: "mcp_publish_preview_failed",
+  /** A publish command was rejected by an optimistic or idempotency conflict. */
+  publishConflict: "mcp_publish_conflict",
+  /** One committed publication with latency and revision identity. */
+  publishSucceeded: "mcp_publish_succeeded",
+  /** The active published revision could not be materialized for runtime. */
+  revisionSnapshotLoadFailed: "mcp_revision_snapshot_load_failed",
+  /** An agent called a removed tool or a contract the active revision no longer serves. */
+  staleAgentCall: "mcp_stale_agent_call",
+  /** A bounded revision retention cleanup run (counts only). */
+  revisionRetentionCleanup: "mcp_revision_retention_cleanup",
 } as const;
 
 export type McpTelemetryEvent =
@@ -41,7 +53,8 @@ export function captureMcpTelemetry(
     db:
       | PostgresJsDatabase<DatabaseSchema>
       | PostgresJsDatabase<Record<string, unknown>>;
-    userId: string;
+    /** Omitted for system-wide operational runs (e.g. retention cleanup). */
+    userId?: string;
     properties: Record<string, unknown>;
   },
 ): void {

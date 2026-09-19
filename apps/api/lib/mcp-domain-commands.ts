@@ -7,6 +7,7 @@ import {
   MCP_DEFAULT_PLATFORM_SCOPES,
   MCP_PLATFORM_RESOURCE_MODES,
   MCP_PLATFORM_SCOPES,
+  paginationInputSchema,
 } from "@repo/core";
 import {
   MCP_FIELD_LIMITS,
@@ -396,6 +397,76 @@ export const invokeToolCommandSchema = z.object({
   toolName: z.string().min(1).optional(),
   args: z.record(z.string(), z.unknown()).optional(),
 });
+
+/** Write-free publication preview for one observed draft revision. */
+export const publishPreviewCommandSchema = z.object({
+  serverId: z.string().min(1).describe("Owning server id."),
+});
+
+/**
+ * One atomic publication command. The expected draft revision, active revision
+ * id, candidate fingerprint, and warning acknowledgements are all bound to the
+ * previewed candidate so a changed draft cannot reuse an older approval.
+ */
+export const publishServerCommandSchema = z.strictObject({
+  serverId: z.string().min(1).describe("Owning server id."),
+  expectedDraftRevision: expectedRevisionSchema.describe(
+    "Observed draft revision from the previewed candidate.",
+  ),
+  expectedPublishedRevisionId: z
+    .string()
+    .min(1)
+    .nullable()
+    .describe("Active published revision id at preview time, or null."),
+  publishRequestId: z
+    .string()
+    .min(1)
+    .max(128)
+    .describe("Client-generated idempotency key for this publication."),
+  candidateFingerprint: z
+    .string()
+    .min(1)
+    .max(128)
+    .describe("Candidate fingerprint returned by publication preview."),
+  acknowledgedWarningCodes: z
+    .array(z.string().min(1))
+    .max(32)
+    .optional()
+    .describe("Warning codes acknowledged for the exact candidate."),
+  note: z
+    .string()
+    .max(500)
+    .nullable()
+    .optional()
+    .describe("Optional bounded publication note."),
+});
+
+export const revisionHistoryCommandSchema = z.object({
+  serverId: z.string().min(1).describe("Owning server id."),
+  ...paginationInputSchema.shape,
+});
+
+export const revisionDetailCommandSchema = z.object({
+  serverId: z.string().min(1).describe("Owning server id."),
+  revisionId: z.string().min(1).describe("Revision id to read."),
+});
+
+export const restoreRevisionCommandSchema = z.strictObject({
+  serverId: z.string().min(1).describe("Owning server id."),
+  revisionId: z.string().min(1).describe("Historical revision id to restore."),
+  expectedRevision: expectedRevisionSchema,
+  expectedDraftRevision: expectedRevisionSchema,
+});
+
+export type PublishPreviewCommand = z.infer<typeof publishPreviewCommandSchema>;
+export type PublishServerCommand = z.infer<typeof publishServerCommandSchema>;
+export type RevisionHistoryCommand = z.infer<
+  typeof revisionHistoryCommandSchema
+>;
+export type RevisionDetailCommand = z.infer<typeof revisionDetailCommandSchema>;
+export type RestoreRevisionCommand = z.infer<
+  typeof restoreRevisionCommandSchema
+>;
 
 export type CreateServerCommand = z.infer<typeof createServerCommandSchema>;
 export type UpdateServerCommand = z.infer<typeof updateServerCommandSchema>;

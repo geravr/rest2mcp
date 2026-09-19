@@ -27,6 +27,7 @@ import {
   type CreatedPlatformPat,
 } from "./mcp-platform-token-service.js";
 import { createPlatformStepUpGrant } from "./mcp-platform-step-up-service.js";
+import { previewPublish, publishServer } from "./mcp-publishing-service.js";
 
 const connectionString = process.env.DATABASE_URL;
 const describeIntegration = connectionString ? describe : describe.skip;
@@ -223,6 +224,21 @@ describeIntegration("Platform MCP end-to-end journey", () => {
     });
   }
 
+  async function publishFixtureServer(requestId: string): Promise<void> {
+    const preview = await previewPublish(db as never, userId, serverId);
+    await publishServer(db as never, {
+      userId,
+      serverId,
+      expectedDraftRevision: preview.draftRevision,
+      expectedPublishedRevisionId: preview.publishedRevisionId,
+      publishRequestId: requestId,
+      candidateFingerprint: preview.candidateFingerprint,
+      acknowledgedWarningCodes: preview.warningCodes,
+      actorSource: "platform",
+      note: null,
+    });
+  }
+
   function createApp() {
     const app = new Hono<AppContext>();
     app.use("*", async (c, next) => {
@@ -275,6 +291,8 @@ describeIntegration("Platform MCP end-to-end journey", () => {
     expect(names).toEqual(
       [
         "get_connection_snippet",
+        "get_revision",
+        "list_revisions",
         "list_servers",
         "list_tools",
         "list_variables",
@@ -450,6 +468,7 @@ describeIntegration("Platform MCP end-to-end journey", () => {
       operator,
       await createPat("E2E Operator", ["read", "invoke"]),
     );
+    await publishFixtureServer("req_platform_e2e_publish_1");
     const connected = await connectClient(operator.token);
 
     const invoked = await connected.callTool({

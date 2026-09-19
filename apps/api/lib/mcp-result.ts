@@ -46,6 +46,13 @@ export const mcpToolErrorSchema = z.strictObject({
   currentRevision: z.number().int().optional(),
   /** Server aggregate affected by a write conflict, when known. */
   serverId: z.string().optional(),
+  /** Active published revision identity for stale-contract refresh guidance. */
+  publishedRevisionId: z.string().optional(),
+  publishedRevisionNumber: z.number().int().optional(),
+  /** Aggregate contract fingerprint of the active published revision. */
+  contractFingerprint: z.string().optional(),
+  /** Whether the client should refresh published tool metadata before retrying. */
+  refreshRequired: z.boolean().optional(),
   issues: z.array(mcpToolIssueSchema).optional(),
 });
 
@@ -235,6 +242,20 @@ export function toMcpToolError(
     ...(error.details?.serverId !== undefined
       ? { serverId: error.details.serverId }
       : {}),
+    ...(error.details?.publishedRevisionId !== undefined &&
+    error.details.publishedRevisionId !== null
+      ? { publishedRevisionId: error.details.publishedRevisionId }
+      : {}),
+    ...(error.details?.publishedRevisionNumber !== undefined &&
+    error.details.publishedRevisionNumber !== null
+      ? { publishedRevisionNumber: error.details.publishedRevisionNumber }
+      : {}),
+    ...(error.details?.currentFingerprint !== undefined
+      ? { contractFingerprint: error.details.currentFingerprint }
+      : {}),
+    ...(error.details?.refreshRequired !== undefined
+      ? { refreshRequired: error.details.refreshRequired }
+      : {}),
     ...(issues !== undefined ? { issues } : {}),
   };
 }
@@ -360,6 +381,11 @@ export function zodErrorToIssues(
 export function invalidArgumentsEnvelope(
   error: z.ZodError,
   nameToId?: Map<string, string>,
+  revisionContext?: {
+    publishedRevisionId?: string | null;
+    publishedRevisionNumber?: number | null;
+    contractFingerprint?: string | null;
+  },
 ): McpToolEnvelope {
   return errorEnvelope({
     category: "invalid_arguments",
@@ -367,6 +393,17 @@ export function invalidArgumentsEnvelope(
     message: "Invalid tool arguments.",
     retryable: false,
     issues: zodErrorToIssues(error, nameToId),
+    ...(revisionContext?.publishedRevisionId
+      ? { publishedRevisionId: revisionContext.publishedRevisionId }
+      : {}),
+    ...(revisionContext?.publishedRevisionNumber !== undefined &&
+    revisionContext.publishedRevisionNumber !== null
+      ? { publishedRevisionNumber: revisionContext.publishedRevisionNumber }
+      : {}),
+    ...(revisionContext?.contractFingerprint
+      ? { contractFingerprint: revisionContext.contractFingerprint }
+      : {}),
+    ...(revisionContext?.publishedRevisionId ? { refreshRequired: true } : {}),
   });
 }
 

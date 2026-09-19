@@ -11,6 +11,11 @@ import {
   expectedRevisionSchema,
   previewLegacyToolCompileCommandSchema,
   previewToolCompileCommandSchema,
+  publishPreviewCommandSchema,
+  publishServerCommandSchema,
+  restoreRevisionCommandSchema,
+  revisionDetailCommandSchema,
+  revisionHistoryCommandSchema,
   revokePlatformPatCommandSchema,
   rotatePlatformPatCommandSchema,
   updateLegacyToolCommandSchema,
@@ -61,6 +66,13 @@ import {
   revokePlatformPat,
   rotatePlatformPat,
 } from "../services/mcp-platform-token-service.js";
+import {
+  getRevisionDetail,
+  listRevisionHistory,
+  previewPublish,
+  publishServer,
+  restoreRevisionToDraft,
+} from "../services/mcp-publishing-service.js";
 import {
   createPlatformStepUpGrant,
   requestPlatformStepUpOtp,
@@ -453,10 +465,21 @@ export const mcpRouter = router({
 
   invokeTool: protectedProcedure
     .input(
-      serverIdInput.extend({
-        toolId: z.string().min(1),
-        args: z.record(z.string(), z.unknown()).optional(),
-      }),
+      serverIdInput
+        .extend({
+          toolId: z.string().min(1),
+          args: z.record(z.string(), z.unknown()).optional(),
+          mode: z.enum(["published", "draft"]).optional(),
+          expectedDraftRevision: z.number().int().min(1).optional(),
+        })
+        .refine(
+          (value) =>
+            value.mode !== "draft" || value.expectedDraftRevision !== undefined,
+          {
+            message:
+              "Draft execution requires the observed expectedDraftRevision.",
+          },
+        ),
     )
     .mutation(async ({ ctx, input }) => {
       const result = await executeMappedTool(ctx.dbDirect, {
@@ -465,6 +488,8 @@ export const mcpRouter = router({
         toolId: input.toolId,
         args: input.args,
         source: "playground",
+        mode: input.mode ?? "published",
+        expectedDraftRevision: input.expectedDraftRevision,
         credentialSecret: ctx.env.MCP_CREDENTIAL_SECRET,
       });
       return {
@@ -480,6 +505,46 @@ export const mcpRouter = router({
     .input(serverIdInput.extend(paginationInputSchema.shape))
     .query(({ ctx, input }) =>
       listCallLogs(ctx.db, ctx.user.id, input.serverId, input),
+    ),
+
+  publishPreview: protectedProcedure
+    .input(publishPreviewCommandSchema)
+    .query(({ ctx, input }) =>
+      previewPublish(ctx.db, ctx.user.id, input.serverId),
+    ),
+
+  publishServer: protectedProcedure
+    .input(publishServerCommandSchema)
+    .mutation(({ ctx, input }) =>
+      publishServer(ctx.dbDirect, {
+        ...input,
+        userId: ctx.user.id,
+        actorSource: "studio",
+      }),
+    ),
+
+  revisionHistory: protectedProcedure
+    .input(revisionHistoryCommandSchema)
+    .query(({ ctx, input }) =>
+      listRevisionHistory(ctx.db, ctx.user.id, input.serverId, {
+        page: input.page,
+        pageSize: input.pageSize,
+      }),
+    ),
+
+  revisionDetail: protectedProcedure
+    .input(revisionDetailCommandSchema)
+    .query(({ ctx, input }) =>
+      getRevisionDetail(ctx.db, ctx.user.id, input.serverId, input.revisionId),
+    ),
+
+  restoreRevision: protectedProcedure
+    .input(restoreRevisionCommandSchema)
+    .mutation(({ ctx, input }) =>
+      restoreRevisionToDraft(ctx.dbDirect, {
+        ...input,
+        userId: ctx.user.id,
+      }),
     ),
 
   platformTokens: protectedProcedure

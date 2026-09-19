@@ -24,6 +24,11 @@ import {
   curlConfirmCommandSchema,
   duplicateToolCommandSchema,
   previewToolCompileCommandSchema,
+  publishPreviewCommandSchema,
+  publishServerCommandSchema,
+  restoreRevisionCommandSchema,
+  revisionDetailCommandSchema,
+  revisionHistoryCommandSchema,
   setServerValueCommandSchema,
   updateToolCommandSchema,
 } from "./mcp-domain-commands.js";
@@ -66,6 +71,14 @@ import {
 } from "./mcp-result.js";
 import { executeMappedTool } from "../services/mcp-executor-service.js";
 import {
+  getPublishedToolIdentity,
+  getRevisionDetail,
+  listRevisionHistory,
+  previewPublish,
+  publishServer,
+  restoreRevisionToDraft,
+} from "../services/mcp-publishing-service.js";
+import {
   createServer,
   createTool,
   createToolFromCurl,
@@ -77,7 +90,6 @@ import {
   getServerName,
   getToolEditorState,
   getToolEnabledState,
-  getToolMethod,
   getToolName,
   isServerValueRuntimeEffective,
   listCallLogs,
@@ -219,6 +231,122 @@ const mutationAckResource = z.object({
   revoked: z.boolean().optional(),
   /** Server configuration revision after the committed mutation. */
   revision: z.number().int().optional(),
+});
+
+/**
+ * Categorized publication issue. Compiler messages are never disclosed: they
+ * can embed server-value ids or names, so only stable codes and locations are
+ * returned to agents.
+ */
+const publicationIssueResource = z.object({
+  code: z.string(),
+  severity: z.enum(["error", "warning"]),
+  path: z.string().optional(),
+  nodeId: z.string().optional(),
+  toolName: z.string().optional(),
+});
+
+const revisionDiffSummaryResource = z.object({
+  serverChanged: z.array(z.string()),
+  commonChanged: z.boolean(),
+  authChanged: z.boolean(),
+  toolsAdded: z.array(z.string()),
+  toolsRemoved: z.array(z.string()),
+  toolsChanged: z.array(z.string()),
+  toolsEnabled: z.array(z.string()),
+  toolsDisabled: z.array(z.string()),
+  configChanged: z.boolean(),
+  contractChanged: z.boolean(),
+});
+
+const publishPreviewResource = z.object({
+  serverId: z.string(),
+  draftRevision: z.number().int(),
+  publishedRevisionId: z.string().nullable(),
+  publishedRevisionNumber: z.number().int().nullable(),
+  candidateFingerprint: z.string(),
+  contractFingerprint: z.string(),
+  ready: z.boolean(),
+  dirty: z.boolean(),
+  errors: z.array(publicationIssueResource),
+  warnings: z.array(publicationIssueResource),
+  warningCodes: z.array(z.string()),
+  diff: revisionDiffSummaryResource.extend({
+    changed: z.boolean(),
+    destructive: z.boolean(),
+  }),
+});
+
+const publishResultResource = z.object({
+  serverId: z.string(),
+  revisionId: z.string(),
+  revisionNumber: z.number().int(),
+  candidateFingerprint: z.string(),
+  contractFingerprint: z.string(),
+  sourceDraftRevision: z.number().int(),
+  status: z.string(),
+  configRevision: z.number().int(),
+  idempotent: z.boolean(),
+});
+
+const revisionSummaryResource = z.object({
+  id: z.string(),
+  revisionNumber: z.number().int(),
+  sourceDraftRevision: z.number().int(),
+  candidateFingerprint: z.string(),
+  contractFingerprint: z.string(),
+  actorSource: z.string(),
+  note: z.string().nullable(),
+  isActive: z.boolean(),
+  createdAt: z.string(),
+});
+
+const revisionToolResource = z.object({
+  sourceToolId: z.string(),
+  name: z.string(),
+  title: z.string().nullable(),
+  description: z.string().nullable(),
+  method: z.string(),
+  enabled: z.boolean(),
+  allowMutation: z.boolean(),
+  source: z.string(),
+  contractFingerprint: z.string().nullable(),
+  definitionHash: z.string().nullable(),
+  compileStatus: z.string().nullable(),
+  compileIssueCount: z.number().int(),
+});
+
+/** Secret slots are surfaced without id or name; only existence is disclosed. */
+const revisionConfigResource = z.object({
+  sourceValueId: z.string().optional(),
+  name: z.string().optional(),
+  kind: z.string(),
+  owner: z.string().nullable().optional(),
+  isSecret: z.boolean(),
+  hasValue: z.boolean(),
+});
+
+const revisionDetailResource = revisionSummaryResource.extend({
+  schemaVersion: z.number().int(),
+  compilerVersion: z.string(),
+  server: z.object({
+    name: z.string(),
+    description: z.string().nullable(),
+    baseUrl: z.string(),
+    allowedHosts: z.array(z.string()),
+  }),
+  diffSummary: revisionDiffSummaryResource.nullable(),
+  tools: z.array(revisionToolResource),
+  configs: z.array(revisionConfigResource),
+});
+
+const restoreRevisionResource = z.object({
+  serverId: z.string(),
+  revisionId: z.string(),
+  draftRevision: z.number().int(),
+  configRevision: z.number().int(),
+  missingSecretCount: z.number().int(),
+  toolCount: z.number().int(),
 });
 
 type PlatformToolContext = {
@@ -486,6 +614,33 @@ function assertDestructiveConfirmation(
  * ownership validation is left to the service and values/ciphertext are still
  * never returned.
  */
+/** Replaces non-visible server-value ids anywhere in a compiled plan. */
+function redactServerValueIds(
+  value: unknown,
+  visibleIds: Set<string>,
+): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => redactServerValueIds(item, visibleIds));
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const output: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(record)) {
+      if (
+        key === "serverValueId" &&
+        typeof item === "string" &&
+        !visibleIds.has(item)
+      ) {
+        output[key] = "msv_redacted";
+      } else {
+        output[key] = redactServerValueIds(item, visibleIds);
+      }
+    }
+    return output;
+  }
+  return value;
+}
+
 async function assertVisibleServerValueReferences(input: {
   principal: PlatformPrincipal;
   db: PlatformDb;
@@ -676,16 +831,6 @@ function getToolNameForPlatform(
   return getToolName(db, principal.userId, serverId, toolId);
 }
 
-function getToolMethodForPlatform(
-  principal: PlatformPrincipal,
-  db: PlatformDb,
-  serverId: string,
-  toolId: string,
-) {
-  assertPlatformResourceAllowed(principal, serverId);
-  return getToolMethod(db, principal.userId, serverId, toolId);
-}
-
 function getToolEnabledStateForPlatform(
   principal: PlatformPrincipal,
   db: PlatformDb,
@@ -741,6 +886,106 @@ function deleteVariableForPlatform(
 ) {
   assertPlatformResourceAllowed(principal, serverId);
   return deleteVariable(db, principal.userId, serverId, name, expectedRevision);
+}
+
+function previewPublishForPlatform(
+  principal: PlatformPrincipal,
+  db: PlatformDb,
+  serverId: string,
+) {
+  assertPlatformResourceAllowed(principal, serverId);
+  return previewPublish(db, principal.userId, serverId);
+}
+
+function publishServerForPlatform(
+  principal: PlatformPrincipal,
+  db: PlatformDb,
+  input: Omit<Parameters<typeof publishServer>[1], "userId" | "actorSource">,
+) {
+  assertPlatformResourceAllowed(principal, input.serverId);
+  return publishServer(db, {
+    ...input,
+    userId: principal.userId,
+    actorSource: "platform",
+  });
+}
+
+function listRevisionHistoryForPlatform(
+  principal: PlatformPrincipal,
+  db: PlatformDb,
+  serverId: string,
+  args: PlatformPageArgs,
+) {
+  assertPlatformResourceAllowed(principal, serverId);
+  return listRevisionHistory(
+    db,
+    principal.userId,
+    serverId,
+    platformPage(args),
+  );
+}
+
+function getRevisionDetailForPlatform(
+  principal: PlatformPrincipal,
+  db: PlatformDb,
+  serverId: string,
+  revisionId: string,
+) {
+  assertPlatformResourceAllowed(principal, serverId);
+  return getRevisionDetail(db, principal.userId, serverId, revisionId);
+}
+
+function restoreRevisionForPlatform(
+  principal: PlatformPrincipal,
+  db: PlatformDb,
+  input: Omit<Parameters<typeof restoreRevisionToDraft>[1], "userId">,
+) {
+  assertPlatformResourceAllowed(principal, input.serverId);
+  return restoreRevisionToDraft(db, { ...input, userId: principal.userId });
+}
+
+/** Drops compiler messages so stable codes and locations only reach agents. */
+function projectPublicationIssue(issue: {
+  code: string;
+  severity: "error" | "warning";
+  path?: string;
+  nodeId?: string;
+  toolName?: string;
+}) {
+  return {
+    code: issue.code,
+    severity: issue.severity,
+    ...(issue.path ? { path: issue.path } : {}),
+    ...(issue.nodeId ? { nodeId: issue.nodeId } : {}),
+    ...(issue.toolName ? { toolName: issue.toolName } : {}),
+  };
+}
+
+/** Secret config slots are anonymized; non-secret values are never included. */
+function projectRevisionConfig(config: {
+  sourceValueId: string;
+  name: string;
+  kind: string;
+  owner: string | null;
+  isSecret: boolean;
+  hasValue: boolean;
+}) {
+  if (config.isSecret) {
+    return {
+      kind: config.kind,
+      ...(config.owner ? { owner: config.owner } : {}),
+      isSecret: true,
+      hasValue: config.hasValue,
+    };
+  }
+  return {
+    sourceValueId: config.sourceValueId,
+    name: config.name,
+    kind: config.kind,
+    owner: config.owner,
+    isSecret: false,
+    hasValue: config.hasValue,
+  };
 }
 
 function executeMappedToolForPlatform(
@@ -907,6 +1152,80 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
           ...(kind ? { kind } : {}),
           ...(owner ? { owner } : {}),
         }));
+    },
+  }),
+
+  definePlatformTool({
+    name: "list_revisions",
+    title: "List server revisions",
+    description:
+      "List the paginated publication history for a server you own, newest first, with revision numbers, fingerprints, safe actor/source metadata, active state, and timestamps.",
+    scopes: ["read"],
+    input: revisionHistoryCommandSchema,
+    data: z.object({
+      ...paginationMeta,
+      items: z.array(revisionSummaryResource),
+    }),
+    annotations: READ_ANNOTATIONS,
+    run: async (ctx, args) => {
+      const page = await listRevisionHistoryForPlatform(
+        ctx.principal,
+        ctx.db,
+        args.serverId,
+        args,
+      );
+      return {
+        page: page.page,
+        pageSize: page.pageSize,
+        total: page.total,
+        items: page.items.map((revision) => ({
+          id: revision.id,
+          revisionNumber: revision.revisionNumber,
+          sourceDraftRevision: revision.sourceDraftRevision,
+          candidateFingerprint: revision.candidateFingerprint,
+          contractFingerprint: revision.contractFingerprint,
+          actorSource: revision.actorSource,
+          note: revision.note,
+          isActive: revision.isActive,
+          createdAt: revision.createdAt.toISOString(),
+        })),
+      };
+    },
+  }),
+
+  definePlatformTool({
+    name: "get_revision",
+    title: "Get revision detail",
+    description:
+      "Read a secret-safe historical revision for a server you own: revision identity, fingerprints, safe server fields, categorized diff, tool contracts, and config existence. Secret slots are surfaced without id, name, or value. Requires read scope.",
+    scopes: ["read"],
+    input: revisionDetailCommandSchema,
+    data: revisionDetailResource,
+    annotations: READ_ANNOTATIONS,
+    run: async (ctx, args) => {
+      const detail = await getRevisionDetailForPlatform(
+        ctx.principal,
+        ctx.db,
+        args.serverId,
+        args.revisionId,
+      );
+      return {
+        id: detail.id,
+        revisionNumber: detail.revisionNumber,
+        sourceDraftRevision: detail.sourceDraftRevision,
+        candidateFingerprint: detail.candidateFingerprint,
+        contractFingerprint: detail.contractFingerprint,
+        actorSource: detail.actorSource,
+        note: detail.note,
+        isActive: detail.isActive,
+        createdAt: detail.createdAt.toISOString(),
+        schemaVersion: detail.schemaVersion,
+        compilerVersion: detail.compilerVersion,
+        server: detail.server,
+        diffSummary: detail.diffSummary,
+        tools: detail.tools,
+        configs: detail.configs.map(projectRevisionConfig),
+      };
     },
   }),
 
@@ -1110,7 +1429,7 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
         serverId: args.serverId,
         definition: args.requestDefinition,
       });
-      return previewToolCompileForPlatform(
+      const result = await previewToolCompileForPlatform(
         ctx.principal,
         ctx.db,
         args.serverId,
@@ -1123,7 +1442,86 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
           allowMutation: args.allowMutation,
         },
       );
+      // Compiler messages can embed server-value ids/names; expose only stable
+      // codes and locations, matching the Platform message-disclosure rule.
+      const safeIssues = result.issues.map((issue) => ({
+        severity: issue.severity,
+        code: issue.code,
+        path: issue.path,
+        ...(issue.id !== undefined ? { id: issue.id } : {}),
+      }));
+      if (platformHasScope(ctx.principal, "secret_reference")) {
+        return { ...result, issues: safeIssues };
+      }
+      // Auth/common bindings are injected into the compiled plan; without
+      // secret_reference authority their secret slot ids must not be returned.
+      const variables = await listVariablesForPlatform(
+        ctx.principal,
+        ctx.db,
+        args.serverId,
+      );
+      const visibleIds = new Set(
+        variables.filter((variable) => !variable.isSecret).map((v) => v.id),
+      );
+      return {
+        ...result,
+        issues: safeIssues,
+        plan: redactServerValueIds(result.plan, visibleIds),
+      };
     },
+  }),
+
+  definePlatformTool({
+    name: "preview_publish",
+    title: "Preview publication",
+    description:
+      "Write-free publication preview for a server you own: observed draft revision, active revision identity, candidate and contract fingerprints, readiness, categorized errors/warnings, and a secret-safe diff. Requires author scope; never publishes.",
+    scopes: ["author"],
+    input: publishPreviewCommandSchema,
+    data: publishPreviewResource,
+    annotations: READ_ANNOTATIONS,
+    run: async (ctx, args) => {
+      const preview = await previewPublishForPlatform(
+        ctx.principal,
+        ctx.db,
+        args.serverId,
+      );
+      return {
+        serverId: preview.serverId,
+        draftRevision: preview.draftRevision,
+        publishedRevisionId: preview.publishedRevisionId,
+        publishedRevisionNumber: preview.publishedRevisionNumber,
+        candidateFingerprint: preview.candidateFingerprint,
+        contractFingerprint: preview.contractFingerprint,
+        ready: preview.ready,
+        dirty: preview.dirty,
+        errors: preview.errors.map(projectPublicationIssue),
+        warnings: preview.warnings.map(projectPublicationIssue),
+        warningCodes: preview.warningCodes,
+        diff: { ...preview.diff },
+      };
+    },
+  }),
+
+  definePlatformTool({
+    name: "publish_server",
+    title: "Publish server revision",
+    description:
+      "Atomically publish the complete candidate as a new immutable revision. Requires publish scope plus the observed draft revision, active revision id, candidate fingerprint, a unique publish request id, and acknowledgement of every warning code. A repeated request id with the same candidate is idempotent.",
+    scopes: ["publish"],
+    input: publishServerCommandSchema,
+    data: publishResultResource,
+    annotations: WRITE_ANNOTATIONS,
+    run: (ctx, args) =>
+      publishServerForPlatform(ctx.principal, ctx.db, {
+        serverId: args.serverId,
+        expectedDraftRevision: args.expectedDraftRevision,
+        expectedPublishedRevisionId: args.expectedPublishedRevisionId,
+        publishRequestId: args.publishRequestId,
+        candidateFingerprint: args.candidateFingerprint,
+        acknowledgedWarningCodes: args.acknowledgedWarningCodes,
+        note: args.note,
+      }),
   }),
 
   definePlatformTool({
@@ -1167,6 +1565,24 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
         ),
       );
     },
+  }),
+
+  definePlatformTool({
+    name: "restore_revision",
+    title: "Restore revision to draft",
+    description:
+      "Replace the current publishable draft structure with a historical revision under optimistic concurrency. Restores to the draft only: it never changes the active published pointer, tokens, status, or current secret material. Requires author scope.",
+    scopes: ["author"],
+    input: restoreRevisionCommandSchema,
+    data: restoreRevisionResource,
+    annotations: WRITE_ANNOTATIONS,
+    run: (ctx, args) =>
+      restoreRevisionForPlatform(ctx.principal, ctx.db, {
+        serverId: args.serverId,
+        revisionId: args.revisionId,
+        expectedRevision: args.expectedRevision,
+        expectedDraftRevision: args.expectedDraftRevision,
+      }),
   }),
 
   definePlatformTool({
@@ -1321,15 +1737,17 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
     }),
     annotations: { ...WRITE_ANNOTATIONS, destructiveHint: true },
     run: async (ctx, args) => {
-      // Method classification is authoritative; caller annotations are ignored.
-      const method = (
-        await getToolMethodForPlatform(
-          ctx.principal,
-          ctx.db,
-          args.serverId,
-          args.toolId,
-        )
-      ).toUpperCase();
+      // Classify from the active published revision, never the mutable draft:
+      // draft edits must not change live authority or destructive confirmation.
+      assertPlatformResourceAllowed(ctx.principal, args.serverId);
+      const published = await getPublishedToolIdentity(
+        ctx.db,
+        ctx.principal.userId,
+        args.serverId,
+        args.toolId,
+        ctx.credentialSecret,
+      );
+      const method = published.method.toUpperCase();
       const mutating =
         method === "POST" ||
         method === "PUT" ||
@@ -1344,13 +1762,7 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
         });
       }
       if (method === "DELETE") {
-        const currentName = await getToolNameForPlatform(
-          ctx.principal,
-          ctx.db,
-          args.serverId,
-          args.toolId,
-        );
-        assertDestructiveConfirmation(args.confirm ?? "", currentName);
+        assertDestructiveConfirmation(args.confirm ?? "", published.name);
       }
 
       const rateLimit = tryAcquireInvocation({
@@ -1379,6 +1791,7 @@ const PLATFORM_REGISTRY: PlatformToolDefinition[] = [
             args: args.args,
             source: "platform",
             credentialSecret: ctx.credentialSecret,
+            snapshot: published.snapshot,
           },
         );
         if (mutating) {

@@ -3,12 +3,18 @@ import { APP_ERROR_CODES } from "@repo/core";
 import { AppError } from "../lib/app-error.js";
 import { withOwnedServerWrite } from "./mcp-server-command.js";
 
-type ServerRow = { id: string; userId: string; configRevision: number };
+type ServerRow = {
+  id: string;
+  userId: string;
+  configRevision: number;
+  draftRevision: number;
+};
 
 const SERVER: ServerRow = {
   id: "mcs_1",
   userId: "usr_1",
   configRevision: 4,
+  draftRevision: 2,
 };
 
 type MockOptions = {
@@ -39,7 +45,15 @@ function makeDb(options: MockOptions = {}) {
         setCalls.push(values);
         return {
           where: () => ({
-            returning: async () => [{ configRevision: values.configRevision }],
+            returning: async () => [
+              {
+                configRevision: values.configRevision,
+                draftRevision:
+                  typeof values.draftRevision === "number"
+                    ? values.draftRevision
+                    : (server?.draftRevision ?? 1),
+              },
+            ],
           }),
         };
       },
@@ -111,10 +125,82 @@ describe("withOwnedServerWrite", () => {
     expect(outcome).toEqual({
       result: "done",
       revision: 5,
+      draftRevision: 2,
       serverId: "mcs_1",
     });
     expect(db.setCalls).toHaveLength(1);
     expect(db.setCalls[0]).toMatchObject({ configRevision: 5 });
+    expect(db.setCalls[0]).not.toHaveProperty("draftRevision");
+  });
+
+  it("increments draftRevision when the command is a draft mutation", async () => {
+    const db = makeDb();
+    const outcome = await withOwnedServerWrite(
+      asDb(db),
+      { userId: "usr_1", serverId: "mcs_1", expectedRevision: 4 },
+      async () => "done",
+      { draftMutation: true },
+    );
+    expect(outcome).toEqual({
+      result: "done",
+      revision: 5,
+      draftRevision: 3,
+      serverId: "mcs_1",
+    });
+    expect(db.setCalls[0]).toMatchObject({
+      configRevision: 5,
+      draftRevision: 3,
+    });
+  });
+
+  it("leaves draftRevision unchanged when finalizeRevision is disabled", async () => {
+    const db = makeDb();
+    const outcome = await withOwnedServerWrite(
+      asDb(db),
+      { userId: "usr_1", serverId: "mcs_1", expectedRevision: 4 },
+      async () => "deleted",
+      { finalizeRevision: false, draftMutation: true },
+    );
+    expect(outcome).toEqual({
+      result: "deleted",
+      revision: 5,
+      draftRevision: 2,
+      serverId: "mcs_1",
+    });
+    expect(db.setCalls).toHaveLength(0);
+  });
+
+  it("rejects a stale draft revision without running the command", async () => {
+    const db = makeDb();
+    const command = vi.fn();
+    await expect(
+      withOwnedServerWrite(
+        asDb(db),
+        { userId: "usr_1", serverId: "mcs_1", expectedRevision: 4 },
+        command,
+        { expectedDraftRevision: 1 },
+      ),
+    ).rejects.toMatchObject({
+      appCode: APP_ERROR_CODES.MCP_PUBLISH_STALE_DRAFT,
+      details: {
+        serverId: "mcs_1",
+        draftRevision: 2,
+        refreshRequired: true,
+      },
+    });
+    expect(command).not.toHaveBeenCalled();
+    expect(db.attempts).toBe(1);
+  });
+
+  it("accepts a matching expected draft revision", async () => {
+    const db = makeDb();
+    const outcome = await withOwnedServerWrite(
+      asDb(db),
+      { userId: "usr_1", serverId: "mcs_1", expectedRevision: 4 },
+      async () => "ok",
+      { expectedDraftRevision: 2 },
+    );
+    expect(outcome.draftRevision).toBe(2);
   });
 
   it("rejects a stale revision without running the command", async () => {

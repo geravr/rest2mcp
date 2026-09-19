@@ -71,6 +71,8 @@ export type ServerWriteResult<T> = {
   result: T;
   /** The new committed revision. */
   revision: number;
+  /** The committed publishable draft revision. */
+  draftRevision: number;
   serverId: string;
 };
 
@@ -115,7 +117,11 @@ export async function withOwnedServerWrite<T>(
   db: DB,
   input: { userId: string; serverId: string; expectedRevision: number },
   command: (ctx: ServerWriteContext) => Promise<T>,
-  options: { finalizeRevision?: boolean } = {},
+  options: {
+    finalizeRevision?: boolean;
+    draftMutation?: boolean;
+    expectedDraftRevision?: number;
+  } = {},
 ): Promise<ServerWriteResult<T>> {
   const finalizeRevision = options.finalizeRevision ?? true;
   if (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 1) {
@@ -174,6 +180,22 @@ export async function withOwnedServerWrite<T>(
           });
         }
 
+        if (
+          options.expectedDraftRevision !== undefined &&
+          server.draftRevision !== options.expectedDraftRevision
+        ) {
+          throw appError({
+            appCode: APP_ERROR_CODES.MCP_PUBLISH_STALE_DRAFT,
+            message: "The draft changed; reload before retrying.",
+            status: 409,
+            details: {
+              serverId: server.id,
+              draftRevision: server.draftRevision,
+              refreshRequired: true,
+            },
+          });
+        }
+
         const hooks: PostCommitHook[] = [];
         const result = await command({
           tx,
@@ -187,20 +209,30 @@ export async function withOwnedServerWrite<T>(
             outcome: {
               result,
               revision: input.expectedRevision + 1,
+              draftRevision: server.draftRevision,
               serverId: server.id,
             },
             hooks,
           };
         }
 
+        // Resolved after the command so a command that inspects child rows can
+        // supply a lazy classifier (see `get draftMutation`).
+        const draftMutation = options.draftMutation ?? false;
         const [updated] = await tx
           .update(mcpServer)
           .set({
             configRevision: input.expectedRevision + 1,
+            ...(draftMutation
+              ? { draftRevision: server.draftRevision + 1 }
+              : {}),
             updatedAt: new Date(),
           })
           .where(eq(mcpServer.id, server.id))
-          .returning({ configRevision: mcpServer.configRevision });
+          .returning({
+            configRevision: mcpServer.configRevision,
+            draftRevision: mcpServer.draftRevision,
+          });
 
         if (!updated) {
           throw appError({
@@ -214,6 +246,7 @@ export async function withOwnedServerWrite<T>(
           outcome: {
             result,
             revision: updated.configRevision,
+            draftRevision: updated.draftRevision,
             serverId: server.id,
           },
           hooks,

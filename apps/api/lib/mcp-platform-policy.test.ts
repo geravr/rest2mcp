@@ -33,6 +33,7 @@ const deleteTool = vi.hoisted(() => vi.fn());
 const getServerName = vi.hoisted(() => vi.fn());
 const getToolName = vi.hoisted(() => vi.fn());
 const getToolMethod = vi.hoisted(() => vi.fn());
+const getPublishedToolIdentity = vi.hoisted(() => vi.fn());
 const executeMappedTool = vi.hoisted(() => vi.fn());
 
 vi.mock("../services/mcp-studio-service.js", async () => {
@@ -61,6 +62,13 @@ vi.mock("../services/mcp-studio-service.js", async () => {
     getToolName,
     getToolMethod,
   };
+});
+
+vi.mock("../services/mcp-publishing-service.js", async () => {
+  const actual = await vi.importActual<
+    typeof import("../services/mcp-publishing-service.js")
+  >("../services/mcp-publishing-service.js");
+  return { ...actual, getPublishedToolIdentity };
 });
 
 vi.mock("../services/mcp-platform-token-service.js", async () => {
@@ -124,6 +132,11 @@ async function connectClient(
   });
   getToolMethod.mockResolvedValue("GET");
   getToolName.mockResolvedValue("tool_name");
+  getPublishedToolIdentity.mockImplementation(async () => ({
+    method: await getToolMethod(),
+    name: await getToolName(),
+    snapshot: {},
+  }));
   getToolEnabledState.mockResolvedValue(false);
   isServerValueRuntimeEffective.mockResolvedValue(false);
   const app = createApp();

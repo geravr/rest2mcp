@@ -74,6 +74,15 @@ Follows **Router/Handler → Service → Database/Infrastructure**:
 - Object storage is a non-transactional boundary: uploads stage an `mcp_storage_asset` as `staging`, then `ready`, and the server attach command claims it in the same commit as `configRevision`. Replaced/abandoned assets become `delete_pending` and are cleaned by the bounded reconciler.
 - Run `bun mcp:reconcile-assets --dry-run` to inspect pending cleanup; `bun mcp:reconcile-assets` performs it. Failed deletions stay pending and are safe to retry.
 
+## MCP Draft vs Published Boundary
+
+- Publishable server structure (name/description, base URL, allowed hosts, structural auth, common bindings, tool definitions, enabled/mutation state, and non-secret config values) lives in the mutable draft (`mcp_server`, `mcp_tool`, `mcp_server_variable`). Saving any of it changes only the draft and never agent-visible behavior.
+- Runtime discovery and execution read exactly one active immutable revision. `loadExecutionSnapshot` resolves `mcp_server.publishedRevisionId` into the `mcp_server_revision` row plus its tool/config rows under a read-only `REPEATABLE READ` transaction and returns the published-mode `McpExecutionSnapshot`. There is no fallback to mutable draft rows, an older revision, or a compatibility projection; a missing/inconsistent active revision advertises no tools.
+- Revision tables (`mcp_server_revision`, `mcp_server_revision_tool`, `mcp_server_revision_config`) are insert/select only. Corrections require a new publication; only bounded retention cleanup deletes them.
+- `configRevision` is the broad compare-and-swap token for every server aggregate write. `draftRevision` is the publishable change sequence: increment it once per versioned-structure change and never for pause/resume, token revocation, secret-material rotation, or presentation-only icon writes.
+- `withOwnedServerWrite` takes `draftMutation: true` only for commands that change publishable structure, and `expectedDraftRevision` when a command must additionally reject a stale draft. Both are checked under the locked server row; a mismatch surfaces `MCP_PUBLISH_STALE_DRAFT` with no writes.
+- `loadDraftExecutionSnapshot` and `compilePlanForTool` exist solely for owner-only Studio draft testing. Gateway, product execution, and Platform MCP must never call them.
+
 - **Single-User Accounts**: Product accounts are single-user. Do not register the Better Auth `organization` plugin, mount an `organization` tRPC router, or reintroduce org tables / `activeOrganizationId`.
 - Platform invitations (`platform_invitation`) and super-admin flows remain. Do not conflate them with product workspaces.
 - Multi-write business operations must use transactions (`ctx.db.transaction`) to preserve atomic flows.

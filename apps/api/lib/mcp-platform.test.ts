@@ -35,6 +35,12 @@ const listServers = vi.hoisted(() => vi.fn());
 const listTools = vi.hoisted(() => vi.fn());
 const executeMappedTool = vi.hoisted(() => vi.fn());
 const handleMcpHttpRequest = vi.hoisted(() => vi.fn());
+const previewPublish = vi.hoisted(() => vi.fn());
+const publishServer = vi.hoisted(() => vi.fn());
+const listRevisionHistory = vi.hoisted(() => vi.fn());
+const getRevisionDetail = vi.hoisted(() => vi.fn());
+const restoreRevisionToDraft = vi.hoisted(() => vi.fn());
+const getPublishedToolIdentity = vi.hoisted(() => vi.fn());
 
 vi.mock("../services/mcp-studio-service.js", async () => {
   const actual = await vi.importActual<
@@ -76,6 +82,21 @@ vi.mock("../services/mcp-executor-service.js", async () => {
     typeof import("../services/mcp-executor-service.js")
   >("../services/mcp-executor-service.js");
   return { ...actual, executeMappedTool };
+});
+
+vi.mock("../services/mcp-publishing-service.js", async () => {
+  const actual = await vi.importActual<
+    typeof import("../services/mcp-publishing-service.js")
+  >("../services/mcp-publishing-service.js");
+  return {
+    ...actual,
+    previewPublish,
+    publishServer,
+    listRevisionHistory,
+    getRevisionDetail,
+    restoreRevisionToDraft,
+    getPublishedToolIdentity,
+  };
 });
 
 vi.mock("./mcp-http.js", async () => {
@@ -140,6 +161,11 @@ async function connectClient(
   });
   getToolMethod.mockResolvedValue("GET");
   getToolName.mockResolvedValue("tool_name");
+  getPublishedToolIdentity.mockImplementation(async () => ({
+    method: await getToolMethod(),
+    name: await getToolName(),
+    snapshot: {},
+  }));
   getToolEnabledState.mockResolvedValue(false);
   isServerValueRuntimeEffective.mockResolvedValue(false);
   const app = createApp();
@@ -216,12 +242,17 @@ describe("platform MCP", () => {
             "delete_variable",
             "duplicate_tool",
             "get_connection_snippet",
+            "get_revision",
             "get_tool_definition",
             "list_recent_calls",
+            "list_revisions",
             "list_servers",
             "list_tools",
             "list_variables",
+            "preview_publish",
             "preview_tool",
+            "publish_server",
+            "restore_revision",
             "set_variable",
             "test_tool",
             "update_tool",
@@ -247,6 +278,8 @@ describe("platform MCP", () => {
         expect(names).toEqual(
           [
             "get_connection_snippet",
+            "get_revision",
+            "list_revisions",
             "list_servers",
             "list_tools",
             "list_variables",
@@ -1063,6 +1096,62 @@ describe("platform MCP", () => {
       }
     });
 
+    it("redacts injected secret server value ids from preview_tool output", async () => {
+      previewToolCompile.mockResolvedValue({
+        ok: true,
+        ready: true,
+        issues: [
+          {
+            severity: "error",
+            code: "MCP_TEMPLATE_UNRESOLVED",
+            path: "headers.Authorization",
+            message:
+              "Authentication references unknown server value msv_secret",
+          },
+        ],
+        plan: {
+          headers: [
+            {
+              name: "Authorization",
+              source: { kind: "serverValue", serverValueId: "msv_secret" },
+            },
+          ],
+        },
+        contract: { fingerprint: "sha256:abc" },
+        compatibilityProjectable: true,
+      });
+      listVariables.mockResolvedValue([
+        { id: "msv_config", name: "region", isSecret: false },
+      ]);
+
+      const client = await connectClient(["author"]);
+      try {
+        const result = await client.callTool({
+          name: "preview_tool",
+          arguments: {
+            serverId: "mcs_1",
+            method: "GET",
+            requestDefinition: {
+              version: 1,
+              pathSegments: [],
+              query: [],
+              headers: [],
+              body: { bodyType: "none" },
+              agentInputs: [],
+            },
+          },
+        });
+        const text = (
+          result.content as Array<{ type: string; text: string }>
+        )[0].text;
+        expect(text).toContain("msv_redacted");
+        expect(text).not.toContain("msv_secret");
+        expect(text).not.toContain("unknown server value");
+      } finally {
+        await client.close();
+      }
+    });
+
     it("redacts sensitive input examples from returned tool rows", async () => {
       duplicateTool.mockResolvedValue({
         id: "mct_2",
@@ -1277,6 +1366,14 @@ describe("platform MCP", () => {
           arguments: { serverId: "mcs_1", toolId: "mct_1" },
         });
         expect(result.isError).toBeFalsy();
+        // Classification must come from the active revision lookup, not the draft.
+        expect(getPublishedToolIdentity).toHaveBeenCalledWith(
+          expect.anything(),
+          "usr_1",
+          "mcs_1",
+          "mct_1",
+          expect.anything(),
+        );
         expect(executeMappedTool).toHaveBeenCalledWith(
           expect.anything(),
           expect.objectContaining({
@@ -1657,6 +1754,493 @@ describe("platform MCP", () => {
       expect(response.headers.get("WWW-Authenticate")).toBeNull();
       expect(handleMcpHttpRequest).not.toHaveBeenCalled();
       expect(authenticatePlatformPat).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("publication tools", () => {
+    function principalWith(scopes: string[]) {
+      return {
+        tokenId: "mtk_1",
+        userId: "usr_1",
+        tokenName: "Test PAT",
+        tokenPrefix: "rmcp_test",
+        policyVersion: 1,
+        scopes,
+        resourceMode: "account" as const,
+        allowedServerIds: [],
+        expiresAt: null,
+      };
+    }
+
+    it("hides and denies publish_server without publish scope", async () => {
+      authenticatePlatformPat.mockResolvedValue(
+        principalWith(["read", "author"]),
+      );
+      const client = await connectClient(["read", "author"]);
+      try {
+        const { tools } = await client.listTools();
+        const names = tools.map((tool) => tool.name);
+        expect(names).toContain("preview_publish");
+        expect(names).toContain("restore_revision");
+        expect(names).toContain("list_revisions");
+        expect(names).toContain("get_revision");
+        expect(names).not.toContain("publish_server");
+      } finally {
+        await client.close();
+      }
+
+      const response = await createApp().request("/api/platform-mcp", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer platform-token",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "publish_server",
+            arguments: {
+              serverId: "mcs_1",
+              expectedDraftRevision: 1,
+              expectedPublishedRevisionId: null,
+              publishRequestId: "req_1",
+              candidateFingerprint: "cand_1",
+            },
+          },
+        }),
+      });
+      expect(response.status).toBe(403);
+      expect(response.headers.get("WWW-Authenticate")).toContain(
+        'scope="publish"',
+      );
+      await expect(response.json()).resolves.toMatchObject({
+        code: APP_ERROR_CODES.MCP_SCOPE_DENIED,
+      });
+      expect(publishServer).not.toHaveBeenCalled();
+    });
+
+    it("previews a candidate without config values or secret ids", async () => {
+      previewPublish.mockResolvedValue({
+        serverId: "mcs_1",
+        draftRevision: 3,
+        publishedRevisionId: "msr_1",
+        publishedRevisionNumber: 1,
+        candidateFingerprint: "cand_fp",
+        contractFingerprint: "contract_fp",
+        ready: true,
+        dirty: true,
+        errors: [],
+        warnings: [
+          {
+            severity: "warning",
+            code: "contract_changed",
+            message: "secret msv_secret api_token sk-live",
+          },
+        ],
+        warningCodes: ["contract_changed"],
+        diff: {
+          serverChanged: ["baseUrl"],
+          commonChanged: false,
+          authChanged: false,
+          toolsAdded: ["get_contact"],
+          toolsRemoved: [],
+          toolsChanged: [],
+          toolsEnabled: [],
+          toolsDisabled: [],
+          configChanged: false,
+          contractChanged: true,
+          changed: true,
+          destructive: false,
+        },
+      });
+      const client = await connectClient(["read", "author"]);
+      try {
+        const result = await client.callTool({
+          name: "preview_publish",
+          arguments: { serverId: "mcs_1" },
+        });
+        expect(result.isError).toBeFalsy();
+        expect(previewPublish).toHaveBeenCalledWith(
+          expect.anything(),
+          "usr_1",
+          "mcs_1",
+        );
+        const data = (
+          result.structuredContent as {
+            data: {
+              candidateFingerprint: string;
+              ready: boolean;
+              warnings: Array<Record<string, unknown>>;
+              diff: Record<string, unknown>;
+            };
+          }
+        ).data;
+        expect(data.candidateFingerprint).toBe("cand_fp");
+        expect(data.ready).toBe(true);
+        // Categorized issues only: compiler messages are never disclosed.
+        expect(data.warnings[0]).toEqual({
+          code: "contract_changed",
+          severity: "warning",
+        });
+        expect(data.diff).toMatchObject({
+          changed: true,
+          destructive: false,
+          toolsAdded: ["get_contact"],
+        });
+        const serialized = JSON.stringify(result.structuredContent);
+        expect(serialized).not.toContain("msv_secret");
+        expect(serialized).not.toContain("api_token");
+        expect(serialized).not.toContain("sk-live");
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("publishes with platform attribution and returns the committed revision", async () => {
+      publishServer.mockResolvedValue({
+        serverId: "mcs_1",
+        revisionId: "msr_2",
+        revisionNumber: 2,
+        candidateFingerprint: "cand_fp",
+        contractFingerprint: "contract_fp",
+        sourceDraftRevision: 3,
+        status: "live",
+        configRevision: 6,
+        idempotent: false,
+      });
+      const client = await connectClient(["read", "author", "publish"]);
+      try {
+        const result = await client.callTool({
+          name: "publish_server",
+          arguments: {
+            serverId: "mcs_1",
+            expectedDraftRevision: 3,
+            expectedPublishedRevisionId: "msr_1",
+            publishRequestId: "req_1",
+            candidateFingerprint: "cand_fp",
+            acknowledgedWarningCodes: ["contract_changed"],
+            note: "Release 2",
+          },
+        });
+        expect(result.isError).toBeFalsy();
+        expect(publishServer).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({
+            userId: "usr_1",
+            actorSource: "platform",
+            serverId: "mcs_1",
+            publishRequestId: "req_1",
+            candidateFingerprint: "cand_fp",
+          }),
+        );
+        expect(result.structuredContent).toMatchObject({
+          ok: true,
+          data: { revisionNumber: 2, idempotent: false },
+        });
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("maps an idempotent publish retry", async () => {
+      publishServer.mockResolvedValue({
+        serverId: "mcs_1",
+        revisionId: "msr_2",
+        revisionNumber: 2,
+        candidateFingerprint: "cand_fp",
+        contractFingerprint: "contract_fp",
+        sourceDraftRevision: 3,
+        status: "live",
+        configRevision: 6,
+        idempotent: true,
+      });
+      const client = await connectClient(["read", "author", "publish"]);
+      try {
+        const result = await client.callTool({
+          name: "publish_server",
+          arguments: {
+            serverId: "mcs_1",
+            expectedDraftRevision: 3,
+            expectedPublishedRevisionId: "msr_1",
+            publishRequestId: "req_1",
+            candidateFingerprint: "cand_fp",
+          },
+        });
+        expect(result.structuredContent).toMatchObject({
+          ok: true,
+          data: { idempotent: true, revisionId: "msr_2" },
+        });
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("surfaces a stale publish conflict as a secret-safe error", async () => {
+      publishServer.mockRejectedValue(
+        appError({
+          appCode: APP_ERROR_CODES.MCP_PUBLISH_STALE_DRAFT,
+          message:
+            "The draft changed after preview; re-preview before publishing.",
+          status: 409,
+          details: {
+            serverId: "mcs_1",
+            draftRevision: 9,
+            refreshRequired: true,
+          },
+        }),
+      );
+      const client = await connectClient(["read", "author", "publish"]);
+      try {
+        const result = await client.callTool({
+          name: "publish_server",
+          arguments: {
+            serverId: "mcs_1",
+            expectedDraftRevision: 3,
+            expectedPublishedRevisionId: null,
+            publishRequestId: "req_1",
+            candidateFingerprint: "cand_fp",
+          },
+        });
+        expect(result.isError).toBe(true);
+        expect(result.structuredContent).toMatchObject({
+          ok: false,
+          error: {
+            code: APP_ERROR_CODES.MCP_PUBLISH_STALE_DRAFT,
+            serverId: "mcs_1",
+          },
+        });
+        const serialized = JSON.stringify(result.structuredContent);
+        expect(serialized).not.toContain("sk_live");
+        expect(serialized).not.toContain("ciphertext");
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("lists revisions with pagination", async () => {
+      listRevisionHistory.mockResolvedValue({
+        items: [
+          {
+            id: "msr_2",
+            revisionNumber: 2,
+            sourceDraftRevision: 4,
+            candidateFingerprint: "cand_2",
+            contractFingerprint: "contract_2",
+            actorSource: "platform",
+            note: "Release 2",
+            isActive: true,
+            createdAt: new Date("2026-02-01T00:00:00Z"),
+          },
+        ],
+        page: 2,
+        pageSize: 20,
+        total: 21,
+      });
+      const client = await connectClient(["read"]);
+      try {
+        const result = await client.callTool({
+          name: "list_revisions",
+          arguments: { serverId: "mcs_1", page: 2, pageSize: 20 },
+        });
+        expect(result.isError).toBeFalsy();
+        expect(listRevisionHistory).toHaveBeenCalledWith(
+          expect.anything(),
+          "usr_1",
+          "mcs_1",
+          { page: 2, pageSize: 20 },
+        );
+        expect(result.structuredContent).toMatchObject({
+          ok: true,
+          data: {
+            page: 2,
+            pageSize: 20,
+            total: 21,
+            items: [
+              {
+                id: "msr_2",
+                revisionNumber: 2,
+                actorSource: "platform",
+                isActive: true,
+                note: "Release 2",
+              },
+            ],
+          },
+        });
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("redacts secret slot ids and names from revision detail", async () => {
+      getRevisionDetail.mockResolvedValue({
+        id: "msr_1",
+        revisionNumber: 1,
+        sourceDraftRevision: 2,
+        candidateFingerprint: "cand_1",
+        contractFingerprint: "contract_1",
+        actorSource: "studio",
+        note: null,
+        isActive: false,
+        createdAt: new Date("2026-01-01T00:00:00Z"),
+        schemaVersion: 1,
+        compilerVersion: "1",
+        server: {
+          name: "CRM",
+          description: null,
+          baseUrl: "https://api.example.com",
+          allowedHosts: ["api.example.com"],
+        },
+        diffSummary: null,
+        tools: [
+          {
+            sourceToolId: "mct_1",
+            name: "get_contact",
+            title: null,
+            description: null,
+            method: "GET",
+            enabled: true,
+            allowMutation: false,
+            source: "manual",
+            contractFingerprint: "tool_fp",
+            definitionHash: "hash_1",
+            compileStatus: "valid",
+            compileIssueCount: 0,
+          },
+        ],
+        configs: [
+          {
+            sourceValueId: "msv_secret",
+            name: "api_token",
+            kind: "secret",
+            owner: "manual",
+            isSecret: true,
+            hasValue: true,
+          },
+          {
+            sourceValueId: "msv_region",
+            name: "region",
+            kind: "config",
+            owner: "manual",
+            isSecret: false,
+            hasValue: true,
+          },
+        ],
+      });
+      const client = await connectClient(["read"]);
+      try {
+        const result = await client.callTool({
+          name: "get_revision",
+          arguments: { serverId: "mcs_1", revisionId: "msr_1" },
+        });
+        expect(result.isError).toBeFalsy();
+        const data = (
+          result.structuredContent as {
+            data: { configs: Array<Record<string, unknown>> };
+          }
+        ).data;
+        expect(data.configs).toEqual([
+          { kind: "secret", owner: "manual", isSecret: true, hasValue: true },
+          {
+            sourceValueId: "msv_region",
+            name: "region",
+            kind: "config",
+            owner: "manual",
+            isSecret: false,
+            hasValue: true,
+          },
+        ]);
+        const serialized = JSON.stringify(result.structuredContent);
+        expect(serialized).not.toContain("msv_secret");
+        expect(serialized).not.toContain("api_token");
+        expect(serialized).not.toContain("ciphertext");
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("restores a revision to the draft with platform attribution", async () => {
+      restoreRevisionToDraft.mockResolvedValue({
+        serverId: "mcs_1",
+        revisionId: "msr_1",
+        draftRevision: 5,
+        configRevision: 8,
+        missingSecretCount: 1,
+        toolCount: 2,
+      });
+      const client = await connectClient(["read", "author"]);
+      try {
+        const result = await client.callTool({
+          name: "restore_revision",
+          arguments: {
+            serverId: "mcs_1",
+            revisionId: "msr_1",
+            expectedRevision: 7,
+            expectedDraftRevision: 4,
+          },
+        });
+        expect(result.isError).toBeFalsy();
+        expect(restoreRevisionToDraft).toHaveBeenCalledWith(expect.anything(), {
+          userId: "usr_1",
+          serverId: "mcs_1",
+          revisionId: "msr_1",
+          expectedRevision: 7,
+          expectedDraftRevision: 4,
+        });
+        expect(result.structuredContent).toMatchObject({
+          ok: true,
+          data: { draftRevision: 5, missingSecretCount: 1, toolCount: 2 },
+        });
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("enforces server grants for publication and revision tools", async () => {
+      const client = await connectClient(
+        ["read", "author", "publish"],
+        "selected",
+      );
+      try {
+        const preview = await client.callTool({
+          name: "preview_publish",
+          arguments: { serverId: "mcs_B" },
+        });
+        expect(preview.isError).toBe(true);
+        expect(preview.structuredContent).toMatchObject({
+          error: { code: APP_ERROR_CODES.MCP_RESOURCE_DENIED },
+        });
+
+        const history = await client.callTool({
+          name: "list_revisions",
+          arguments: { serverId: "mcs_B" },
+        });
+        expect(history.isError).toBe(true);
+        expect(history.structuredContent).toMatchObject({
+          error: { code: APP_ERROR_CODES.MCP_RESOURCE_DENIED },
+        });
+
+        const restore = await client.callTool({
+          name: "restore_revision",
+          arguments: {
+            serverId: "mcs_B",
+            revisionId: "msr_1",
+            expectedRevision: 1,
+            expectedDraftRevision: 1,
+          },
+        });
+        expect(restore.isError).toBe(true);
+        expect(restore.structuredContent).toMatchObject({
+          error: { code: APP_ERROR_CODES.MCP_RESOURCE_DENIED },
+        });
+
+        expect(previewPublish).not.toHaveBeenCalled();
+        expect(listRevisionHistory).not.toHaveBeenCalled();
+        expect(restoreRevisionToDraft).not.toHaveBeenCalled();
+      } finally {
+        await client.close();
+      }
     });
   });
 });

@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { APP_ERROR_CODES } from "@repo/core";
+import type { McpServer, McpTool } from "@repo/db";
 import { AppError } from "../lib/app-error.js";
-import { encryptCredential } from "../lib/mcp-crypto.js";
+import { resetAuditQueueState } from "../lib/mcp-audit-queue.js";
+import { decryptCredential, encryptCredential } from "../lib/mcp-crypto.js";
 import { MCP_UPSTREAM_DEADLINE_MS } from "../lib/mcp-policy.js";
 
 const tables = vi.hoisted(() => ({
@@ -12,6 +14,17 @@ const tables = vi.hoisted(() => ({
     name: "mcp_tool.name",
   },
   mcpServerVariable: { serverId: "mcp_server_variable.server_id" },
+  mcpServerRevision: {
+    id: "mcp_server_revision.id",
+    serverId: "mcp_server_revision.server_id",
+  },
+  mcpServerRevisionTool: {
+    revisionId: "mcp_server_revision_tool.revision_id",
+    toolOrder: "mcp_server_revision_tool.tool_order",
+  },
+  mcpServerRevisionConfig: {
+    revisionId: "mcp_server_revision_config.revision_id",
+  },
   mcpCallLog: {},
 }));
 
@@ -26,6 +39,7 @@ vi.mock("@repo/db", () => ({
 vi.mock("drizzle-orm", () => ({
   and: vi.fn((...args: unknown[]) => ({ kind: "and", args })),
   eq: vi.fn((left: unknown, right: unknown) => ({ kind: "eq", left, right })),
+  asc: vi.fn((...args: unknown[]) => ({ kind: "asc", args })),
 }));
 
 const lookupMock = vi.hoisted(() => vi.fn());
@@ -33,74 +47,244 @@ vi.mock("node:dns/promises", () => ({
   lookup: lookupMock,
 }));
 
-import { executeMappedTool } from "./mcp-executor-service.js";
+import {
+  compilePlanForTool,
+  executeMappedTool,
+  type McpExecutionSnapshot,
+  type ResolvedServerValue,
+  type ToolCompileInputs,
+} from "./mcp-executor-service.js";
 
 const SECRET = "c".repeat(32);
 
-/** A promise-like `select().from(table).where(...)` result usable both
- * awaited directly and via a chained `.limit(n)`. */
+/** A promise-like `select().from(table).where(...)` result usable directly,
+ * via `.limit(n)`, or via `.orderBy(...)`. */
 function selectResult(rows: unknown[]) {
   const promise = Promise.resolve(rows);
   return Object.assign(promise, {
     limit: () => Promise.resolve(rows),
+    orderBy: () => Promise.resolve(rows),
   });
 }
 
-function makeDb(input: {
-  server: unknown[];
-  tool: unknown[];
-  serverValues?: unknown[];
-}) {
-  const insertedValues: unknown[] = [];
-  const db = {
-    select: vi.fn(() => ({
-      from: (table: unknown) => ({
-        where: () => {
-          if (table === tables.mcpServer) return selectResult(input.server);
-          if (table === tables.mcpTool) return selectResult(input.tool);
-          if (table === tables.mcpServerVariable) {
-            return selectResult(input.serverValues ?? []);
-          }
-          return selectResult([]);
-        },
-      }),
-    })),
+function insertRecorder(insertedValues: unknown[]) {
+  return {
     insert: vi.fn(() => ({
       values: (payload: unknown) => {
         insertedValues.push(payload);
         return Promise.resolve([]);
       },
     })),
+  };
+}
+
+/** Minimal db for the ownership check and best-effort call-log insert. The
+ * execution itself is driven from a preloaded snapshot. */
+function makeDb(input: { server: unknown[] }) {
+  const insertedValues: unknown[] = [];
+  const db = {
+    select: vi.fn(() => ({
+      from: (table: unknown) => ({
+        where: () => {
+          if (table === tables.mcpServer) return selectResult(input.server);
+          return selectResult([]);
+        },
+      }),
+    })),
+    ...insertRecorder(insertedValues),
     transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(db)),
   };
   return { db, insertedValues };
 }
 
-const liveServer = {
-  id: "mcs_1",
-  userId: "usr_owner",
-  status: "live",
-  baseUrl: "https://api.example.com",
-  allowedHosts: ["api.example.com"],
-  defaultHeaders: null,
-  defaultQuery: null,
-  commonEntries: null,
-  authConfiguration: null,
+function makeServer(overrides: Partial<McpServer> = {}): McpServer {
+  return {
+    id: "mcs_1",
+    userId: "usr_owner",
+    name: "CRM",
+    slug: "crm",
+    description: null,
+    iconAssetId: null,
+    baseUrl: "https://api.example.com",
+    allowedHosts: ["api.example.com"],
+    defaultHeaders: null,
+    defaultQuery: null,
+    commonEntries: null,
+    authConfiguration: null,
+    status: "live",
+    configRevision: 1,
+    draftRevision: 1,
+    publishedRevisionId: "msr_1",
+    createdAt: new Date("2026-01-01T00:00:00Z"),
+    updatedAt: new Date("2026-01-01T00:00:00Z"),
+    ...overrides,
+  };
+}
+
+function makeTool(overrides: Partial<McpTool> = {}): McpTool {
+  return {
+    id: "mct_1",
+    serverId: "mcs_1",
+    name: "get_contact",
+    title: "Get contact",
+    description: "Fetch one contact by id.",
+    method: "GET",
+    pathTemplate: "/contacts/{{id}}",
+    requestTemplate: {},
+    params: [{ name: "id", required: true, type: "string" }],
+    requestDefinition: null,
+    compiledPlan: null,
+    compileStatus: null,
+    compileIssues: null,
+    annotations: null,
+    allowMutation: false,
+    enabled: true,
+    source: "manual",
+    createdAt: new Date("2026-01-01T00:00:00Z"),
+    updatedAt: new Date("2026-01-01T00:00:00Z"),
+    ...overrides,
+  };
+}
+
+type ServerValueFixture = {
+  id: string;
+  name: string;
+  kind?: "config" | "secret";
+  isSecret?: boolean;
+  owner?: "manual" | "auth";
+  value?: string | null;
+  ciphertext?: string | null;
 };
 
-const getTool = {
-  id: "mct_1",
-  name: "get_contact",
-  method: "GET",
-  pathTemplate: "/contacts/{{id}}",
-  requestTemplate: {},
-  params: [{ name: "id", required: true, type: "string" }],
-  allowMutation: false,
-  enabled: true,
-  requestDefinition: null,
-  compiledPlan: null,
-  compileStatus: null,
-};
+function buildServerValues(
+  serverValues: ServerValueFixture[],
+): Map<string, ResolvedServerValue> {
+  const map = new Map<string, ResolvedServerValue>();
+  for (const row of serverValues) {
+    const kind = row.kind ?? (row.isSecret ? "secret" : "config");
+    const value =
+      kind === "secret"
+        ? row.ciphertext
+          ? decryptCredential(row.ciphertext, SECRET)
+          : ""
+        : (row.value ?? "");
+    map.set(row.id, { name: row.name, value, kind });
+  }
+  return map;
+}
+
+/** Builds a published-mode snapshot with a real compiled plan from the
+ * legacy server/tool fixtures, so the executor request path needs no db. */
+function makeSnapshot(
+  input: {
+    server?: Partial<McpServer>;
+    tool?: Partial<McpTool>;
+    serverValues?: ServerValueFixture[];
+  } = {},
+): McpExecutionSnapshot {
+  const server = makeServer(input.server);
+  const tool = makeTool(input.tool);
+  const serverValues = input.serverValues ?? [];
+  const compileInputs: ToolCompileInputs = {
+    serverValueRefs: serverValues.map((row) => ({
+      id: row.id,
+      name: row.name,
+      kind: row.kind ?? (row.isSecret ? "secret" : "config"),
+      owner: row.owner ?? "manual",
+    })),
+    common: { headers: [], query: [] },
+    auth: null,
+    basePath: new URL(server.baseUrl).pathname,
+    legacyDefaultHeaders: server.defaultHeaders,
+    legacyDefaultQuery: server.defaultQuery,
+  };
+  return {
+    configRevision: server.configRevision,
+    server,
+    tools: [
+      {
+        tool,
+        plan: compilePlanForTool(tool, compileInputs),
+        contractFingerprint: null,
+        compileError: null,
+      },
+    ],
+    serverValues: buildServerValues(serverValues),
+    compileInputs,
+    revisionMode: "published",
+    publishedRevisionId: server.publishedRevisionId,
+    revisionNumber: 3,
+    aggregateFingerprint: "agg_fp",
+    draftRevision: server.draftRevision,
+  };
+}
+
+/** Revision-aware db for the loader path (no preloaded snapshot). */
+function makePublishedDb(
+  input: { server?: Partial<McpServer>; tool?: Partial<McpTool> } = {},
+) {
+  const server = makeServer(input.server);
+  const tool = makeTool(input.tool);
+  const snapshot = makeSnapshot({ server, tool });
+  const snapshotTool = snapshot.tools[0];
+  if (!snapshotTool) throw new Error("expected one compiled snapshot tool");
+
+  const insertedValues: unknown[] = [];
+  const revisionRow = {
+    id: server.publishedRevisionId,
+    serverId: server.id,
+    revisionNumber: snapshot.revisionNumber,
+    name: server.name,
+    description: server.description,
+    baseUrl: server.baseUrl,
+    allowedHosts: server.allowedHosts,
+    commonEntries: server.commonEntries,
+    authConfiguration: server.authConfiguration,
+    contractFingerprint: snapshot.aggregateFingerprint,
+  };
+  const revisionToolRow = {
+    id: "mrt_1",
+    revisionId: server.publishedRevisionId,
+    serverId: server.id,
+    sourceToolId: tool.id,
+    name: tool.name,
+    title: tool.title,
+    description: tool.description,
+    method: tool.method,
+    pathTemplate: tool.pathTemplate,
+    requestDefinition: tool.requestDefinition,
+    compiledPlan: snapshotTool.plan,
+    compileStatus: "valid",
+    compileIssues: null,
+    annotations: null,
+    allowMutation: tool.allowMutation,
+    enabled: tool.enabled,
+    source: tool.source,
+    contractFingerprint: snapshotTool.contractFingerprint,
+    definitionHash: null,
+    toolOrder: 0,
+    createdAt: tool.createdAt,
+  };
+  const db = {
+    select: vi.fn(() => ({
+      from: (table: unknown) => ({
+        where: () => {
+          if (table === tables.mcpServer) return selectResult([server]);
+          if (table === tables.mcpServerRevision) {
+            return selectResult([revisionRow]);
+          }
+          if (table === tables.mcpServerRevisionTool) {
+            return selectResult([revisionToolRow]);
+          }
+          return selectResult([]);
+        },
+      }),
+    })),
+    ...insertRecorder(insertedValues),
+    transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(db)),
+  };
+  return { db, insertedValues };
+}
 
 function jsonResponse(
   body: unknown,
@@ -121,13 +305,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.clearAllMocks();
   vi.useRealTimers();
+  resetAuditQueueState();
 });
 
 describe("executeMappedTool: guards before contacting upstream", () => {
   it("rejects a non-owner before loading or decrypting a snapshot", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const { db } = makeDb({ server: [], tool: [getTool] });
+    const { db } = makeDb({ server: [] });
 
     await expect(
       executeMappedTool(db as never, {
@@ -137,6 +322,7 @@ describe("executeMappedTool: guards before contacting upstream", () => {
         args: {},
         source: "playground",
         credentialSecret: SECRET,
+        snapshot: makeSnapshot(),
       }),
     ).rejects.toMatchObject({
       appCode: APP_ERROR_CODES.MCP_SERVER_NOT_FOUND,
@@ -149,10 +335,7 @@ describe("executeMappedTool: guards before contacting upstream", () => {
   it("rejects paused servers", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const { db } = makeDb({
-      server: [{ ...liveServer, status: "paused" }],
-      tool: [getTool],
-    });
+    const { db } = makeDb({ server: [makeServer({ status: "paused" })] });
 
     await expect(
       executeMappedTool(db as never, {
@@ -162,6 +345,7 @@ describe("executeMappedTool: guards before contacting upstream", () => {
         args: { id: "1" },
         source: "playground",
         credentialSecret: SECRET,
+        snapshot: makeSnapshot({ server: { status: "paused" } }),
       }),
     ).rejects.toSatisfy(
       (error: unknown) =>
@@ -174,10 +358,7 @@ describe("executeMappedTool: guards before contacting upstream", () => {
   it("rejects disabled tools", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const { db } = makeDb({
-      server: [liveServer],
-      tool: [{ ...getTool, enabled: false }],
-    });
+    const { db } = makeDb({ server: [makeServer()] });
 
     await expect(
       executeMappedTool(db as never, {
@@ -187,6 +368,7 @@ describe("executeMappedTool: guards before contacting upstream", () => {
         args: { id: "1" },
         source: "playground",
         credentialSecret: SECRET,
+        snapshot: makeSnapshot({ tool: { enabled: false } }),
       }),
     ).rejects.toSatisfy(
       (error: unknown) =>
@@ -199,10 +381,7 @@ describe("executeMappedTool: guards before contacting upstream", () => {
   it("blocks mutations when allowMutation is false", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const { db } = makeDb({
-      server: [liveServer],
-      tool: [{ ...getTool, method: "DELETE", allowMutation: false }],
-    });
+    const { db } = makeDb({ server: [] });
 
     await expect(
       executeMappedTool(db as never, {
@@ -210,6 +389,9 @@ describe("executeMappedTool: guards before contacting upstream", () => {
         toolId: "mct_1",
         source: "agent",
         credentialSecret: SECRET,
+        snapshot: makeSnapshot({
+          tool: { method: "DELETE", allowMutation: false },
+        }),
       }),
     ).rejects.toSatisfy(
       (error: unknown) =>
@@ -222,16 +404,11 @@ describe("executeMappedTool: guards before contacting upstream", () => {
   it("rejects hosts outside the allowlist", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const { db } = makeDb({
-      server: [
-        {
-          ...liveServer,
-          baseUrl: "https://evil.example",
-          allowedHosts: ["api.example.com"],
-        },
-      ],
-      tool: [getTool],
+    const server = makeServer({
+      baseUrl: "https://evil.example",
+      allowedHosts: ["api.example.com"],
     });
+    const { db } = makeDb({ server: [server] });
 
     await expect(
       executeMappedTool(db as never, {
@@ -241,6 +418,7 @@ describe("executeMappedTool: guards before contacting upstream", () => {
         args: { id: "1" },
         source: "playground",
         credentialSecret: SECRET,
+        snapshot: makeSnapshot({ server }),
       }),
     ).rejects.toSatisfy(
       (error: unknown) =>
@@ -253,7 +431,7 @@ describe("executeMappedTool: guards before contacting upstream", () => {
   it("fails a missing required agent input before contacting upstream", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const { db } = makeDb({ server: [liveServer], tool: [getTool] });
+    const { db } = makeDb({ server: [makeServer()] });
 
     await expect(
       executeMappedTool(db as never, {
@@ -263,6 +441,7 @@ describe("executeMappedTool: guards before contacting upstream", () => {
         args: {},
         source: "playground",
         credentialSecret: SECRET,
+        snapshot: makeSnapshot(),
       }),
     ).rejects.toSatisfy(
       (error: unknown) =>
@@ -276,7 +455,7 @@ describe("executeMappedTool: guards before contacting upstream", () => {
   it("rejects playground invoke for another user's server", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const { db } = makeDb({ server: [liveServer], tool: [] });
+    const { db } = makeDb({ server: [makeServer()] });
 
     await expect(
       executeMappedTool(db as never, {
@@ -285,6 +464,7 @@ describe("executeMappedTool: guards before contacting upstream", () => {
         toolId: "mct_1",
         source: "playground",
         credentialSecret: SECRET,
+        snapshot: makeSnapshot(),
       }),
     ).rejects.toSatisfy(
       (error: unknown) =>
@@ -300,7 +480,7 @@ describe("executeMappedTool: envelope for completed responses", () => {
     lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true }));
     vi.stubGlobal("fetch", fetchMock);
-    const { db } = makeDb({ server: [liveServer], tool: [getTool] });
+    const { db } = makeDb({ server: [makeServer()] });
 
     const result = await executeMappedTool(db as never, {
       serverId: "mcs_1",
@@ -309,6 +489,7 @@ describe("executeMappedTool: envelope for completed responses", () => {
       args: { id: "1" },
       source: "playground",
       credentialSecret: SECRET,
+      snapshot: makeSnapshot(),
     });
 
     expect(result.ok).toBe(true);
@@ -334,7 +515,7 @@ describe("executeMappedTool: envelope for completed responses", () => {
       return jsonResponse({ ok: true });
     });
     vi.stubGlobal("fetch", fetchMock);
-    const { db } = makeDb({ server: [liveServer], tool: [getTool] });
+    const { db } = makePublishedDb();
     const originalTransaction = db.transaction;
     db.transaction = vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => {
       const result = await originalTransaction(fn);
@@ -344,10 +525,9 @@ describe("executeMappedTool: envelope for completed responses", () => {
 
     const result = await executeMappedTool(db as never, {
       serverId: "mcs_1",
-      ownerUserId: "usr_owner",
       toolId: "mct_1",
       args: { id: "1" },
-      source: "playground",
+      source: "agent",
       credentialSecret: SECRET,
     });
 
@@ -362,7 +542,7 @@ describe("executeMappedTool: envelope for completed responses", () => {
       .fn()
       .mockResolvedValue(jsonResponse({ error: "unauthorized" }, 401));
     vi.stubGlobal("fetch", fetchMock);
-    const { db } = makeDb({ server: [liveServer], tool: [getTool] });
+    const { db } = makeDb({ server: [makeServer()] });
 
     const result = await executeMappedTool(db as never, {
       serverId: "mcs_1",
@@ -371,6 +551,7 @@ describe("executeMappedTool: envelope for completed responses", () => {
       args: { id: "1" },
       source: "playground",
       credentialSecret: SECRET,
+      snapshot: makeSnapshot(),
     });
 
     expect(result.ok).toBe(false);
@@ -392,24 +573,9 @@ describe("executeMappedTool: envelope for completed responses", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
     const tool = {
-      ...getTool,
       requestTemplate: { headers: { Authorization: "Bearer {{api_token}}" } },
     };
-    const { db } = makeDb({
-      server: [liveServer],
-      tool: [tool],
-      serverValues: [
-        {
-          id: "msv_token",
-          name: "api_token",
-          isSecret: true,
-          kind: "secret",
-          owner: "manual",
-          value: null,
-          ciphertext: tokenCipher,
-        },
-      ],
-    });
+    const { db } = makeDb({ server: [makeServer()] });
 
     const result = await executeMappedTool(db as never, {
       serverId: "mcs_1",
@@ -418,6 +584,20 @@ describe("executeMappedTool: envelope for completed responses", () => {
       args: { id: "1" },
       source: "playground",
       credentialSecret: SECRET,
+      snapshot: makeSnapshot({
+        tool,
+        serverValues: [
+          {
+            id: "msv_token",
+            name: "api_token",
+            isSecret: true,
+            kind: "secret",
+            owner: "manual",
+            value: null,
+            ciphertext: tokenCipher,
+          },
+        ],
+      }),
     });
 
     expect(result.envelope.body).toContain("[REDACTED]");
@@ -440,7 +620,7 @@ describe("executeMappedTool: envelope for completed responses", () => {
       }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const { db } = makeDb({ server: [liveServer], tool: [getTool] });
+    const { db } = makeDb({ server: [makeServer()] });
 
     const result = await executeMappedTool(db as never, {
       serverId: "mcs_1",
@@ -449,6 +629,7 @@ describe("executeMappedTool: envelope for completed responses", () => {
       args: { id: "1" },
       source: "playground",
       credentialSecret: SECRET,
+      snapshot: makeSnapshot(),
     });
 
     expect(result.ok).toBe(true);
@@ -459,6 +640,12 @@ describe("executeMappedTool: envelope for completed responses", () => {
 });
 
 describe("executeMappedTool: redirects", () => {
+  const mutatingTool = {
+    method: "POST" as const,
+    allowMutation: true,
+    requestTemplate: { body: '{"note":"hi"}', bodyType: "json" as const },
+  };
+
   it("follows a same-origin 307 redirect, preserving method and body", async () => {
     lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
     const fetchMock = vi
@@ -471,13 +658,7 @@ describe("executeMappedTool: redirects", () => {
       )
       .mockResolvedValueOnce(jsonResponse({ ok: true }));
     vi.stubGlobal("fetch", fetchMock);
-    const tool = {
-      ...getTool,
-      method: "POST",
-      allowMutation: true,
-      requestTemplate: { body: '{"note":"hi"}', bodyType: "json" },
-    };
-    const { db } = makeDb({ server: [liveServer], tool: [tool] });
+    const { db } = makeDb({ server: [makeServer()] });
 
     const result = await executeMappedTool(db as never, {
       serverId: "mcs_1",
@@ -486,6 +667,7 @@ describe("executeMappedTool: redirects", () => {
       args: { id: "1" },
       source: "playground",
       credentialSecret: SECRET,
+      snapshot: makeSnapshot({ tool: mutatingTool }),
     });
 
     expect(result.ok).toBe(true);
@@ -510,13 +692,7 @@ describe("executeMappedTool: redirects", () => {
       )
       .mockResolvedValueOnce(jsonResponse({ ok: true }));
     vi.stubGlobal("fetch", fetchMock);
-    const tool = {
-      ...getTool,
-      method: "POST",
-      allowMutation: true,
-      requestTemplate: { body: '{"note":"hi"}', bodyType: "json" },
-    };
-    const { db } = makeDb({ server: [liveServer], tool: [tool] });
+    const { db } = makeDb({ server: [makeServer()] });
 
     await executeMappedTool(db as never, {
       serverId: "mcs_1",
@@ -525,6 +701,7 @@ describe("executeMappedTool: redirects", () => {
       args: { id: "1" },
       source: "playground",
       credentialSecret: SECRET,
+      snapshot: makeSnapshot({ tool: mutatingTool }),
     });
 
     const secondCall = fetchMock.mock.calls[1] as [URL, RequestInit];
@@ -541,7 +718,7 @@ describe("executeMappedTool: redirects", () => {
       }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const { db } = makeDb({ server: [liveServer], tool: [getTool] });
+    const { db } = makeDb({ server: [makeServer()] });
 
     await expect(
       executeMappedTool(db as never, {
@@ -551,6 +728,7 @@ describe("executeMappedTool: redirects", () => {
         args: { id: "1" },
         source: "playground",
         credentialSecret: SECRET,
+        snapshot: makeSnapshot(),
       }),
     ).rejects.toSatisfy(
       (error: unknown) =>
@@ -576,7 +754,7 @@ describe("executeMappedTool: deadline and network failures", () => {
         }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const { db } = makeDb({ server: [liveServer], tool: [getTool] });
+    const { db } = makeDb({ server: [makeServer()] });
 
     const promise = executeMappedTool(db as never, {
       serverId: "mcs_1",
@@ -585,6 +763,7 @@ describe("executeMappedTool: deadline and network failures", () => {
       args: { id: "1" },
       source: "playground",
       credentialSecret: SECRET,
+      snapshot: makeSnapshot(),
     });
     const assertion = expect(promise).rejects.toSatisfy(
       (error: unknown) =>
@@ -609,13 +788,7 @@ describe("executeMappedTool: deadline and network failures", () => {
         }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const tool = {
-      ...getTool,
-      method: "POST",
-      allowMutation: true,
-      requestTemplate: { body: "{}", bodyType: "json" },
-    };
-    const { db } = makeDb({ server: [liveServer], tool: [tool] });
+    const { db } = makeDb({ server: [makeServer()] });
 
     const promise = executeMappedTool(db as never, {
       serverId: "mcs_1",
@@ -624,6 +797,13 @@ describe("executeMappedTool: deadline and network failures", () => {
       args: { id: "1" },
       source: "playground",
       credentialSecret: SECRET,
+      snapshot: makeSnapshot({
+        tool: {
+          method: "POST",
+          allowMutation: true,
+          requestTemplate: { body: "{}", bodyType: "json" },
+        },
+      }),
     });
     const assertion = expect(promise).rejects.toSatisfy(
       (error: unknown) =>
@@ -638,13 +818,7 @@ describe("executeMappedTool: deadline and network failures", () => {
     lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
     const fetchMock = vi.fn().mockRejectedValue(new Error("ECONNRESET"));
     vi.stubGlobal("fetch", fetchMock);
-    const tool = {
-      ...getTool,
-      method: "POST",
-      allowMutation: true,
-      requestTemplate: { body: "{}", bodyType: "json" },
-    };
-    const { db } = makeDb({ server: [liveServer], tool: [tool] });
+    const { db } = makeDb({ server: [makeServer()] });
 
     await expect(
       executeMappedTool(db as never, {
@@ -654,6 +828,13 @@ describe("executeMappedTool: deadline and network failures", () => {
         args: { id: "1" },
         source: "playground",
         credentialSecret: SECRET,
+        snapshot: makeSnapshot({
+          tool: {
+            method: "POST",
+            allowMutation: true,
+            requestTemplate: { body: "{}", bodyType: "json" },
+          },
+        }),
       }),
     ).rejects.toSatisfy(
       (error: unknown) =>
@@ -666,7 +847,7 @@ describe("executeMappedTool: deadline and network failures", () => {
     lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
     const fetchMock = vi.fn().mockRejectedValue(new Error("ECONNRESET"));
     vi.stubGlobal("fetch", fetchMock);
-    const { db } = makeDb({ server: [liveServer], tool: [getTool] });
+    const { db } = makeDb({ server: [makeServer()] });
 
     await expect(
       executeMappedTool(db as never, {
@@ -676,6 +857,7 @@ describe("executeMappedTool: deadline and network failures", () => {
         args: { id: "1" },
         source: "playground",
         credentialSecret: SECRET,
+        snapshot: makeSnapshot(),
       }),
     ).rejects.toSatisfy(
       (error: unknown) =>
@@ -690,10 +872,7 @@ describe("executeMappedTool: audit logging", () => {
     lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true }));
     vi.stubGlobal("fetch", fetchMock);
-    const { db, insertedValues } = makeDb({
-      server: [liveServer],
-      tool: [getTool],
-    });
+    const { db, insertedValues } = makeDb({ server: [makeServer()] });
 
     const result = await executeMappedTool(db as never, {
       serverId: "mcs_1",
@@ -702,6 +881,7 @@ describe("executeMappedTool: audit logging", () => {
       args: { id: "1" },
       source: "playground",
       credentialSecret: SECRET,
+      snapshot: makeSnapshot(),
     });
 
     await flushMicrotasks();
@@ -710,6 +890,10 @@ describe("executeMappedTool: audit logging", () => {
       id: result.callLogId,
       status: "success",
       outcome: "success",
+      revisionMode: "published",
+      publishedRevisionId: "msr_1",
+      revisionNumber: 3,
+      aggregateFingerprint: "agg_fp",
     });
   });
 });

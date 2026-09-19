@@ -178,35 +178,35 @@ describe("mcp-studio helpers", () => {
     expect(
       deriveTrafficLight({
         status: "paused",
-        enabledToolCount: 2,
+        publishedRevisionId: "msr_1",
         recentCallStatuses: ["success"],
       }),
     ).toBe("paused");
     expect(
       deriveTrafficLight({
         status: "live",
-        enabledToolCount: 0,
+        publishedRevisionId: null,
         recentCallStatuses: [],
       }),
     ).toBe("draft");
     expect(
       deriveTrafficLight({
         status: "live",
-        enabledToolCount: 1,
+        publishedRevisionId: "msr_1",
         recentCallStatuses: [],
       }),
     ).toBe("green");
     expect(
       deriveTrafficLight({
         status: "live",
-        enabledToolCount: 1,
+        publishedRevisionId: "msr_1",
         recentCallStatuses: ["error", "success"],
       }),
     ).toBe("yellow");
     expect(
       deriveTrafficLight({
         status: "live",
-        enabledToolCount: 1,
+        publishedRevisionId: "msr_1",
         recentCallStatuses: ["error", "error", "error", "error", "error"],
       }),
     ).toBe("red");
@@ -350,6 +350,7 @@ describe("mcp-studio ownership", () => {
           userId: "user-a",
           name: "A1",
           status: "live",
+          publishedRevisionId: "msr_1",
           allowedHosts: [],
         },
       ],

@@ -9,12 +9,31 @@ import { mcpRouter } from "./mcp.js";
 const createTool = vi.hoisted(() => vi.fn());
 const updateTool = vi.hoisted(() => vi.fn());
 const updateServer = vi.hoisted(() => vi.fn());
+const previewPublish = vi.hoisted(() => vi.fn());
+const publishServer = vi.hoisted(() => vi.fn());
+const listRevisionHistory = vi.hoisted(() => vi.fn());
+const getRevisionDetail = vi.hoisted(() => vi.fn());
+const restoreRevisionToDraft = vi.hoisted(() => vi.fn());
 
 vi.mock("../services/mcp-studio-service.js", async () => {
   const actual = await vi.importActual<
     typeof import("../services/mcp-studio-service.js")
   >("../services/mcp-studio-service.js");
   return { ...actual, createTool, updateTool, updateServer };
+});
+
+vi.mock("../services/mcp-publishing-service.js", async () => {
+  const actual = await vi.importActual<
+    typeof import("../services/mcp-publishing-service.js")
+  >("../services/mcp-publishing-service.js");
+  return {
+    ...actual,
+    previewPublish,
+    publishServer,
+    listRevisionHistory,
+    getRevisionDetail,
+    restoreRevisionToDraft,
+  };
 });
 
 vi.mock("../lib/user-access.js", async () => {
@@ -170,6 +189,162 @@ describe("mcp router revision contract", () => {
       serverId: "mcs_1",
     });
     // Conflict metadata must never carry secret material.
+    const serialized = JSON.stringify(caught);
+    expect(serialized).not.toContain("sk_live");
+    expect(serialized).not.toContain("ciphertext");
+  });
+});
+
+describe("mcp router publication contract", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("rejects publishServer without an expectedDraftRevision", async () => {
+    const caller = makeCaller();
+    await expect(
+      caller.publishServer({
+        serverId: "mcs_1",
+        expectedPublishedRevisionId: null,
+        publishRequestId: "req_1",
+        candidateFingerprint: "cand_1",
+      } as never),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(publishServer).not.toHaveBeenCalled();
+  });
+
+  it("rejects restoreRevision without an expectedDraftRevision", async () => {
+    const caller = makeCaller();
+    await expect(
+      caller.restoreRevision({
+        serverId: "mcs_1",
+        revisionId: "msr_1",
+        expectedRevision: 1,
+      } as never),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(restoreRevisionToDraft).not.toHaveBeenCalled();
+  });
+
+  it("previews a publication for the session user", async () => {
+    previewPublish.mockResolvedValue({ serverId: "mcs_1" });
+    const caller = makeCaller();
+    await caller.publishPreview({ serverId: "mcs_1" });
+    expect(previewPublish).toHaveBeenCalledWith(
+      expect.anything(),
+      "usr_1",
+      "mcs_1",
+    );
+  });
+
+  it("publishes with studio attribution and the session user", async () => {
+    publishServer.mockResolvedValue({ revisionNumber: 1 });
+    const caller = makeCaller();
+    await caller.publishServer({
+      serverId: "mcs_1",
+      expectedDraftRevision: 2,
+      expectedPublishedRevisionId: null,
+      publishRequestId: "req_1",
+      candidateFingerprint: "cand_1",
+      acknowledgedWarningCodes: ["contract_changed"],
+      note: "First release",
+    });
+    expect(publishServer).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        userId: "usr_1",
+        actorSource: "studio",
+        expectedDraftRevision: 2,
+        expectedPublishedRevisionId: null,
+        publishRequestId: "req_1",
+        candidateFingerprint: "cand_1",
+        acknowledgedWarningCodes: ["contract_changed"],
+        note: "First release",
+      }),
+    );
+  });
+
+  it("passes pagination through revision history", async () => {
+    listRevisionHistory.mockResolvedValue({
+      items: [],
+      page: 2,
+      pageSize: 20,
+      total: 0,
+    });
+    const caller = makeCaller();
+    await caller.revisionHistory({
+      serverId: "mcs_1",
+      page: 2,
+      pageSize: 20,
+    });
+    expect(listRevisionHistory).toHaveBeenCalledWith(
+      expect.anything(),
+      "usr_1",
+      "mcs_1",
+      { page: 2, pageSize: 20 },
+    );
+  });
+
+  it("reads revision detail with the session user", async () => {
+    getRevisionDetail.mockResolvedValue({ id: "msr_1" });
+    const caller = makeCaller();
+    await caller.revisionDetail({ serverId: "mcs_1", revisionId: "msr_1" });
+    expect(getRevisionDetail).toHaveBeenCalledWith(
+      expect.anything(),
+      "usr_1",
+      "mcs_1",
+      "msr_1",
+    );
+  });
+
+  it("restores a revision to the draft with the session user", async () => {
+    restoreRevisionToDraft.mockResolvedValue({ draftRevision: 3 });
+    const caller = makeCaller();
+    await caller.restoreRevision({
+      serverId: "mcs_1",
+      revisionId: "msr_1",
+      expectedRevision: 4,
+      expectedDraftRevision: 2,
+    });
+    expect(restoreRevisionToDraft).toHaveBeenCalledWith(expect.anything(), {
+      userId: "usr_1",
+      serverId: "mcs_1",
+      revisionId: "msr_1",
+      expectedRevision: 4,
+      expectedDraftRevision: 2,
+    });
+  });
+
+  it("surfaces a stale publish as a secret-safe conflict", async () => {
+    publishServer.mockRejectedValue(
+      appError({
+        appCode: APP_ERROR_CODES.MCP_PUBLISH_STALE_DRAFT,
+        message:
+          "The draft changed after preview; re-preview before publishing.",
+        status: 409,
+        details: { serverId: "mcs_1", draftRevision: 9, refreshRequired: true },
+      }),
+    );
+    const caller = makeCaller();
+    let caught: unknown;
+    try {
+      await caller.publishServer({
+        serverId: "mcs_1",
+        expectedDraftRevision: 2,
+        expectedPublishedRevisionId: null,
+        publishRequestId: "req_1",
+        candidateFingerprint: "cand_1",
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(TRPCError);
+    const cause = causeOf(caught);
+    expect(cause.appCode).toBe(APP_ERROR_CODES.MCP_PUBLISH_STALE_DRAFT);
+    expect(cause.details).toMatchObject({
+      serverId: "mcs_1",
+      draftRevision: 9,
+      refreshRequired: true,
+    });
     const serialized = JSON.stringify(caught);
     expect(serialized).not.toContain("sk_live");
     expect(serialized).not.toContain("ciphertext");

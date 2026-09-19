@@ -142,8 +142,12 @@ export function createMcpGatewayRoutes() {
 
       // Always install the tools handlers, even with zero tools, so
       // `tools/list` answers `[]` instead of "Method not found" for a paused
-      // server or one with no contract-ready tools.
-      if (!snapshot || snapshot.server.status === "paused") {
+      // server, an unpublished server, or one with no contract-ready tools.
+      if (
+        !snapshot ||
+        snapshot.server.status === "paused" ||
+        snapshot.publishedRevisionId === null
+      ) {
         installContractTools(mcp, []);
         return mcp;
       }
@@ -200,6 +204,8 @@ export function createMcpGatewayRoutes() {
             serverId: server.id,
             toolId: tool.id,
             configRevision: snapshot.configRevision,
+            revisionNumber: snapshot.revisionNumber,
+            aggregateFingerprint: snapshot.aggregateFingerprint,
             contractVersion: activeContract.contractVersion,
             fingerprint: activeContract.fingerprint,
           },
@@ -239,8 +245,27 @@ export function createMcpGatewayRoutes() {
                 rawArgs ?? {},
               );
               if (!parsed.success) {
+                captureMcpTelemetry(MCP_TELEMETRY_EVENTS.staleAgentCall, {
+                  db,
+                  userId: token.userId,
+                  properties: {
+                    serverId: server.id,
+                    toolId: tool.id,
+                    reason: "input_validation_failed",
+                    publishedRevisionId: snapshot.publishedRevisionId,
+                    revisionNumber: snapshot.revisionNumber,
+                    aggregateFingerprint: snapshot.aggregateFingerprint,
+                    issueCodes: parsed.error.issues
+                      .map((issue) => issue.code)
+                      .slice(0, 10),
+                  },
+                });
                 return buildMcpToolResult(
-                  invalidArgumentsEnvelope(parsed.error, inputIdByName),
+                  invalidArgumentsEnvelope(parsed.error, inputIdByName, {
+                    publishedRevisionId: snapshot.publishedRevisionId,
+                    publishedRevisionNumber: snapshot.revisionNumber,
+                    contractFingerprint: snapshot.aggregateFingerprint,
+                  }),
                 );
               }
               const result = await executeMappedTool(db, {

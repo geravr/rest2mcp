@@ -43,6 +43,10 @@ const tables = vi.hoisted(() => ({
   mcpServer: { id: "id" },
   mcpTool: { serverId: "serverId", enabled: "enabled", id: "id", name: "name" },
   mcpServerVariable: { serverId: "serverId" },
+  mcpServerRevision: { id: "id", serverId: "serverId" },
+  mcpServerRevisionTool: { revisionId: "revisionId", toolOrder: "toolOrder" },
+  mcpServerRevisionConfig: { revisionId: "revisionId" },
+  generateId: (prefix: string) => `${prefix}_test`,
 }));
 
 vi.mock("@repo/db", () => tables);
@@ -50,16 +54,21 @@ vi.mock("@repo/db", () => tables);
 vi.mock("drizzle-orm", () => ({
   and: vi.fn((...args: unknown[]) => args),
   eq: vi.fn((...args: unknown[]) => args),
+  asc: vi.fn((...args: unknown[]) => args),
 }));
 
 import { createMcpGatewayRoutes } from "./mcp-gateway.js";
 import { buildAgentInputZodObject } from "./mcp-contract.js";
+import { compileToolDefinition } from "./mcp-compiler.js";
+import { MCP_REQUEST_DEFINITION_VERSION } from "./mcp-policy.js";
 import { errorHandler } from "./middleware.js";
 
 const SERVER_ROW = {
   id: "mcs_1",
   userId: "usr_1",
   name: "CRM",
+  slug: "crm",
+  description: null,
   status: "live",
   baseUrl: "https://api.example.com",
   allowedHosts: ["api.example.com"],
@@ -67,43 +76,100 @@ const SERVER_ROW = {
   defaultQuery: null,
   commonEntries: null,
   authConfiguration: null,
+  configRevision: 1,
+  draftRevision: 1,
+  publishedRevisionId: "msr_1",
 };
 
-const TOOL_ROWS = [
+const REVISION_ROW = {
+  id: "msr_1",
+  serverId: "mcs_1",
+  revisionNumber: 3,
+  contractFingerprint: "agg_fp",
+  name: "CRM",
+  description: null,
+  baseUrl: "https://api.example.com",
+  allowedHosts: ["api.example.com"],
+  commonEntries: null,
+  authConfiguration: null,
+};
+
+const COMPILED_TOOL = compileToolDefinition({
+  method: "GET",
+  definition: {
+    version: MCP_REQUEST_DEFINITION_VERSION,
+    pathSegments: [
+      { id: "path_0", value: { kind: "literal", value: "/contacts/" } },
+      { id: "path_1", value: { kind: "agentInput", agentInputId: "id" } },
+    ],
+    query: [],
+    headers: [],
+    body: { bodyType: "none" },
+    agentInputs: [
+      {
+        id: "id",
+        name: "id",
+        description: "Contact id",
+        required: true,
+        sensitive: false,
+        type: "string",
+      },
+    ],
+  },
+  common: { headers: [], query: [] },
+  auth: null,
+  serverValues: [],
+  basePath: "/",
+  allowMutation: false,
+});
+
+if (!COMPILED_TOOL.ok || !COMPILED_TOOL.plan) {
+  throw new Error("gateway test fixture failed to compile");
+}
+const COMPILED_PLAN = COMPILED_TOOL.plan;
+
+const REVISION_TOOL_ROWS = [
   {
-    id: "mct_1",
+    id: "mrt_1",
+    revisionId: "msr_1",
     serverId: "mcs_1",
+    sourceToolId: "mct_1",
     name: "get_contact",
     title: "Get contact",
     description: "Fetch one contact by id.",
     method: "GET",
     pathTemplate: "/contacts/{{id}}",
-    requestTemplate: {},
-    params: [
-      {
-        name: "id",
-        required: true,
-        type: "string",
-        description: "Contact id",
-      },
-    ],
+    requestDefinition: null,
+    compiledPlan: COMPILED_PLAN,
+    compileStatus: "valid",
+    compileIssues: null,
+    annotations: null,
     allowMutation: false,
     enabled: true,
-    requestDefinition: null,
-    compiledPlan: null,
-    compileStatus: null,
+    source: "manual",
+    contractFingerprint: "ctr_fp",
+    definitionHash: COMPILED_PLAN.definitionHash,
+    toolOrder: 0,
+    createdAt: new Date("2026-01-01T00:00:00Z"),
   },
 ];
 
 function selectResult(rows: unknown[]) {
   const promise = Promise.resolve(rows);
-  return Object.assign(promise, { limit: () => Promise.resolve(rows) });
+  return Object.assign(promise, {
+    limit: () => Promise.resolve(rows),
+    orderBy: () => Promise.resolve(rows),
+  });
 }
 
 function gatewayDb(
   serverRow: typeof SERVER_ROW | null = SERVER_ROW,
-  toolRows: typeof TOOL_ROWS = TOOL_ROWS,
+  revisionToolRows: typeof REVISION_TOOL_ROWS = REVISION_TOOL_ROWS,
 ) {
+  const revisionRow =
+    serverRow?.publishedRevisionId != null
+      ? { ...REVISION_ROW, id: serverRow.publishedRevisionId }
+      : null;
   const db = {
     select: () => ({
       from: (table: unknown) => ({
@@ -111,7 +177,15 @@ function gatewayDb(
           if (table === tables.mcpServer) {
             return selectResult(serverRow ? [serverRow] : []);
           }
-          if (table === tables.mcpTool) return selectResult(toolRows);
+          if (table === tables.mcpServerRevision) {
+            return selectResult(revisionRow ? [revisionRow] : []);
+          }
+          if (table === tables.mcpServerRevisionTool) {
+            return selectResult(revisionToolRows);
+          }
+          if (table === tables.mcpServerRevisionConfig) {
+            return selectResult([]);
+          }
           if (table === tables.mcpServerVariable) return selectResult([]);
           return selectResult([]);
         },
@@ -124,12 +198,12 @@ function gatewayDb(
 
 function createApp(
   serverRow: typeof SERVER_ROW | null = SERVER_ROW,
-  toolRows: typeof TOOL_ROWS = TOOL_ROWS,
+  revisionToolRows: typeof REVISION_TOOL_ROWS = REVISION_TOOL_ROWS,
 ) {
   const app = new Hono<AppContext>();
   app.onError(errorHandler);
   app.use("*", async (c, next) => {
-    c.set("db", gatewayDb(serverRow, toolRows) as never);
+    c.set("db", gatewayDb(serverRow, revisionToolRows) as never);
     c.set("dbDirect", c.get("db"));
     c.set("env", {
       MCP_CREDENTIAL_SECRET: "s".repeat(32),
@@ -231,7 +305,7 @@ describe("product MCP gateway: transport guards", () => {
 describe("MCP round-trip", () => {
   async function connectClient(
     serverRow: typeof SERVER_ROW | null = SERVER_ROW,
-    toolRows: typeof TOOL_ROWS = TOOL_ROWS,
+    revisionToolRows: typeof REVISION_TOOL_ROWS = REVISION_TOOL_ROWS,
   ) {
     authenticateServerToken.mockResolvedValue({
       id: "mtk_1",
@@ -239,7 +313,7 @@ describe("MCP round-trip", () => {
       serverId: "mcs_1",
       userId: "usr_1",
     });
-    const app = createApp(serverRow, toolRows);
+    const app = createApp(serverRow, revisionToolRows);
     const transport = new StreamableHTTPClientTransport(
       new URL("http://test.local/mcp/mcs_1"),
       {

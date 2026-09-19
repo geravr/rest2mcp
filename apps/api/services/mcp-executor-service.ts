@@ -8,12 +8,19 @@
 import {
   generateId,
   mcpServer,
+  mcpServerRevision,
+  mcpServerRevisionConfig,
+  mcpServerRevisionTool,
   mcpServerVariable,
   mcpTool,
   type McpServer,
+  type McpServerRevision,
+  type McpServerRevisionConfig,
+  type McpServerRevisionTool,
+  type McpServerVariable,
   type McpTool,
 } from "@repo/db";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { APP_ERROR_CODES, AppError, appError } from "../lib/app-error.js";
 import { enqueueCallLog } from "../lib/mcp-audit-queue.js";
@@ -34,6 +41,10 @@ import {
   MCP_UPSTREAM_DEADLINE_MS,
 } from "../lib/mcp-policy.js";
 import { capText, redactText } from "../lib/mcp-redact.js";
+import {
+  captureMcpTelemetry,
+  MCP_TELEMETRY_EVENTS,
+} from "../lib/mcp-telemetry.js";
 import type { TemplateVariable } from "../lib/mcp-template.js";
 import {
   mcpAuthConfigurationSchema,
@@ -65,6 +76,8 @@ export const READ_METHODS = new Set(["GET", "HEAD"]);
 
 export type McpCallSource = "playground" | "agent" | "platform";
 
+export type McpExecutionMode = "published" | "draft";
+
 export type ExecuteMappedToolInput = {
   serverId: string;
   ownerUserId?: string;
@@ -73,6 +86,14 @@ export type ExecuteMappedToolInput = {
   args?: Record<string, unknown>;
   source: McpCallSource;
   credentialSecret: string;
+  /**
+   * "published" (default) executes the active immutable revision. "draft"
+   * materializes the observed draft for owner-only testing and never changes
+   * published state.
+   */
+  mode?: McpExecutionMode;
+  /** Draft-mode optimistic check against the observed `mcp_server.draftRevision`. */
+  expectedDraftRevision?: number;
   /** Pre-materialized committed configuration; when omitted the executor loads one. */
   snapshot?: McpExecutionSnapshot;
 };
@@ -225,22 +246,198 @@ export async function loadToolCompileInputs(
  * runtime request can never combine a server row, compiled plan, or value set
  * from different committed revisions. The transaction ends before any upstream
  * HTTP begins.
+ *
+ * Published mode reads only the active immutable revision. Draft mode exists
+ * solely for owner-only Studio testing and is never used by the product gateway.
  */
 export type SnapshotTool = {
   tool: McpTool;
   plan: McpCompiledPlan | null;
+  /** Contract fingerprint stored with the published revision tool. */
+  contractFingerprint: string | null;
   compileError: AppError | null;
 };
 
 export type McpExecutionSnapshot = {
-  /** The server configuration revision all materialized rows belong to. */
+  /** Broad configuration revision of the owning server row at load time. */
   configRevision: number;
   server: McpServer;
-  /** All tools on the server; `plan` is null when the tool cannot compile. */
+  /** Tools available for the selected mode; empty when unavailable. */
   tools: SnapshotTool[];
   serverValues: Map<string, ResolvedServerValue>;
   compileInputs: ToolCompileInputs;
+  /** "published" (immutable revision) or "draft" (owner-only testing). */
+  revisionMode: McpExecutionMode;
+  /** Active revision id; null when unpublished or in draft mode. */
+  publishedRevisionId: string | null;
+  /** Active revision number; null when unpublished or in draft mode. */
+  revisionNumber: number | null;
+  /** Aggregate contract fingerprint of the pinned revision. */
+  aggregateFingerprint: string | null;
+  /** Observed `mcp_server.draftRevision`. */
+  draftRevision: number;
 };
+
+function revisionToolToMcpTool(
+  tool: McpServerRevisionTool,
+  serverId: string,
+): McpTool {
+  return {
+    id: tool.sourceToolId,
+    serverId,
+    name: tool.name,
+    title: tool.title,
+    description: tool.description,
+    method: tool.method,
+    pathTemplate: tool.pathTemplate,
+    requestTemplate: null,
+    params: null,
+    requestDefinition: tool.requestDefinition ?? null,
+    compiledPlan: tool.compiledPlan ?? null,
+    compileStatus: tool.compileStatus ?? null,
+    compileIssues: (tool.compileIssues as McpTool["compileIssues"]) ?? null,
+    annotations: (tool.annotations as McpTool["annotations"]) ?? null,
+    allowMutation: tool.allowMutation,
+    enabled: tool.enabled,
+    source: tool.source,
+    createdAt: tool.createdAt,
+    updatedAt: tool.createdAt,
+  };
+}
+
+function emptyCompileInputs(server: McpServer): ToolCompileInputs {
+  return {
+    serverValueRefs: [],
+    common: { headers: [], query: [] },
+    auth: null,
+    basePath: safeBasePath(server.baseUrl),
+    legacyDefaultHeaders: server.defaultHeaders,
+    legacyDefaultQuery: server.defaultQuery,
+  };
+}
+
+function safeBasePath(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).pathname;
+  } catch {
+    return "/";
+  }
+}
+
+function materializePublishedSnapshot(
+  server: McpServer,
+  revision: McpServerRevision,
+  revisionTools: McpServerRevisionTool[],
+  revisionConfigs: McpServerRevisionConfig[],
+  secretRows: McpServerVariable[],
+  credentialSecret: string,
+): McpExecutionSnapshot {
+  const commonParsed = mcpCommonEntriesSchema.safeParse(revision.commonEntries);
+  const common = commonParsed.success
+    ? commonParsed.data
+    : { headers: [], query: [] };
+  const authParsed = mcpAuthConfigurationSchema.safeParse(
+    revision.authConfiguration,
+  );
+  const auth = authParsed.success ? authParsed.data : null;
+  const serverValueRefs: CompileServerValueRef[] = revisionConfigs.map(
+    (config) => ({
+      id: config.sourceValueId,
+      name: config.name,
+      kind: config.isSecret ? "secret" : "config",
+      owner: (config.owner as "manual" | "auth" | null) ?? "manual",
+    }),
+  );
+
+  const secretById = new Map(secretRows.map((row) => [row.id, row]));
+  const serverValues = new Map<string, ResolvedServerValue>();
+  for (const config of revisionConfigs) {
+    if (config.isSecret) {
+      const row = secretById.get(config.sourceValueId);
+      if (!row) continue;
+      const value =
+        row.ciphertext !== null && row.ciphertext !== undefined
+          ? decryptCredential(row.ciphertext, credentialSecret)
+          : "";
+      serverValues.set(config.sourceValueId, {
+        name: config.name,
+        value,
+        kind: "secret",
+      });
+    } else {
+      serverValues.set(config.sourceValueId, {
+        name: config.name,
+        value: config.value ?? "",
+        kind: "config",
+      });
+    }
+  }
+
+  const executionServer: McpServer = {
+    ...server,
+    name: revision.name,
+    description: revision.description,
+    baseUrl: revision.baseUrl,
+    allowedHosts: revision.allowedHosts ?? [],
+    commonEntries: revision.commonEntries as McpServer["commonEntries"],
+    authConfiguration:
+      revision.authConfiguration as McpServer["authConfiguration"],
+  };
+
+  const tools: SnapshotTool[] = revisionTools.map((tool) => {
+    const parsed = tool.compiledPlan
+      ? mcpCompiledPlanSchema.safeParse(tool.compiledPlan)
+      : null;
+    const plan = parsed && parsed.success ? parsed.data : null;
+    return {
+      tool: revisionToolToMcpTool(tool, server.id),
+      plan,
+      contractFingerprint: tool.contractFingerprint ?? null,
+      compileError: plan
+        ? null
+        : appError({
+            appCode: APP_ERROR_CODES.MCP_COMPILE_INVALID,
+            message: `Published tool "${tool.name}" has no usable compiled plan.`,
+            status: 409,
+          }),
+    };
+  });
+
+  return {
+    configRevision: server.configRevision,
+    server: executionServer,
+    tools,
+    serverValues,
+    compileInputs: {
+      serverValueRefs,
+      common,
+      auth,
+      basePath: safeBasePath(revision.baseUrl),
+      legacyDefaultHeaders: null,
+      legacyDefaultQuery: null,
+    },
+    revisionMode: "published",
+    publishedRevisionId: revision.id,
+    revisionNumber: revision.revisionNumber,
+    aggregateFingerprint: revision.contractFingerprint,
+    draftRevision: server.draftRevision,
+  };
+}
+
+function unpublishedSnapshot(server: McpServer): McpExecutionSnapshot {
+  return {
+    configRevision: server.configRevision,
+    server,
+    tools: [],
+    serverValues: new Map(),
+    compileInputs: emptyCompileInputs(server),
+    revisionMode: "published",
+    publishedRevisionId: null,
+    revisionNumber: null,
+    aggregateFingerprint: null,
+    draftRevision: server.draftRevision,
+  };
+}
 
 export async function loadExecutionSnapshot(
   db: DB,
@@ -254,7 +451,94 @@ export async function loadExecutionSnapshot(
         .where(eq(mcpServer.id, input.serverId))
         .limit(1);
       if (!server) return null;
+      if (!server.publishedRevisionId) return unpublishedSnapshot(server);
 
+      const [revision] = await tx
+        .select()
+        .from(mcpServerRevision)
+        .where(
+          and(
+            eq(mcpServerRevision.id, server.publishedRevisionId),
+            eq(mcpServerRevision.serverId, server.id),
+          ),
+        )
+        .limit(1);
+      // An inconsistent or missing active revision never falls back to mutable
+      // draft rows or an older revision; the server advertises no tools.
+      if (!revision) {
+        captureMcpTelemetry(MCP_TELEMETRY_EVENTS.revisionSnapshotLoadFailed, {
+          db,
+          properties: {
+            serverId: server.id,
+            publishedRevisionId: server.publishedRevisionId,
+            reason: "missing_active_revision",
+          },
+        });
+        return unpublishedSnapshot(server);
+      }
+
+      const revisionTools = await tx
+        .select()
+        .from(mcpServerRevisionTool)
+        .where(eq(mcpServerRevisionTool.revisionId, revision.id))
+        .orderBy(asc(mcpServerRevisionTool.toolOrder));
+      const revisionConfigs = await tx
+        .select()
+        .from(mcpServerRevisionConfig)
+        .where(eq(mcpServerRevisionConfig.revisionId, revision.id));
+      const secretRows = await tx
+        .select()
+        .from(mcpServerVariable)
+        .where(eq(mcpServerVariable.serverId, server.id));
+
+      return materializePublishedSnapshot(
+        server,
+        revision,
+        revisionTools,
+        revisionConfigs,
+        secretRows,
+        input.credentialSecret,
+      );
+    },
+    { isolationLevel: "repeatable read", accessMode: "read only" },
+  );
+}
+
+/**
+ * Owner-only draft materialization for the Studio playground. Compiles the
+ * current draft without persisting a revision or touching published state.
+ */
+export async function loadDraftExecutionSnapshot(
+  db: DB,
+  input: {
+    serverId: string;
+    credentialSecret: string;
+    expectedDraftRevision?: number;
+  },
+): Promise<McpExecutionSnapshot | null> {
+  return db.transaction(
+    async (tx) => {
+      const [server] = await tx
+        .select()
+        .from(mcpServer)
+        .where(eq(mcpServer.id, input.serverId))
+        .limit(1);
+      if (!server) return null;
+      if (
+        input.expectedDraftRevision !== undefined &&
+        server.draftRevision !== input.expectedDraftRevision
+      ) {
+        throw appError({
+          appCode: APP_ERROR_CODES.MCP_PUBLISH_STALE_DRAFT,
+          message: "The draft changed while preparing the preview.",
+          status: 409,
+          details: {
+            serverId: server.id,
+            draftRevision: server.draftRevision,
+            refreshRequired: true,
+          },
+        });
+      }
       const tools = await tx
         .select()
         .from(mcpTool)
@@ -265,29 +549,34 @@ export async function loadExecutionSnapshot(
         server.id,
         input.credentialSecret,
       );
-
       const snapshotTools: SnapshotTool[] = tools.map((tool) => {
         try {
           return {
             tool,
             plan: compilePlanForTool(tool, compileInputs),
+            contractFingerprint: null,
             compileError: null,
           };
         } catch (error) {
           return {
             tool,
             plan: null,
+            contractFingerprint: null,
             compileError: error instanceof AppError ? error : null,
           };
         }
       });
-
       return {
         configRevision: server.configRevision,
         server,
         tools: snapshotTools,
         serverValues,
         compileInputs,
+        revisionMode: "draft" as const,
+        publishedRevisionId: null,
+        revisionNumber: null,
+        aggregateFingerprint: null,
+        draftRevision: server.draftRevision,
       };
     },
     { isolationLevel: "repeatable read", accessMode: "read only" },
@@ -891,12 +1180,27 @@ export async function executeMappedTool(
     }
   }
 
+  const mode = input.mode ?? "published";
+  if (mode === "draft" && input.source !== "playground") {
+    throw appError({
+      appCode: APP_ERROR_CODES.MCP_SCOPE_DENIED,
+      message: "Draft execution is available only from the owner playground.",
+      status: 403,
+    });
+  }
+
   const snapshot =
     input.snapshot ??
-    (await loadExecutionSnapshot(db, {
-      serverId: input.serverId,
-      credentialSecret: input.credentialSecret,
-    }));
+    (mode === "draft"
+      ? await loadDraftExecutionSnapshot(db, {
+          serverId: input.serverId,
+          credentialSecret: input.credentialSecret,
+          expectedDraftRevision: input.expectedDraftRevision,
+        })
+      : await loadExecutionSnapshot(db, {
+          serverId: input.serverId,
+          credentialSecret: input.credentialSecret,
+        }));
 
   if (!snapshot) {
     throw appError({
@@ -947,10 +1251,35 @@ async function runMappedTool(
       );
 
   if (!snapshotTool) {
+    if (snapshot.revisionMode === "published") {
+      captureMcpTelemetry(MCP_TELEMETRY_EVENTS.staleAgentCall, {
+        db,
+        properties: {
+          serverId: server.id,
+          reason: "removed_tool",
+          lookup: input.toolId ? "id" : "name",
+          source: input.source,
+          publishedRevisionId: snapshot.publishedRevisionId,
+          revisionNumber: snapshot.revisionNumber,
+        },
+      });
+    }
     throw appError({
       appCode: APP_ERROR_CODES.MCP_TOOL_NOT_FOUND,
       message: "MCP tool not found.",
       status: 404,
+      details:
+        snapshot.revisionMode === "published"
+          ? {
+              serverId: server.id,
+              publishedRevisionId: snapshot.publishedRevisionId,
+              publishedRevisionNumber: snapshot.revisionNumber,
+              ...(snapshot.aggregateFingerprint
+                ? { currentFingerprint: snapshot.aggregateFingerprint }
+                : {}),
+              refreshRequired: true,
+            }
+          : undefined,
     });
   }
 
@@ -976,6 +1305,23 @@ async function runMappedTool(
       source: input.source,
       createdAt: new Date(),
       requestSummary,
+      publishedRevisionId:
+        snapshot.revisionMode === "published"
+          ? snapshot.publishedRevisionId
+          : null,
+      revisionNumber:
+        snapshot.revisionMode === "published" ? snapshot.revisionNumber : null,
+      aggregateFingerprint:
+        snapshot.revisionMode === "published"
+          ? snapshot.aggregateFingerprint
+          : null,
+      toolFingerprint:
+        snapshot.revisionMode === "published"
+          ? (snapshotTool.contractFingerprint ?? null)
+          : null,
+      revisionMode: snapshot.revisionMode,
+      draftRevision:
+        snapshot.revisionMode === "draft" ? snapshot.draftRevision : null,
       ...fields,
     });
   };
@@ -1007,6 +1353,18 @@ async function runMappedTool(
     }
 
     if (!snapshotTool.plan) {
+      if (snapshot.revisionMode === "published") {
+        captureMcpTelemetry(MCP_TELEMETRY_EVENTS.revisionSnapshotLoadFailed, {
+          db,
+          properties: {
+            serverId: server.id,
+            toolId: tool.id,
+            publishedRevisionId: snapshot.publishedRevisionId,
+            revisionNumber: snapshot.revisionNumber,
+            reason: "missing_compiled_plan",
+          },
+        });
+      }
       throw (
         snapshotTool.compileError ??
         appError({

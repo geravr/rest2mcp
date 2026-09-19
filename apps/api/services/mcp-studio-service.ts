@@ -6,6 +6,7 @@ import {
   mcpAgentToken,
   mcpCallLog,
   mcpServer,
+  mcpServerRevisionConfig,
   mcpServerVariable,
   mcpTool,
   type McpAuthConfigurationRow,
@@ -96,6 +97,12 @@ import {
   MUTATING_METHODS,
   READ_METHODS,
 } from "./mcp-executor-service.js";
+import {
+  buildPublicationCandidate,
+  loadDraftAggregate,
+  loadPublishedToolInputs,
+  loadRevisionSummary,
+} from "./mcp-publishing-service.js";
 
 type DB = PostgresJsDatabase<Record<string, unknown>>;
 
@@ -157,6 +164,15 @@ export type UpdateServerInput = {
   defaultHeaders?: Record<string, string> | null;
   defaultQuery?: Record<string, string> | null;
 };
+
+const PUBLISHABLE_SERVER_FIELDS = [
+  "name",
+  "description",
+  "baseUrl",
+  "allowedHosts",
+  "defaultHeaders",
+  "defaultQuery",
+] as const satisfies readonly (keyof UpdateServerInput)[];
 
 export type CreateLegacyToolInput = {
   expectedRevision: number;
@@ -317,11 +333,11 @@ export function mutationDefaults(
 
 export function deriveTrafficLight(input: {
   status: string;
-  enabledToolCount: number;
+  publishedRevisionId: string | null;
   recentCallStatuses: string[];
 }): TrafficLight {
   if (input.status === "paused") return "paused";
-  if (input.enabledToolCount === 0) return "draft";
+  if (!input.publishedRevisionId) return "draft";
   const recent = input.recentCallStatuses.slice(0, 5);
   if (recent.length === 0) return "green";
   const failed = recent.filter((status) => status !== "success");
@@ -347,6 +363,41 @@ async function requireOwnedServer(db: DB, userId: string, serverId: string) {
   return server;
 }
 
+/**
+ * A secret slot referenced by the active published revision is an operational
+ * dependency. Deleting it or changing its kind would break live execution even
+ * when the draft no longer references it; both require a new publication.
+ */
+async function assertActiveRevisionDoesNotReferenceSecret(
+  db: DB,
+  server: McpServer,
+  variableId: string,
+  action: "deleted" | "converted",
+): Promise<void> {
+  if (!server.publishedRevisionId) return;
+  const [reference] = await db
+    .select({ id: mcpServerRevisionConfig.id })
+    .from(mcpServerRevisionConfig)
+    .where(
+      and(
+        eq(mcpServerRevisionConfig.revisionId, server.publishedRevisionId),
+        eq(mcpServerRevisionConfig.sourceValueId, variableId),
+        eq(mcpServerRevisionConfig.isSecret, true),
+      ),
+    )
+    .limit(1);
+  if (!reference) return;
+  throw appError({
+    appCode: APP_ERROR_CODES.MCP_ACTIVE_SECRET_IN_USE,
+    message: `This secret is used by the active published revision and cannot be ${action}.`,
+    status: 409,
+    details: {
+      serverId: server.id,
+      publishedRevisionId: server.publishedRevisionId,
+    },
+  });
+}
+
 async function countEnabledTools(db: DB, serverId: string): Promise<number> {
   const [row] = await db
     .select({ count: count() })
@@ -355,9 +406,10 @@ async function countEnabledTools(db: DB, serverId: string): Promise<number> {
   return row?.count ?? 0;
 }
 
-async function recentProductCallStatuses(
+async function recentActiveRevisionCallStatuses(
   db: DB,
   serverId: string,
+  publishedRevisionId: string,
 ): Promise<string[]> {
   const rows = await db
     .select({ status: mcpCallLog.status })
@@ -365,6 +417,7 @@ async function recentProductCallStatuses(
     .where(
       and(
         eq(mcpCallLog.serverId, serverId),
+        eq(mcpCallLog.publishedRevisionId, publishedRevisionId),
         inArray(mcpCallLog.source, ["playground", "agent"]),
       ),
     )
@@ -419,7 +472,13 @@ export async function attachTrafficLight(
       const [enabledToolCount, recentCallStatuses, secret, lastCall] =
         await Promise.all([
           countEnabledTools(db, server.id),
-          recentProductCallStatuses(db, server.id),
+          server.publishedRevisionId
+            ? recentActiveRevisionCallStatuses(
+                db,
+                server.id,
+                server.publishedRevisionId,
+              )
+            : Promise.resolve([] as string[]),
           hasSecretVariable(db, server.id),
           lastCallAt(db, server.id),
         ]);
@@ -433,7 +492,7 @@ export async function attachTrafficLight(
         lastCallAt: lastCall,
         trafficLight: deriveTrafficLight({
           status: server.status,
-          enabledToolCount,
+          publishedRevisionId: server.publishedRevisionId,
           recentCallStatuses,
         }),
       };
@@ -1063,6 +1122,14 @@ export async function applyAuthRecipe(
       row.name,
     );
     if (references.length > 0) continue;
+    if (row.isSecret) {
+      await assertActiveRevisionDoesNotReferenceSecret(
+        db,
+        updated,
+        row.id,
+        "deleted",
+      );
+    }
     await db.delete(mcpServerVariable).where(eq(mcpServerVariable.id, row.id));
   }
 
@@ -1094,6 +1161,7 @@ export async function setServerAuth(
         auth: describeServerAuth(updated),
       };
     },
+    { draftMutation: true },
   );
   return { ...result, revision };
 }
@@ -1188,10 +1256,48 @@ export async function getServer(db: DB, userId: string, serverId: string) {
     .orderBy(desc(mcpTool.createdAt));
   const variables = await listVariables(db, userId, server.id);
 
+  const aggregate = await loadDraftAggregate(db, { userId, serverId });
+  const candidate = buildPublicationCandidate(aggregate);
+  const activeRevision = server.publishedRevisionId
+    ? await loadRevisionSummary(db, server.id, server.publishedRevisionId)
+    : null;
+  const publishedInputs = activeRevision
+    ? await loadPublishedToolInputs(db, activeRevision.id)
+    : new Map<
+        string,
+        Array<{
+          name: string;
+          type: string;
+          required: boolean;
+          sensitive: boolean;
+          description?: string;
+          minimum?: number;
+          maximum?: number;
+          minLength?: number;
+          maxLength?: number;
+          pattern?: string;
+        }>
+      >();
+
   return {
     ...withMeta,
     tools,
     variables,
+    publishedRevisionNumber: activeRevision?.revisionNumber ?? null,
+    publishedTools:
+      activeRevision?.tools
+        .filter((entry) => entry.enabled)
+        .map((entry) => ({
+          id: entry.sourceToolId,
+          name: entry.name,
+          method: entry.method,
+          allowMutation: entry.allowMutation,
+          params: publishedInputs.get(entry.sourceToolId) ?? [],
+        })) ?? [],
+    dirty: activeRevision
+      ? activeRevision.candidateFingerprint !== candidate.candidateFingerprint
+      : true,
+    publishReady: candidate.ready,
     auth: describeServerAuth(server),
     recipe: toRecipeTemplate({
       name: server.name,
@@ -1227,6 +1333,9 @@ export async function updateServer(
   serverId: string,
   input: UpdateServerInput,
 ) {
+  const draftMutation = PUBLISHABLE_SERVER_FIELDS.some(
+    (field) => input[field] !== undefined,
+  );
   const { result, revision } = await withOwnedServerWrite(
     db,
     { userId, serverId, expectedRevision: input.expectedRevision },
@@ -1326,6 +1435,7 @@ export async function updateServer(
       const [withMeta] = await attachTrafficLight(ctx.tx, [updated]);
       return withMeta;
     },
+    { draftMutation },
   );
 
   return { ...result, revision };
@@ -1369,6 +1479,7 @@ export async function updateServerCommon(
     db,
     { userId, serverId, expectedRevision: input.expectedRevision },
     async (ctx) => applyServerCommonWrite(ctx.tx, ctx.server, parsedCommon),
+    { draftMutation: true },
   );
   return { ...result, revision };
 }
@@ -2141,6 +2252,7 @@ export async function createTool(
         rethrowToolNameConflict(error);
       }
     },
+    { draftMutation: true },
   );
   return { ...result, revision };
 }
@@ -2376,6 +2488,7 @@ export async function updateTool(
         rethrowToolNameConflict(error);
       }
     },
+    { draftMutation: true },
   );
   return { ...result, revision };
 }
@@ -2493,6 +2606,7 @@ export async function duplicateTool(
         rethrowToolNameConflict(error);
       }
     },
+    { draftMutation: true },
   );
   return { ...result, revision };
 }
@@ -2579,6 +2693,7 @@ export async function createLegacyTool(
         rethrowToolNameConflict(error);
       }
     },
+    { draftMutation: true },
   );
   return { ...result, revision };
 }
@@ -2881,6 +2996,7 @@ export async function confirmCurlImport(
         rethrowToolNameConflict(error);
       }
     },
+    { draftMutation: true },
   );
   return { ...result, revision };
 }
@@ -3149,6 +3265,7 @@ export async function updateLegacyTool(
         rethrowToolNameConflict(error);
       }
     },
+    { draftMutation: true },
   );
   return { ...result, revision };
 }
@@ -3179,6 +3296,7 @@ export async function deleteTool(
       // No automatic live-to-draft demotion when the last tool is removed.
       return { id: deleted.id, deleted: true as const };
     },
+    { draftMutation: true },
   );
   return { ...result, revision };
 }
@@ -3260,6 +3378,7 @@ export async function createVariable(
         throw error;
       }
     },
+    { draftMutation: true },
   );
   return { ...result, revision };
 }
@@ -3277,6 +3396,7 @@ export async function updateVariable(
   input: { expectedRevision: number; value?: string; isSecret?: boolean },
   credentialSecret: string,
 ) {
+  let isPureSecretRotation = false;
   const { result, revision } = await withOwnedServerWrite(
     db,
     { userId, serverId, expectedRevision: input.expectedRevision },
@@ -3310,6 +3430,20 @@ export async function updateVariable(
         });
       }
 
+      isPureSecretRotation =
+        existing.isSecret === true &&
+        (input.isSecret === undefined || input.isSecret === true) &&
+        hasValue;
+
+      if (existing.isSecret === true && nextIsSecret === false) {
+        await assertActiveRevisionDoesNotReferenceSecret(
+          ctx.tx,
+          ctx.server,
+          existing.id,
+          "converted",
+        );
+      }
+
       const nextValue = (hasValue ? input.value : existing.value) ?? "";
       await ctx.tx
         .update(mcpServerVariable)
@@ -3340,6 +3474,11 @@ export async function updateVariable(
 
       return { name: existing.name, isSecret: nextIsSecret, hasValue: true };
     },
+    {
+      get draftMutation() {
+        return !isPureSecretRotation;
+      },
+    },
   );
   return { ...result, revision };
 }
@@ -3362,6 +3501,7 @@ export async function setVariable(
     });
   }
 
+  let isPureSecretRotation = false;
   const { result, revision } = await withOwnedServerWrite(
     db,
     { userId, serverId, expectedRevision: input.expectedRevision },
@@ -3380,6 +3520,16 @@ export async function setVariable(
       if (existing) {
         const nextIsSecret = input.isSecret;
         const nextValue = input.value;
+        isPureSecretRotation =
+          existing.isSecret === true && input.isSecret === true;
+        if (existing.isSecret === true && nextIsSecret === false) {
+          await assertActiveRevisionDoesNotReferenceSecret(
+            ctx.tx,
+            ctx.server,
+            existing.id,
+            "converted",
+          );
+        }
         await ctx.tx
           .update(mcpServerVariable)
           .set(
@@ -3439,6 +3589,11 @@ export async function setVariable(
         throw error;
       }
     },
+    {
+      get draftMutation() {
+        return !isPureSecretRotation;
+      },
+    },
   );
   return { ...result, revision };
 }
@@ -3487,11 +3642,28 @@ export async function deleteVariable(
         });
       }
 
+      // A secret slot referenced by the active published revision is an
+      // operational dependency: deleting it would break live execution even
+      // when the draft no longer references it. Config values are snapshotted
+      // into the revision, so they remain deletable.
+      const isSecret =
+        (variable.kind ?? (variable.isSecret ? "secret" : "config")) ===
+        "secret";
+      if (isSecret) {
+        await assertActiveRevisionDoesNotReferenceSecret(
+          ctx.tx,
+          ctx.server,
+          variable.id,
+          "deleted",
+        );
+      }
+
       await ctx.tx
         .delete(mcpServerVariable)
         .where(eq(mcpServerVariable.id, variable.id));
       return { name, deleted: true as const };
     },
+    { draftMutation: true },
   );
   return { ...result, revision };
 }
