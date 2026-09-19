@@ -56,6 +56,8 @@ source -> bounded bytes -> strict JSON -> version validation
 
 The pipeline never stores the raw document. It computes a deterministic fingerprint from canonicalized parsed JSON. Preview returns document metadata, compatible operations, suggested names/groups, sanitized security requirements, and per-operation issues.
 
+**Dependency decision (task 1.2):** no OpenAPI parser or JSON Reference library is added. The minimal maintained dependency set is the empty set, because every maintained resolver either fetches external `$ref` targets on its own (which decision 6 forbids outright) or expands references without the byte, hop, depth, resolution, and operation bounds this change requires. The parser, the bounded local JSON Pointer resolver, and the operation inventory are therefore implemented in-repo over `JSON.parse` and the existing `canonicalContractJson` fingerprint helper, which keeps the pipeline deterministic, side-effect-free, and auditable, and adds no supply-chain surface to the API workspace.
+
 ### 5. Preview and confirmation are bound without server-side staging
 
 Preview is write-free. Confirmation resubmits the document source, the preview fingerprint, selected operation keys, optional name overrides, group strategy, and `expectedRevision`. File/paste content is resent by the client; URL confirmation refetches the URL. A changed URL document fails fingerprint comparison and requires a new preview.
