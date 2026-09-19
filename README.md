@@ -96,6 +96,10 @@ bun db:seed
 
 If your local database already applied an older migration chain (before the single-user baseline), drop the Postgres volume/database first, then migrate again. There is no in-place upgrade path for that history.
 
+`bun db:seed` is idempotent. It seeds test users plus canonical MCP fixtures ("Echo API", "Contacts Demo") as **unpublished drafts**: `published_revision_id` is null, `draft_revision` is 1, and `status` is `draft`. An unpublished server advertises no tools to agents. To make a fixture callable, sign in as its owner, open the server in Studio, review the publish preview, and publish revision 1 explicitly. There is no automatic backfill for existing development servers.
+
+**Disposable development data:** these records are not preserved. To reset, drop the local database/volume, re-run `bun db:migrate`, then `bun db:seed`. See [db/README.md](db/README.md) for the database-level reset notes.
+
 ### 5. Launch the Apps
 
 Start the development server for all workspaces:

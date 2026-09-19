@@ -26,8 +26,16 @@ Local guidance for the database workspace in `db/`. Read [../AGENTS.md](../AGENT
 ## Seeds and Exports
 
 - Seed scripts live in `db/scripts/seed.ts` and populate the database with initial data.
+- MCP fixtures live in `db/seeds/mcp.ts` and create owner-scoped servers as unpublished drafts (`published_revision_id` null, `draft_revision` 1, `status` "draft"). Seeds must stay development-only, idempotent, and free of secret material; a fixture is only made callable through the normal Studio review/publish flow.
 - Export scripts live in `db/scripts/export.ts` and dump database state for debugging.
 - These scripts are invoked via `bun db:seed` and `bun db:export` from the repo root.
+
+## MCP Revision Tables
+
+- `mcp_server_revision`, `mcp_server_revision_tool`, and `mcp_server_revision_config` are immutable. Rows are insert/select only; never add an update path or a migration that mutates historical revision content.
+- Revision child rows cascade-delete with their parent revision. Retention deletes only superseded revisions, after protecting the active revision and the newest minimum.
+- `mcp_call_log` keeps denormalized `published_revision_id`, `revision_number`, `aggregate_fingerprint`, and `tool_fingerprint` so attribution survives revision cleanup. Do not replace those columns with joins to revision tables.
+- `mcp_server.published_revision_id` is intentionally not a foreign key (it avoids a server/revision FK cycle); pointer integrity is enforced by the publication service and asserted in tests.
 
 ## Environment
 

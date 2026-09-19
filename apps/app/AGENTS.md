@@ -28,6 +28,12 @@ Local guidance for frontend work in `apps/app`. Read [../../AGENTS.md](../../AGE
 - **Lucide Icons**: Use `lucide-react` for icons.
 - **List screens**: Collection pages paginate with the `@repo/core` contract. Persist `page`, `pageSize`, `q`, and filters in TanStack Router `validateSearch`; omit defaults (`page=1`, `pageSize=10`, empty `q`, unset “all” filters). Do not filter the current page’s `items` in the client to produce the visible set. Use `@repo/ui` `Pagination` and `Select` for page navigation and page size. Exceptions: singletons, aggregates, and explicitly tiny bounded lists. A lone `limit` is not pagination.
 
+## Server Draft vs Published State
+
+- The server detail view must distinguish draft, unpublished-changes, published-revision, paused, and publication-blocked states. Server edits save to the draft; mutation feedback must say the change was saved to the draft, never that it is already live.
+- Publishing is an explicit review flow that presents readiness, agent-contract changes, destructive warnings, redacted configuration changes, and the candidate fingerprint. Restoring a historical revision writes a new draft; it never moves the live pointer directly.
+- The playground mode is explicit (`published` or `draft`) and shown prominently. Published mode matches the active gateway revision and feeds production health; draft mode is owner-only testing and marks its results as draft.
+
 ## Existing Patterns Worth Preserving
 
 - **File-Based Routing**: Routing is handled by TanStack Router. Physical files inside `apps/app/routes/` automatically define the route structure.
