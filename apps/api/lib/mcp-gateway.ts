@@ -1,32 +1,37 @@
 /**
  * @file Hardened hosted Streamable HTTP MCP gateway. Validates Origin and
  * request size before authentication, applies per-token rate/concurrency
- * limits per invocation, advertises only enabled successfully compiled
- * tools, and returns MCP-native structured results/errors.
+ * limits per invocation, advertises only enabled contract-ready tools, and
+ * returns the shared structured result envelope for every completion.
  */
 import { mcpServer, mcpTool, type McpTool } from "@repo/db";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
-import { z } from "zod";
 import type { AppContext } from "./context.js";
 import { APP_ERROR_CODES, AppError, appJsonError } from "./app-error.js";
 import { extractBearerToken } from "./mcp-agent-token.js";
-import {
-  handleMcpHttpRequest,
-  jsonToolError,
-  structuredToolError,
-  structuredToolResult,
-} from "./mcp-http.js";
+import { compileAgentToolContract } from "./mcp-contract.js";
+import { handleMcpHttpRequest } from "./mcp-http.js";
 import { MCP_GATEWAY_REQUEST_SIZE_LIMIT } from "./mcp-policy.js";
 import { releaseServerSlot, tryAcquireInvocation } from "./mcp-rate-limit.js";
 import {
-  mcpExecutionEnvelopeSchema,
-  type McpAgentInput,
-  type McpCompiledPlan,
-  type McpExecutionEnvelope,
+  installContractTools,
+  type RegisteredContractTool,
+} from "./mcp-registration.js";
+import type {
+  McpAgentInput,
+  McpCompiledPlan,
 } from "./mcp-request-definition.js";
+import {
+  buildMcpToolResult,
+  errorEnvelope,
+  internalErrorEnvelope,
+  invalidArgumentsEnvelope,
+  toMcpToolError,
+  type McpToolEnvelope,
+} from "./mcp-result.js";
+import { captureMcpTelemetry, MCP_TELEMETRY_EVENTS } from "./mcp-telemetry.js";
 import {
   compilePlanForTool,
   executeMappedTool,
@@ -34,83 +39,6 @@ import {
   MUTATING_METHODS,
 } from "../services/mcp-executor-service.js";
 import { authenticateAgentToken } from "../services/mcp-studio-service.js";
-
-function agentInputToZodType(input: McpAgentInput): z.ZodType {
-  let field: z.ZodType;
-  switch (input.type) {
-    case "string": {
-      let s = z.string();
-      if (input.minLength !== undefined) s = s.min(input.minLength);
-      if (input.maxLength !== undefined) s = s.max(input.maxLength);
-      if (input.pattern) {
-        try {
-          s = s.regex(new RegExp(input.pattern));
-        } catch {
-          // Invalid author patterns must not crash gateway construction.
-        }
-      }
-      field = s;
-      break;
-    }
-    case "number": {
-      let n = z.number();
-      if (input.minimum !== undefined) n = n.min(input.minimum);
-      if (input.maximum !== undefined) n = n.max(input.maximum);
-      field = n;
-      break;
-    }
-    case "integer": {
-      let n = z.number().int();
-      if (input.minimum !== undefined) n = n.min(input.minimum);
-      if (input.maximum !== undefined) n = n.max(input.maximum);
-      field = n;
-      break;
-    }
-    case "boolean":
-      field = z.boolean();
-      break;
-    case "json":
-      field = z.unknown();
-      break;
-  }
-  if (input.enum && input.enum.length > 0) {
-    const [first, ...rest] = input.enum.map((value) => z.literal(value));
-    field = rest.length > 0 ? z.union([first, ...rest]) : first;
-  }
-  if (input.description) field = field.describe(input.description);
-  if (Array.isArray(input.examples) && input.examples.length > 0) {
-    field = field.meta({ examples: input.examples });
-  }
-  return input.required ? field : field.optional();
-}
-
-/** Generates a closed (no-unknown-keys) zod object schema from compiled agent inputs. */
-export function deriveInputSchema(agentInputs: McpAgentInput[]) {
-  const shape: Record<string, z.ZodType> = {};
-  for (const input of agentInputs) {
-    shape[input.name] = agentInputToZodType(input);
-  }
-  return z.object(shape).strict();
-}
-
-function toolAnnotationsFromPlan(plan: McpCompiledPlan): ToolAnnotations {
-  return {
-    readOnlyHint: plan.annotations.readOnlyHint,
-    destructiveHint: plan.annotations.destructiveHint,
-    idempotentHint: plan.annotations.idempotentHint,
-    openWorldHint: plan.annotations.openWorldHint,
-  };
-}
-
-function describePlanPath(plan: McpCompiledPlan): string {
-  const parts = plan.pathSegments.map((segment) =>
-    segment.source.kind === "literal"
-      ? String(segment.source.value ?? "")
-      : "{value}",
-  );
-  const joined = parts.join("");
-  return joined.length > 0 ? joined : "/";
-}
 
 function isTrustedOrigin(origin: string, appOrigin: string): boolean {
   try {
@@ -120,17 +48,8 @@ function isTrustedOrigin(origin: string, appOrigin: string): boolean {
   }
 }
 
-function emptyEnvelope(
-  overrides: Partial<McpExecutionEnvelope> & { appCode: string },
-): McpExecutionEnvelope {
-  return {
-    ok: false,
-    status: null,
-    contentType: null,
-    headers: {},
-    truncated: false,
-    ...overrides,
-  };
+function nameToInputId(agentInputs: McpAgentInput[]): Map<string, string> {
+  return new Map(agentInputs.map((input) => [input.name, input.id]));
 }
 
 export function createMcpGatewayRoutes() {
@@ -226,14 +145,12 @@ export function createMcpGatewayRoutes() {
         name: server?.name ?? "mcp-server",
         version: "1.0.0",
       });
-      // Always advertise the tools capability, even with zero registered
-      // tools, so `tools/list` answers `[]` instead of "Method not found"
-      // for a paused server or one with no compilable tools.
-      (
-        mcp as unknown as { setToolRequestHandlers: () => void }
-      ).setToolRequestHandlers();
 
+      // Always install the tools handlers, even with zero tools, so
+      // `tools/list` answers `[]` instead of "Method not found" for a paused
+      // server or one with no contract-ready tools.
       if (!server || server.status === "paused") {
+        installContractTools(mcp, []);
         return mcp;
       }
 
@@ -244,37 +161,71 @@ export function createMcpGatewayRoutes() {
 
       const compileInputs = await loadToolCompileInputs(db, server);
 
-      const compiledTools: Array<{ tool: McpTool; plan: McpCompiledPlan }> = [];
+      const compiledTools: Array<{
+        tool: McpTool;
+        plan: McpCompiledPlan;
+        contract: NonNullable<
+          ReturnType<typeof compileAgentToolContract>["contract"]
+        >;
+      }> = [];
       for (const tool of enabledTools) {
+        let plan: McpCompiledPlan;
         try {
-          compiledTools.push({
-            tool,
-            plan: compilePlanForTool(tool, compileInputs),
-          });
+          plan = compilePlanForTool(tool, compileInputs);
         } catch {
-          // Invalid or uncompilable tools are never advertised on the gateway.
           continue;
         }
+        const contract = compileAgentToolContract({
+          name: tool.name,
+          title: tool.title,
+          description: tool.description,
+          method: plan.method,
+          plan,
+        });
+        if (!contract.ok || !contract.contract) {
+          captureMcpTelemetry(MCP_TELEMETRY_EVENTS.contractReadinessFailed, {
+            db,
+            userId: token.userId,
+            properties: {
+              serverId: server.id,
+              toolId: tool.id,
+              issueCodes: contract.issues
+                .filter((issue) => issue.severity === "error")
+                .map((issue) => issue.code)
+                .slice(0, 10),
+            },
+          });
+          continue;
+        }
+        compiledTools.push({ tool, plan, contract: contract.contract });
       }
       compiledTools.sort((a, b) => a.tool.name.localeCompare(b.tool.name));
 
-      for (const { tool, plan } of compiledTools) {
-        let inputSchema: ReturnType<typeof deriveInputSchema>;
-        try {
-          inputSchema = deriveInputSchema(plan.agentInputs);
-        } catch {
-          continue;
-        }
-        mcp.registerTool(
-          tool.name,
-          {
-            description:
-              tool.description ?? `${plan.method} ${describePlanPath(plan)}`,
-            inputSchema: inputSchema.shape,
-            outputSchema: mcpExecutionEnvelopeSchema.shape,
-            annotations: toolAnnotationsFromPlan(plan),
+      const registrations: RegisteredContractTool[] = [];
+      for (const { tool, plan, contract: activeContract } of compiledTools) {
+        const inputIdByName = nameToInputId(plan.agentInputs);
+        const idempotent = plan.annotations.idempotentHint === true;
+
+        captureMcpTelemetry(MCP_TELEMETRY_EVENTS.contractEmitted, {
+          db,
+          userId: token.userId,
+          properties: {
+            serverId: server.id,
+            toolId: tool.id,
+            contractVersion: activeContract.contractVersion,
+            fingerprint: activeContract.fingerprint,
           },
-          async (rawArgs) => {
+        });
+
+        registrations.push({
+          name: tool.name,
+          title: activeContract.title,
+          description: activeContract.description,
+          inputSchema: activeContract.inputSchema,
+          outputSchema: activeContract.outputSchema,
+          annotations: activeContract.annotations,
+          metadata: activeContract.metadata,
+          handler: async (rawArgs) => {
             const mutating = MUTATING_METHODS.has(plan.method);
             const rateLimit = tryAcquireInvocation({
               tokenId: token.id,
@@ -282,9 +233,12 @@ export function createMcpGatewayRoutes() {
               mutating,
             });
             if (!rateLimit.ok) {
-              return structuredToolError(
-                emptyEnvelope({
-                  appCode: APP_ERROR_CODES.MCP_RATE_LIMITED,
+              return buildMcpToolResult(
+                errorEnvelope({
+                  category: "rate_limit",
+                  code: APP_ERROR_CODES.MCP_RATE_LIMITED,
+                  message: "Too many requests. Wait and try again.",
+                  retryable: true,
                   ...(rateLimit.retryAfterSeconds !== undefined
                     ? { retryAfterSeconds: rateLimit.retryAfterSeconds }
                     : {}),
@@ -293,40 +247,50 @@ export function createMcpGatewayRoutes() {
             }
 
             try {
-              let parsedArgs: Record<string, unknown> = {};
-              try {
-                parsedArgs = inputSchema.parse(rawArgs ?? {}) as Record<
-                  string,
-                  unknown
-                >;
-              } catch {
-                return jsonToolError(
-                  "Invalid tool arguments.",
-                  APP_ERROR_CODES.INVALID_INPUT,
+              const parsed = activeContract.inputValidator.safeParse(
+                rawArgs ?? {},
+              );
+              if (!parsed.success) {
+                return buildMcpToolResult(
+                  invalidArgumentsEnvelope(parsed.error, inputIdByName),
                 );
               }
               const result = await executeMappedTool(db, {
                 serverId: server.id,
                 toolId: tool.id,
-                args: parsedArgs,
+                args: parsed.data,
                 source: "agent",
                 credentialSecret: env.MCP_CREDENTIAL_SECRET,
               });
-              return result.ok
-                ? structuredToolResult(result.envelope)
-                : structuredToolError(result.envelope);
+              return buildMcpToolResult(result.envelope, {
+                onDefect: (reason) =>
+                  captureMcpTelemetry(
+                    MCP_TELEMETRY_EVENTS.schemaInvalidInternalResult,
+                    {
+                      db,
+                      userId: token.userId,
+                      properties: {
+                        serverId: server.id,
+                        toolId: tool.id,
+                        reason,
+                      },
+                    },
+                  ),
+              });
             } catch (error) {
-              if (error instanceof AppError) {
-                return jsonToolError(error.message, error.appCode);
-              }
-              return jsonToolError("Tool execution failed.");
+              const envelope: McpToolEnvelope =
+                error instanceof AppError
+                  ? errorEnvelope(toMcpToolError(error, { idempotent }))
+                  : internalErrorEnvelope();
+              return buildMcpToolResult(envelope);
             } finally {
               releaseServerSlot(server.id);
             }
           },
-        );
+        });
       }
 
+      installContractTools(mcp, registrations);
       return mcp;
     });
   });

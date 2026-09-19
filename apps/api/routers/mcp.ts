@@ -224,6 +224,7 @@ export const mcpRouter = router({
     .mutation(({ ctx, input }) =>
       duplicateTool(ctx.dbDirect, ctx.user.id, input.serverId, input.toolId, {
         name: input.name,
+        title: input.title,
         description: input.description,
         enabled: input.enabled,
       }),
@@ -239,6 +240,9 @@ export const mcpRouter = router({
     .input(previewToolCompileCommandSchema)
     .mutation(({ ctx, input }) =>
       previewToolCompile(ctx.db, ctx.user.id, input.serverId, {
+        name: input.name,
+        title: input.title,
+        description: input.description,
         method: input.method,
         requestDefinition: input.requestDefinition,
         allowMutation: input.allowMutation,

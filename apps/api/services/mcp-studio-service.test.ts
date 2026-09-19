@@ -1221,6 +1221,7 @@ describe("mcp-studio typed tools", () => {
       {
         id: "ain_1",
         name: "id",
+        description: "Contact id.",
         required: true,
         sensitive: false,
         type: "string" as const,
@@ -1238,6 +1239,8 @@ describe("mcp-studio typed tools", () => {
 
     await createTool(db as never, "user-a", "mcs_1", {
       name: "get_contact",
+      title: "Get contact",
+      description: "Fetch one contact.",
       method: "GET",
       requestDefinition: typedDefinition,
     });
@@ -1307,6 +1310,8 @@ describe("mcp-studio typed tools", () => {
 
     await updateTool(db as never, "user-a", "mcs_1", "mct_1", {
       name: "renamed",
+      title: "Get contact",
+      description: "Fetch one contact.",
     });
 
     const updated = db.updatedValues[0] as {
@@ -1428,7 +1433,8 @@ describe("mcp-studio typed tools", () => {
         {
           id: "mct_1",
           name: "get_contact",
-          description: null,
+          title: "Get contact",
+          description: "Fetch one contact.",
           method: "GET",
           pathTemplate: "/contacts/{{id}}",
           requestDefinition: typedDefinition,

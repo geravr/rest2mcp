@@ -52,7 +52,8 @@ vi.mock("drizzle-orm", () => ({
   eq: vi.fn((...args: unknown[]) => args),
 }));
 
-import { createMcpGatewayRoutes, deriveInputSchema } from "./mcp-gateway.js";
+import { createMcpGatewayRoutes } from "./mcp-gateway.js";
+import { buildAgentInputZodObject } from "./mcp-contract.js";
 import { errorHandler } from "./middleware.js";
 
 const SERVER_ROW = {
@@ -73,7 +74,8 @@ const TOOL_ROWS = [
     id: "mct_1",
     serverId: "mcs_1",
     name: "get_contact",
-    description: null,
+    title: "Get contact",
+    description: "Fetch one contact by id.",
     method: "GET",
     pathTemplate: "/contacts/{{id}}",
     requestTemplate: {},
@@ -259,16 +261,26 @@ describe("MCP round-trip", () => {
       expect(tools).toHaveLength(1);
       const tool = tools[0];
       expect(tool.name).toBe("get_contact");
-      expect(tool.description).toBe("GET /contacts/{value}");
+      expect(tool.title).toBe("Get contact");
+      expect(tool.description).toBe("Fetch one contact by id.");
       expect(tool.inputSchema).toMatchObject({
         type: "object",
         properties: {
           id: { type: "string", description: "Contact id" },
         },
         required: ["id"],
+        additionalProperties: false,
       });
       expect(tool.outputSchema).toMatchObject({ type: "object" });
-      expect(tool.annotations).toMatchObject({ readOnlyHint: true });
+      expect(tool.annotations).toMatchObject({
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      });
+      expect(tool._meta).toMatchObject({
+        "io.rest2mcp/contract": { version: 1 },
+      });
     } finally {
       await client.close();
     }
@@ -326,6 +338,30 @@ describe("MCP round-trip", () => {
     }
   });
 
+  it("returns structured invalid-arguments diagnostics without calling upstream", async () => {
+    const client = await connectClient();
+    try {
+      const result = await client.callTool({
+        name: "get_contact",
+        arguments: { id: 123 },
+      });
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent).toMatchObject({
+        ok: false,
+        error: { category: "invalid_arguments", retryable: false },
+      });
+      const error = (
+        result.structuredContent as {
+          error: { issues: Array<{ path: string }> };
+        }
+      ).error;
+      expect(error.issues[0]?.path).toBe("id");
+      expect(executeMappedTool).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+    }
+  });
+
   it("returns a completed upstream 401 as isError:true structuredContent", async () => {
     executeMappedTool.mockResolvedValue({
       ok: false,
@@ -338,7 +374,12 @@ describe("MCP round-trip", () => {
         truncated: false,
         body: JSON.stringify({ error: "unauthorized" }),
         data: { error: "unauthorized" },
-        appCode: APP_ERROR_CODES.MCP_UPSTREAM_HTTP_ERROR,
+        error: {
+          category: "auth",
+          code: APP_ERROR_CODES.MCP_UPSTREAM_HTTP_ERROR,
+          message: "Upstream authentication failed.",
+          retryable: false,
+        },
       },
       durationMs: 12,
       callLogId: "log_1",
@@ -353,15 +394,20 @@ describe("MCP round-trip", () => {
 
       expect(result.isError).toBe(true);
       expect(result.structuredContent).toMatchObject({
+        ok: false,
         status: 401,
-        appCode: APP_ERROR_CODES.MCP_UPSTREAM_HTTP_ERROR,
+        error: {
+          category: "auth",
+          code: APP_ERROR_CODES.MCP_UPSTREAM_HTTP_ERROR,
+          retryable: false,
+        },
       });
     } finally {
       await client.close();
     }
   });
 
-  it("maps a thrown executor AppError to a jsonToolError with appCode", async () => {
+  it("maps a thrown executor AppError to the structured error contract", async () => {
     executeMappedTool.mockRejectedValue(
       appError({
         appCode: APP_ERROR_CODES.MCP_MUTATION_NOT_ALLOWED,
@@ -377,10 +423,15 @@ describe("MCP round-trip", () => {
       });
 
       expect(result.isError).toBe(true);
-      const text = (result.content as Array<{ type: string; text: string }>)[0]
-        .text;
-      expect(text).toContain(APP_ERROR_CODES.MCP_MUTATION_NOT_ALLOWED);
-      expect(text).toContain("Mutations are not allowed.");
+      expect(result.structuredContent).toMatchObject({
+        ok: false,
+        error: {
+          category: "policy",
+          code: APP_ERROR_CODES.MCP_MUTATION_NOT_ALLOWED,
+          message: "Mutations are not allowed.",
+          retryable: false,
+        },
+      });
     } finally {
       await client.close();
     }
@@ -418,7 +469,12 @@ describe("MCP round-trip", () => {
       });
       expect(limited.isError).toBe(true);
       expect(limited.structuredContent).toMatchObject({
-        appCode: APP_ERROR_CODES.MCP_RATE_LIMITED,
+        ok: false,
+        error: {
+          category: "rate_limit",
+          code: APP_ERROR_CODES.MCP_RATE_LIMITED,
+          retryable: true,
+        },
       });
     } finally {
       await client.close();
@@ -426,9 +482,9 @@ describe("MCP round-trip", () => {
   }, 20_000);
 });
 
-describe("deriveInputSchema", () => {
+describe("buildAgentInputZodObject", () => {
   it("advertises a closed empty object schema for a tool with no inputs", () => {
-    const schema = deriveInputSchema([]);
+    const schema = buildAgentInputZodObject([]);
 
     expect(schema.safeParse({}).success).toBe(true);
     expect(schema.safeParse({ extra: 1 }).success).toBe(false);
@@ -439,7 +495,7 @@ describe("deriveInputSchema", () => {
   });
 
   it("maps agent input types, constraints, required flags, and descriptions", () => {
-    const schema = deriveInputSchema([
+    const schema = buildAgentInputZodObject([
       {
         id: "in_query",
         name: "query",

@@ -76,6 +76,7 @@ export const legacyToolParamSchema = z.object({
   minLength: z.number().int().nonnegative().optional(),
   maxLength: z.number().int().nonnegative().optional(),
   pattern: z.string().max(512).optional(),
+  format: z.enum(["date", "date-time", "email", "uri", "uuid"]).optional(),
   enum: z.array(z.union([z.string(), z.number(), z.boolean()])).optional(),
   examples: z.array(z.unknown()).max(8).optional(),
   allowEmpty: z.boolean().optional(),
@@ -124,17 +125,39 @@ export const updateLegacyToolCommandSchema = createLegacyToolCommandSchema
   });
 
 export const createToolCommandSchema = z.strictObject({
-  serverId: z.string().min(1),
-  name: z.string().trim().min(1).max(MCP_FIELD_LIMITS.name),
+  serverId: z.string().min(1).describe("Owning server id."),
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(MCP_FIELD_LIMITS.name)
+    .describe("Stable MCP tool name."),
+  title: z
+    .string()
+    .trim()
+    .min(1)
+    .max(MCP_FIELD_LIMITS.toolTitle)
+    .optional()
+    .nullable()
+    .describe("Human-facing agent title."),
   description: z
     .string()
     .max(MCP_FIELD_LIMITS.description)
     .optional()
-    .nullable(),
-  method: mcpHttpMethodSchema,
-  requestDefinition: mcpRequestDefinitionSchema,
-  allowMutation: z.boolean().optional(),
-  enabled: z.boolean().optional(),
+    .nullable()
+    .describe("Outcome-oriented agent description."),
+  method: mcpHttpMethodSchema.describe("Upstream HTTP method."),
+  requestDefinition: mcpRequestDefinitionSchema.describe(
+    "Versioned typed request definition.",
+  ),
+  allowMutation: z
+    .boolean()
+    .optional()
+    .describe("Whether this tool may contact upstream with a mutating method."),
+  enabled: z
+    .boolean()
+    .optional()
+    .describe("Whether the tool is enabled; requires a contract-ready tool."),
 });
 
 export const updateToolCommandSchema = createToolCommandSchema
@@ -147,23 +170,47 @@ export const updateToolCommandSchema = createToolCommandSchema
 
 /** Create a copy of an existing tool with regenerated definition-local ids. */
 export const duplicateToolCommandSchema = z.strictObject({
-  serverId: z.string().min(1),
-  toolId: z.string().min(1),
-  name: z.string().trim().min(1).max(MCP_FIELD_LIMITS.name).optional(),
+  serverId: z.string().min(1).describe("Owning server id."),
+  toolId: z.string().min(1).describe("Source tool id to copy."),
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(MCP_FIELD_LIMITS.name)
+    .optional()
+    .describe("Name for the copy."),
+  title: z
+    .string()
+    .trim()
+    .min(1)
+    .max(MCP_FIELD_LIMITS.toolTitle)
+    .optional()
+    .nullable()
+    .describe("Human-facing agent title for the copy."),
   description: z
     .string()
     .max(MCP_FIELD_LIMITS.description)
     .optional()
-    .nullable(),
-  enabled: z.boolean().optional(),
+    .nullable()
+    .describe("Outcome-oriented agent description for the copy."),
+  enabled: z.boolean().optional().describe("Whether the copy is enabled."),
 });
 
-export const setServerValueCommandSchema = z.object({
-  serverId: z.string().min(1),
-  name: mcpValueNameSchema,
-  kind: mcpServerValueKindSchema,
-  value: z.string().max(MCP_FIELD_LIMITS.body),
-  description: z.string().max(MCP_FIELD_LIMITS.description).optional(),
+export const setServerValueCommandSchema = z.strictObject({
+  serverId: z.string().min(1).describe("Owning server id."),
+  name: mcpValueNameSchema.describe("Server value name."),
+  kind: mcpServerValueKindSchema.describe(
+    "Whether the value is config or secret.",
+  ),
+  value: z
+    .string()
+    .max(MCP_FIELD_LIMITS.body)
+    .describe("Value to store; secrets must use the Studio secret flow."),
+  description: z
+    .string()
+    .max(MCP_FIELD_LIMITS.description)
+    .optional()
+    .describe("Optional human-facing description."),
 });
 
 export const updateServerValueCommandSchema = z.object({
@@ -192,15 +239,26 @@ export const curlPreviewCommandSchema = z.object({
   curl: z.string().min(1).max(MCP_FIELD_LIMITS.body),
 });
 
-export const curlConfirmCommandSchema = z.object({
-  serverId: z.string().min(1),
-  curl: z.string().min(1).max(MCP_FIELD_LIMITS.body),
-  name: z.string().trim().min(1).max(MCP_FIELD_LIMITS.name).optional(),
+export const curlConfirmCommandSchema = z.strictObject({
+  serverId: z.string().min(1).describe("Owning server id."),
+  curl: z
+    .string()
+    .min(1)
+    .max(MCP_FIELD_LIMITS.body)
+    .describe("One curl command to import."),
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(MCP_FIELD_LIMITS.name)
+    .optional()
+    .describe("Optional tool name for the imported draft."),
   description: z
     .string()
     .max(MCP_FIELD_LIMITS.description)
     .optional()
-    .nullable(),
+    .nullable()
+    .describe("Optional agent description for the imported draft."),
   markings: z
     .array(
       z.object({
@@ -228,10 +286,36 @@ export const createPlatformTokenCommandSchema = z.object({
 
 /** Dry-run compile preview: same typed definition the Studio tool form builds, no persistence. */
 export const previewToolCompileCommandSchema = z.strictObject({
-  serverId: z.string().min(1),
-  method: mcpHttpMethodSchema,
-  requestDefinition: mcpRequestDefinitionSchema,
-  allowMutation: z.boolean().optional(),
+  serverId: z.string().min(1).describe("Owning server id."),
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(MCP_FIELD_LIMITS.name)
+    .optional()
+    .describe("Candidate tool name."),
+  title: z
+    .string()
+    .trim()
+    .min(1)
+    .max(MCP_FIELD_LIMITS.toolTitle)
+    .optional()
+    .nullable()
+    .describe("Candidate human-facing agent title."),
+  description: z
+    .string()
+    .max(MCP_FIELD_LIMITS.description)
+    .optional()
+    .nullable()
+    .describe("Candidate outcome-oriented agent description."),
+  method: mcpHttpMethodSchema.describe("Upstream HTTP method."),
+  requestDefinition: mcpRequestDefinitionSchema.describe(
+    "Candidate versioned typed request definition.",
+  ),
+  allowMutation: z
+    .boolean()
+    .optional()
+    .describe("Whether the candidate tool may mutate upstream state."),
 });
 
 /** Explicit legacy compatibility preview retained during the migration window. */

@@ -250,7 +250,18 @@ describe("platform MCP", () => {
 
   describe("authoring tools", () => {
     it("creates a server without accepting an auth recipe", async () => {
-      createServer.mockResolvedValue({ id: "mcs_1", name: "CRM" });
+      createServer.mockResolvedValue({
+        id: "mcs_1",
+        name: "CRM",
+        slug: "crm",
+        description: null,
+        baseUrl: "https://api.example.com",
+        allowedHosts: ["api.example.com"],
+        status: "draft",
+        trafficLight: "draft",
+        enabledToolCount: 0,
+        lastCallAt: null,
+      });
       const client = await connectClient(["author"]);
       try {
         const result = await client.callTool({
@@ -266,6 +277,30 @@ describe("platform MCP", () => {
         );
         // No credentialSecret / auth argument ever reaches the service call.
         expect(createServer.mock.calls[0]).toHaveLength(3);
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("returns repairable invalid-arguments diagnostics", async () => {
+      const client = await connectClient(["author"]);
+      try {
+        const result = await client.callTool({
+          name: "create_server",
+          arguments: { name: "CRM", baseUrl: "not-a-url" },
+        });
+        expect(result.isError).toBe(true);
+        expect(result.structuredContent).toMatchObject({
+          ok: false,
+          error: { category: "invalid_arguments", retryable: false },
+        });
+        const error = (
+          result.structuredContent as {
+            error: { issues: Array<{ path: string }> };
+          }
+        ).error;
+        expect(error.issues[0]?.path).toBe("baseUrl");
+        expect(createServer).not.toHaveBeenCalled();
       } finally {
         await client.close();
       }
@@ -464,6 +499,7 @@ describe("platform MCP", () => {
     it("previews and duplicates through the typed services", async () => {
       previewToolCompile.mockResolvedValue({
         ok: false,
+        ready: false,
         issues: [
           {
             path: "query[0]",
@@ -474,6 +510,8 @@ describe("platform MCP", () => {
           },
         ],
         plan: null,
+        contract: null,
+        compatibilityProjectable: false,
       });
       duplicateTool.mockResolvedValue({
         id: "mct_2",
@@ -533,6 +571,79 @@ describe("platform MCP", () => {
         });
         expect(dup.isError).toBeFalsy();
         expect(duplicateTool).toHaveBeenCalled();
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("redacts sensitive input examples from returned tool rows", async () => {
+      duplicateTool.mockResolvedValue({
+        id: "mct_2",
+        name: "secure_get_copy",
+        method: "GET",
+        requestDefinition: {
+          version: 1,
+          pathSegments: [],
+          query: [],
+          headers: [],
+          body: { bodyType: "none" },
+          agentInputs: [
+            {
+              id: "ain_1",
+              name: "token",
+              required: true,
+              sensitive: true,
+              type: "string",
+              examples: ["sk-live-secret"],
+            },
+          ],
+        },
+        compileStatus: "valid",
+        compileIssues: [],
+        annotations: null,
+        allowMutation: false,
+        enabled: false,
+        source: "manual",
+      });
+      getToolEditorState.mockResolvedValue({
+        toolId: "mct_1",
+        typed: true,
+        definition: {
+          version: 1,
+          pathSegments: [],
+          query: [],
+          headers: [],
+          body: { bodyType: "none" },
+          agentInputs: [],
+        },
+        issues: [],
+        conversionDraft: null,
+        conversionIssues: [],
+      });
+      listVariables.mockResolvedValue([]);
+      const client = await connectClient(["author"]);
+      try {
+        const result = await client.callTool({
+          name: "duplicate_tool",
+          arguments: { serverId: "mcs_1", toolId: "mct_1" },
+        });
+        expect(result.isError).toBeFalsy();
+        const text = (
+          result.content as Array<{ type: string; text: string }>
+        )[0].text;
+        expect(text).not.toContain("sk-live-secret");
+        const data = (
+          result.structuredContent as {
+            data: {
+              requestDefinition: {
+                agentInputs: Array<Record<string, unknown>>;
+              };
+            };
+          }
+        ).data;
+        expect(data.requestDefinition.agentInputs[0]).not.toHaveProperty(
+          "examples",
+        );
       } finally {
         await client.close();
       }
@@ -646,7 +757,21 @@ describe("platform MCP", () => {
 
   describe("invoke", () => {
     it("test_tool runs through the shared executor with invoke scope", async () => {
-      executeMappedTool.mockResolvedValue({ ok: true, httpStatus: 200 });
+      executeMappedTool.mockResolvedValue({
+        ok: true,
+        httpStatus: 200,
+        envelope: {
+          ok: true,
+          status: 200,
+          contentType: "application/json",
+          headers: {},
+          truncated: false,
+          data: {},
+        },
+        durationMs: 3,
+        callLogId: "log_1",
+        secretsUsed: [],
+      });
       const client = await connectClient(["invoke"]);
       try {
         const result = await client.callTool({
@@ -794,7 +919,9 @@ describe("platform MCP", () => {
         const text = (
           result.content as Array<{ type: string; text: string }>
         )[0].text;
-        const payload = JSON.parse(text) as Array<Record<string, unknown>>;
+        const payload = (
+          result.structuredContent as { data: Array<Record<string, unknown>> }
+        ).data;
         expect(payload).toEqual([
           {
             id: "msv_1",
@@ -840,7 +967,9 @@ describe("platform MCP", () => {
         const text = (
           result.content as Array<{ type: string; text: string }>
         )[0].text;
-        const payload = JSON.parse(text) as Array<Record<string, unknown>>;
+        const payload = (
+          result.structuredContent as { data: Array<Record<string, unknown>> }
+        ).data;
         expect(payload).toEqual([
           {
             id: "msv_2",

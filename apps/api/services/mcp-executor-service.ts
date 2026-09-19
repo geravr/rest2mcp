@@ -45,10 +45,13 @@ import {
   type McpCommonEntries,
   type McpCompiledPlan,
   type McpCompileIssue,
-  type McpExecutionEnvelope,
   type McpJsonNode,
   type McpValueBinding,
 } from "../lib/mcp-request-definition.js";
+import {
+  type McpToolEnvelope,
+  upstreamHttpToolError,
+} from "../lib/mcp-result.js";
 import {
   assertPathWithinBase,
   assertSameOriginRedirect,
@@ -76,7 +79,7 @@ export type ExecuteMappedToolResult = {
   /** True only for a completed 2xx upstream response. */
   ok: boolean;
   httpStatus: number | null;
-  envelope: McpExecutionEnvelope;
+  envelope: McpToolEnvelope;
   durationMs: number;
   callLogId: string | null;
   secretsUsed: string[];
@@ -767,7 +770,7 @@ function outcomeForAppCode(appCode: string): string {
   }
 }
 
-function phaseForAppCode(appCode: string): McpExecutionEnvelope["phase"] {
+function phaseForAppCode(appCode: string): string {
   switch (appCode) {
     case APP_ERROR_CODES.MCP_COMPILE_INVALID:
       return "compile";
@@ -999,11 +1002,14 @@ export async function executeMappedTool(
     const retryAfterSeconds = parseRetryAfterSeconds(
       response.headers.get("retry-after"),
     );
-    const upstreamAppCode = response.ok
+    const failureError = response.ok
       ? undefined
-      : APP_ERROR_CODES.MCP_UPSTREAM_HTTP_ERROR;
+      : upstreamHttpToolError(response.status, {
+          method: plan.method,
+          ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
+        });
 
-    let envelope: McpExecutionEnvelope;
+    let envelope: McpToolEnvelope;
     let responseLogText: string;
 
     if (bytes.byteLength === 0) {
@@ -1014,9 +1020,7 @@ export async function executeMappedTool(
         headers: safeHeaders,
         truncated: bodyTruncated,
         body: "",
-        phase: "complete",
-        ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
-        ...(upstreamAppCode ? { appCode: upstreamAppCode } : {}),
+        ...(failureError ? { error: failureError } : {}),
       };
       responseLogText = "";
     } else if (isTextualContentType(contentType)) {
@@ -1038,9 +1042,7 @@ export async function executeMappedTool(
         truncated: bodyTruncated,
         body: redactedText,
         ...(data !== undefined ? { data } : {}),
-        phase: "complete",
-        ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
-        ...(upstreamAppCode ? { appCode: upstreamAppCode } : {}),
+        ...(failureError ? { error: failureError } : {}),
       };
       responseLogText = redactedText;
     } else {
@@ -1051,9 +1053,7 @@ export async function executeMappedTool(
         headers: safeHeaders,
         truncated: bodyTruncated,
         binary: true,
-        phase: "complete",
-        ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
-        ...(upstreamAppCode ? { appCode: upstreamAppCode } : {}),
+        ...(failureError ? { error: failureError } : {}),
       };
       responseLogText = `<binary ${bytes.byteLength} bytes>`;
     }
@@ -1063,7 +1063,7 @@ export async function executeMappedTool(
       status: response.ok ? "success" : "error",
       httpStatus: response.status,
       durationMs,
-      appCode: envelope.appCode ?? null,
+      appCode: envelope.error?.code ?? null,
       phase: "complete",
       outcome: response.ok ? "success" : "upstream_error",
       responseSummary: summarizeForCallLog(responseLogText, redactionValues()),

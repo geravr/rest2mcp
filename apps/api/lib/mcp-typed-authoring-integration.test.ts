@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { compilePlanForTool } from "../services/mcp-executor-service.js";
-import { deriveInputSchema } from "./mcp-gateway.js";
+import { buildAgentInputZodObject } from "./mcp-contract.js";
 import { compileToolDefinition } from "./mcp-compiler.js";
 import { mcpRequestDefinitionSchema } from "./mcp-request-definition.js";
 
@@ -149,9 +150,11 @@ describe("typed authoring integration", () => {
     });
 
     // 5. MCP schema generation exposes the agent inputs exactly once.
-    const inputSchema = deriveInputSchema(reloadedPlan.agentInputs);
-    const shape = inputSchema.shape as Record<string, unknown>;
-    expect(Object.keys(shape).sort()).toEqual(["id", "limit"]);
+    const inputSchema = buildAgentInputZodObject(reloadedPlan.agentInputs);
+    const jsonSchema = z.toJSONSchema(inputSchema) as {
+      properties: Record<string, unknown>;
+    };
+    expect(Object.keys(jsonSchema.properties).sort()).toEqual(["id", "limit"]);
     expect(inputSchema.safeParse({ id: "abc", limit: 5 }).success).toBe(true);
     expect(
       inputSchema.safeParse({ id: "abc", limit: 5, extra: 1 }).success,

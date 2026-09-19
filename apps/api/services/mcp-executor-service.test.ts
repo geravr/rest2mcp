@@ -321,9 +321,10 @@ describe("executeMappedTool: envelope for completed responses", () => {
 
     expect(result.ok).toBe(false);
     expect(result.httpStatus).toBe(401);
-    expect(result.envelope.appCode).toBe(
+    expect(result.envelope.error?.code).toBe(
       APP_ERROR_CODES.MCP_UPSTREAM_HTTP_ERROR,
     );
+    expect(result.envelope.error?.category).toBe("auth");
     expect(result.envelope.data).toEqual({ error: "unauthorized" });
   });
 

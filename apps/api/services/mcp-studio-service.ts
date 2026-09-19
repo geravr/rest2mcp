@@ -38,6 +38,11 @@ import { generateAgentToken, hashAgentToken } from "../lib/mcp-agent-token.js";
 import type { CompileServerValueRef } from "../lib/mcp-compiler.js";
 import { compileToolDefinition } from "../lib/mcp-compiler.js";
 import {
+  compileAgentToolContract,
+  toSerializableContract,
+  type McpAgentToolContract,
+} from "../lib/mcp-contract.js";
+import {
   buildCurlImportDraft,
   detectCurlCredentials,
   previewCurlImport as buildCurlImportPreview,
@@ -61,6 +66,7 @@ import { MCP_MAX_TOOLS_PER_SERVER } from "../lib/mcp-redact.js";
 import {
   mcpCommonEntriesSchema,
   mcpRequestDefinitionSchema,
+  redactSensitiveExamples,
   regenerateDefinitionIds,
   type McpAuthConfiguration,
   type McpCommonEntries,
@@ -141,6 +147,7 @@ export type UpdateLegacyToolInput = {
 /** Canonical typed create contract; the request definition is authoritative. */
 export type CreateTypedToolInput = {
   name: string;
+  title?: string | null;
   description?: string | null;
   method: McpHttpMethod;
   requestDefinition: McpRequestDefinition;
@@ -150,6 +157,7 @@ export type CreateTypedToolInput = {
 
 export type UpdateTypedToolInput = {
   name?: string;
+  title?: string | null;
   description?: string | null;
   method?: McpHttpMethod;
   requestDefinition?: McpRequestDefinition;
@@ -159,6 +167,7 @@ export type UpdateTypedToolInput = {
 
 export type DuplicateTypedToolInput = {
   name?: string;
+  title?: string | null;
   description?: string | null;
   enabled?: boolean;
 };
@@ -1687,6 +1696,8 @@ function throwTypedCompileInvalid(
 
 type TypedToolPersistence = CompiledToolPersistence & {
   ok: boolean;
+  /** Compiled agent-visible contract, or null when compilation is not ready. */
+  contract: McpAgentToolContract | null;
   /** Legacy compatibility fields written only when the projection is lossless. */
   compatibility: {
     pathTemplate: string;
@@ -1706,6 +1717,9 @@ async function compileTypedToolForPersistence(
   db: DB,
   server: McpServer,
   input: {
+    name: string;
+    title?: string | null;
+    description?: string | null;
     method: McpHttpMethod;
     definition: McpRequestDefinition;
     allowMutation: boolean;
@@ -1756,7 +1770,24 @@ async function compileTypedToolForPersistence(
     compileIssues.push(...projection.issues);
   }
 
-  const ok = compileResult.ok && plaintextSecretIssues.length === 0;
+  const contractResult =
+    compileResult.ok && compileResult.plan
+      ? compileAgentToolContract({
+          name: input.name,
+          title: input.title,
+          description: input.description,
+          method: input.method,
+          plan: compileResult.plan,
+        })
+      : null;
+  if (contractResult) {
+    compileIssues.push(...contractResult.issues);
+  }
+
+  const ok =
+    compileResult.ok &&
+    plaintextSecretIssues.length === 0 &&
+    contractResult?.ok === true;
   if (!ok) {
     captureMcpTelemetry(MCP_TELEMETRY_EVENTS.typedCompileFailed, {
       db,
@@ -1798,6 +1829,7 @@ async function compileTypedToolForPersistence(
         Record<string, unknown> | undefined) ?? null,
     enabled: ok && input.enabled,
     ok,
+    contract: contractResult?.contract ?? null,
     compatibility: {
       pathTemplate: fallbackPathTemplate,
       requestTemplate: projection.projectable
@@ -1836,6 +1868,9 @@ export async function createTool(
   assertSupportedMethod(method);
   const flags = mutationDefaults(method, input.allowMutation, input.enabled);
   const compiled = await compileTypedToolForPersistence(db, server, {
+    name,
+    title: input.title,
+    description: input.description,
     method,
     definition: input.requestDefinition,
     allowMutation: flags.allowMutation,
@@ -1850,6 +1885,7 @@ export async function createTool(
       .values({
         serverId: server.id,
         name,
+        title: input.title?.trim() || null,
         description: input.description?.trim() || null,
         method,
         pathTemplate: compiled.compatibility.pathTemplate,
@@ -1890,6 +1926,9 @@ export async function previewToolCompile(
   userId: string,
   serverId: string,
   input: {
+    name?: string;
+    title?: string | null;
+    description?: string | null;
     method: McpHttpMethod;
     requestDefinition: McpRequestDefinition;
     allowMutation?: boolean;
@@ -1900,6 +1939,9 @@ export async function previewToolCompile(
   assertSupportedMethod(method);
   const flags = mutationDefaults(method, input.allowMutation, false);
   const compiled = await compileTypedToolForPersistence(db, server, {
+    name: input.name ? toMcpToolName(input.name) : "tool",
+    title: input.title,
+    description: input.description,
     method,
     definition: input.requestDefinition,
     allowMutation: flags.allowMutation,
@@ -1907,8 +1949,15 @@ export async function previewToolCompile(
   });
   return {
     ok: compiled.ok,
+    ready: compiled.ok,
     issues: compiled.compileIssues,
-    plan: compiled.compiledPlan,
+    plan: redactSensitiveExamples(compiled.compiledPlan) as Record<
+      string,
+      unknown
+    > | null,
+    contract: compiled.contract
+      ? toSerializableContract(compiled.contract)
+      : null,
     compatibilityProjectable: compiled.compatibility.projectable,
   };
 }
@@ -2039,7 +2088,17 @@ export async function updateTool(
     input.allowMutation ?? existing.allowMutation,
     input.enabled ?? existing.enabled,
   );
+  const nextName = input.name ? toMcpToolName(input.name) : existing.name;
+  const nextTitle =
+    input.title === undefined ? existing.title : input.title?.trim() || null;
+  const nextDescription =
+    input.description === undefined
+      ? existing.description
+      : input.description?.trim() || null;
   const compiled = await compileTypedToolForPersistence(db, server, {
+    name: nextName,
+    title: nextTitle,
+    description: nextDescription,
     method,
     definition,
     allowMutation: flags.allowMutation,
@@ -2052,11 +2111,9 @@ export async function updateTool(
     const [updated] = await db
       .update(mcpTool)
       .set({
-        name: input.name ? toMcpToolName(input.name) : existing.name,
-        description:
-          input.description === undefined
-            ? existing.description
-            : input.description?.trim() || null,
+        name: nextName,
+        title: nextTitle,
+        description: nextDescription,
         method,
         pathTemplate: compiled.compatibility.pathTemplate,
         requestTemplate: compiled.compatibility.requestTemplate,
@@ -2137,7 +2194,18 @@ export async function duplicateTool(
     existing.allowMutation,
     input.enabled ?? existing.enabled,
   );
+  const baseName = input.name ?? `${existing.name}_copy`;
+  const nextName = toMcpToolName(baseName);
+  const nextTitle =
+    input.title === undefined ? existing.title : input.title?.trim() || null;
+  const nextDescription =
+    input.description === undefined
+      ? existing.description
+      : input.description?.trim() || null;
   const compiled = await compileTypedToolForPersistence(db, server, {
+    name: nextName,
+    title: nextTitle,
+    description: nextDescription,
     method,
     definition,
     allowMutation: flags.allowMutation,
@@ -2146,17 +2214,14 @@ export async function duplicateTool(
   if (!compiled.ok && flags.enabled)
     throwTypedCompileInvalid(compiled.compileIssues);
 
-  const baseName = input.name ?? `${existing.name}_copy`;
   try {
     const [created] = await db
       .insert(mcpTool)
       .values({
         serverId: server.id,
-        name: toMcpToolName(baseName),
-        description:
-          input.description === undefined
-            ? existing.description
-            : input.description?.trim() || null,
+        name: nextName,
+        title: nextTitle,
+        description: nextDescription,
         method,
         pathTemplate: compiled.compatibility.pathTemplate,
         requestTemplate: compiled.compatibility.requestTemplate,

@@ -144,6 +144,8 @@ export const mcpAgentInputSchema = z.strictObject({
   minLength: z.number().int().nonnegative().optional(),
   maxLength: z.number().int().nonnegative().optional(),
   pattern: z.string().max(512).optional(),
+  /** Supported string format preserved in the advertised schema and runtime. */
+  format: z.enum(["date", "date-time", "email", "uri", "uuid"]).optional(),
   enum: z.array(z.union([z.string(), z.number(), z.boolean()])).optional(),
   examples: z.array(z.unknown()).max(8).optional(),
   allowEmpty: z.boolean().optional(),
@@ -289,6 +291,34 @@ export function scanDefinitionIds(
   }
 
   return scan;
+}
+
+/**
+ * Removes `examples` from any agent input flagged `sensitive` without needing a
+ * full schema parse. Used by read-only/preview surfaces so sensitive sample
+ * values are never echoed back, matching the advertised write-only schema.
+ */
+export function redactSensitiveExamples(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object") return raw;
+  const record = raw as Record<string, unknown>;
+  const inputs = record.agentInputs;
+  if (!Array.isArray(inputs)) return raw;
+  return {
+    ...record,
+    agentInputs: inputs.map((input) => {
+      if (
+        input &&
+        typeof input === "object" &&
+        (input as { sensitive?: unknown }).sensitive === true &&
+        "examples" in input
+      ) {
+        const rest = { ...(input as Record<string, unknown>) };
+        delete rest.examples;
+        return rest;
+      }
+      return input;
+    }),
+  };
 }
 
 /**
@@ -594,33 +624,6 @@ export const mcpCompileIssueSchema = z.strictObject({
 
 export type McpCompileIssue = z.infer<typeof mcpCompileIssueSchema>;
 
-export const mcpExecutionEnvelopeSchema = z.object({
-  ok: z.boolean(),
-  status: z.number().int().nullable(),
-  contentType: z.string().nullable(),
-  data: z.unknown().optional(),
-  body: z.string().optional(),
-  headers: z.record(z.string(), z.string()).default({}),
-  truncated: z.boolean(),
-  binary: z.boolean().optional(),
-  retryAfterSeconds: z.number().optional(),
-  appCode: z.string().nullable().optional(),
-  phase: z
-    .enum([
-      "compile",
-      "validate",
-      "connect",
-      "redirect",
-      "headers",
-      "body",
-      "complete",
-    ])
-    .optional(),
-  indeterminate: z.boolean().optional(),
-});
-
-export type McpExecutionEnvelope = z.infer<typeof mcpExecutionEnvelopeSchema>;
-
 export const mcpCompiledPlanSchema = z.object({
   version: z.literal(MCP_REQUEST_DEFINITION_VERSION),
   method: z.string(),
@@ -690,6 +693,7 @@ export type McpCompiledPlan = z.infer<typeof mcpCompiledPlanSchema>;
 /** Shared field/payload limits for tRPC and Platform MCP authoring. */
 export const MCP_FIELD_LIMITS = {
   name: 80,
+  toolTitle: 120,
   description: 2000,
   pathSegment: 512,
   /** Legacy whole-path template shared by tRPC and Platform MCP tool authoring. */

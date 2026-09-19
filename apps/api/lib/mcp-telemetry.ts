@@ -13,6 +13,9 @@ export const MCP_TELEMETRY_EVENTS = {
   legacyConversion: "mcp_legacy_conversion",
   definitionNotProjectable: "mcp_definition_not_projectable",
   typedCompileFailed: "mcp_typed_compile_failed",
+  contractReadinessFailed: "mcp_contract_readiness_failed",
+  contractEmitted: "mcp_contract_emitted",
+  schemaInvalidInternalResult: "mcp_schema_invalid_internal_result",
 } as const;
 
 export type McpTelemetryEvent =
