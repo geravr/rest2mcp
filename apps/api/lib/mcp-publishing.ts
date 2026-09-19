@@ -36,6 +36,11 @@ export type PublicationWarningCode =
   | "config_changed"
   | "unpublished_mutation";
 
+/**
+ * Candidate tool projection. Studio group placement and OpenAPI provenance are
+ * authoring metadata and are deliberately absent here, so neither can reach a
+ * candidate payload, fingerprint, diff, or revision row.
+ */
 export type PublicationTool = {
   sourceToolId: string;
   name: string;

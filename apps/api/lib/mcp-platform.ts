@@ -555,17 +555,33 @@ function unknownServerValueDenied(): AppError {
 }
 
 /**
- * Strips sensitive `examples` from any tool row echoed back to an agent before
- * the result is projected through the advertised output schema.
+ * Studio-only `mcp_tool` columns. Group placement and OpenAPI import
+ * provenance are owner-facing organization metadata with no Platform MCP
+ * surface, so no Platform result may carry them.
  */
-function redactToolRow<T extends Record<string, unknown>>(tool: T): T {
-  if (!("requestDefinition" in tool)) return tool;
-  return {
-    ...tool,
-    requestDefinition: redactSensitiveExamples(
-      (tool as { requestDefinition?: unknown }).requestDefinition,
-    ),
-  };
+const STUDIO_ONLY_TOOL_COLUMNS = ["groupId", "sourceProvenance"] as const;
+
+type StudioOnlyToolColumn = (typeof STUDIO_ONLY_TOOL_COLUMNS)[number];
+
+/**
+ * Agent-visible tool row projection: strips sensitive `examples` and the
+ * Studio-only columns from any tool row echoed back to an agent, so the
+ * emitted shape excludes them even before the advertised output schema
+ * projects the result.
+ */
+function redactToolRow<T extends Record<string, unknown>>(
+  tool: T,
+): Omit<T, StudioOnlyToolColumn> {
+  const redacted: Record<string, unknown> = { ...tool };
+  for (const column of STUDIO_ONLY_TOOL_COLUMNS) {
+    delete redacted[column];
+  }
+  if ("requestDefinition" in redacted) {
+    redacted.requestDefinition = redactSensitiveExamples(
+      redacted.requestDefinition,
+    );
+  }
+  return redacted as Omit<T, StudioOnlyToolColumn>;
 }
 
 const READ_ANNOTATIONS: ToolAnnotations = {

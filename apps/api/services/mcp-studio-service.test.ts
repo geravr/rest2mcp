@@ -19,6 +19,10 @@ const tables = vi.hoisted(() => ({
     enabled: "mcp_tool.enabled",
     createdAt: "mcp_tool.created_at",
   },
+  mcpToolGroup: {
+    id: "mcp_tool_group.id",
+    serverId: "mcp_tool_group.server_id",
+  },
   mcpServerVariable: {
     id: "mcp_server_variable.id",
     serverId: "mcp_server_variable.server_id",
@@ -182,6 +186,18 @@ const simpleTypedDefinition = {
   body: { bodyType: "none" as const },
   agentInputs: [],
 };
+
+/** Drops the compile timestamp so two compiles of one definition compare equal. */
+function withoutPlanTimestamp(
+  fields: Record<string, unknown>,
+): Record<string, unknown> {
+  const plan = fields.compiledPlan;
+  if (!plan || typeof plan !== "object") return fields;
+  const entries = Object.entries(plan as Record<string, unknown>).filter(
+    ([key]) => key !== "compiledAt",
+  );
+  return { ...fields, compiledPlan: Object.fromEntries(entries) };
+}
 
 describe("mcp-studio helpers", () => {
   it("derives traffic-light states", () => {
@@ -1312,6 +1328,229 @@ describe("mcp-studio typed tools", () => {
   });
 });
 
+describe("mcp-studio tool group placement", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const serverRow = {
+    configRevision: 1,
+    id: "mcs_1",
+    userId: "user-a",
+    status: "live",
+    baseUrl: "https://api.example.com",
+    commonEntries: null,
+    authConfiguration: null,
+  };
+
+  const storedTool = {
+    id: "mct_1",
+    serverId: "mcs_1",
+    name: "get_contact",
+    title: "Get contact",
+    description: "Fetch one contact.",
+    method: "GET",
+    requestDefinition: simpleTypedDefinition,
+    compiledPlan: null,
+    compileStatus: "valid",
+    compileIssues: [],
+    annotations: null,
+    allowMutation: false,
+    enabled: true,
+    groupId: "mtg_old",
+  };
+
+  it("persists a same-server group on manual create", async () => {
+    const db = makeDb([
+      [serverRow],
+      [{ count: 0 }],
+      [{ id: "mtg_1" }],
+      [], // server values
+      [{ id: "mct_1", name: "get_contact" }],
+    ]);
+
+    await createTool(db as never, "user-a", "mcs_1", {
+      expectedRevision: 1,
+      name: "get_contact",
+      title: "Get contact",
+      description: "Fetch one contact.",
+      method: "GET",
+      requestDefinition: simpleTypedDefinition,
+      groupId: "mtg_1",
+    });
+
+    expect(db.insertedValues).toHaveLength(1);
+    expect(db.insertedValues[0]).toMatchObject({ groupId: "mtg_1" });
+  });
+
+  it("creates no tool for a foreign or unknown group on manual create", async () => {
+    const db = makeDb([[serverRow], [{ count: 0 }], []]);
+
+    await expect(
+      createTool(db as never, "user-a", "mcs_1", {
+        expectedRevision: 1,
+        name: "get_contact",
+        method: "GET",
+        requestDefinition: simpleTypedDefinition,
+        groupId: "mtg_foreign",
+      }),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.appCode === APP_ERROR_CODES.MCP_TOOL_GROUP_NOT_FOUND,
+    );
+    expect(db.insert).not.toHaveBeenCalled();
+  });
+
+  it("leaves the stored assignment untouched when the group key is absent", async () => {
+    const db = makeDb([
+      [serverRow],
+      [storedTool],
+      [], // server values
+      [{ id: "mct_1" }],
+    ]);
+
+    await updateTool(db as never, "user-a", "mcs_1", "mct_1", {
+      expectedRevision: 1,
+      title: "Get a contact",
+    });
+
+    const updated = db.updatedValues[0] as Record<string, unknown>;
+    expect(updated).not.toHaveProperty("groupId");
+    expect(updated).toMatchObject({
+      name: "get_contact",
+      title: "Get a contact",
+      method: "GET",
+      enabled: true,
+      allowMutation: false,
+    });
+  });
+
+  it("ungroups when groupId is null", async () => {
+    const db = makeDb([
+      [serverRow],
+      [storedTool],
+      [], // server values
+      [{ id: "mct_1" }],
+    ]);
+
+    await updateTool(db as never, "user-a", "mcs_1", "mct_1", {
+      expectedRevision: 1,
+      groupId: null,
+    });
+
+    expect(db.updatedValues[0]).toHaveProperty("groupId", null);
+  });
+
+  it("moves the tool when a valid group is supplied", async () => {
+    const db = makeDb([
+      [serverRow],
+      [storedTool],
+      [{ id: "mtg_new" }],
+      [], // server values
+      [{ id: "mct_1" }],
+    ]);
+
+    await updateTool(db as never, "user-a", "mcs_1", "mct_1", {
+      expectedRevision: 1,
+      groupId: "mtg_new",
+    });
+
+    expect(db.updatedValues[0]).toHaveProperty("groupId", "mtg_new");
+  });
+
+  it("rejects a foreign group on update without changing the tool", async () => {
+    const db = makeDb([[serverRow], [storedTool], []]);
+
+    await expect(
+      updateTool(db as never, "user-a", "mcs_1", "mct_1", {
+        expectedRevision: 1,
+        groupId: "mtg_foreign",
+      }),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.appCode === APP_ERROR_CODES.MCP_TOOL_GROUP_NOT_FOUND,
+    );
+    expect(db.updatedValues).toHaveLength(0);
+  });
+
+  it("copies the source group onto a duplicate only while it still exists", async () => {
+    const withGroup = makeDb([
+      [serverRow],
+      [storedTool],
+      [{ count: 1 }],
+      [{ id: "mtg_old" }],
+      [], // server values
+      [{ id: "mct_2", name: "get_contact_copy" }],
+    ]);
+    await duplicateTool(withGroup as never, "user-a", "mcs_1", "mct_1", {
+      expectedRevision: 1,
+    });
+    expect(withGroup.insertedValues[0]).toMatchObject({ groupId: "mtg_old" });
+
+    const withoutGroup = makeDb([
+      [serverRow],
+      [storedTool],
+      [{ count: 1 }],
+      [], // the source group no longer exists
+      [], // server values
+      [{ id: "mct_3", name: "get_contact_copy" }],
+    ]);
+    await duplicateTool(withoutGroup as never, "user-a", "mcs_1", "mct_1", {
+      expectedRevision: 1,
+    });
+    expect(withoutGroup.insertedValues[0]).toMatchObject({ groupId: null });
+  });
+
+  it("changes only the assignment for a group-only edit", async () => {
+    const untouched = makeDb([
+      [serverRow],
+      [storedTool],
+      [], // server values
+      [{ id: "mct_1" }],
+    ]);
+    await updateTool(untouched as never, "user-a", "mcs_1", "mct_1", {
+      expectedRevision: 1,
+    });
+
+    const moved = makeDb([
+      [serverRow],
+      [storedTool],
+      [{ id: "mtg_new" }],
+      [], // server values
+      [{ id: "mct_1" }],
+    ]);
+    await updateTool(moved as never, "user-a", "mcs_1", "mct_1", {
+      expectedRevision: 1,
+      groupId: "mtg_new",
+    });
+
+    const { groupId: untouchedGroupId, ...untouchedFields } = untouched
+      .updatedValues[0] as Record<string, unknown>;
+    const { groupId: movedGroupId, ...movedFields } = moved
+      .updatedValues[0] as Record<string, unknown>;
+
+    expect(untouchedGroupId).toBeUndefined();
+    expect(movedGroupId).toBe("mtg_new");
+    // The compiled plan timestamp is the only volatile field.
+    expect(withoutPlanTimestamp(movedFields)).toEqual(
+      withoutPlanTimestamp(untouchedFields),
+    );
+    expect(movedFields).toMatchObject({
+      name: "get_contact",
+      title: "Get contact",
+      description: "Fetch one contact.",
+      method: "GET",
+      enabled: true,
+      allowMutation: false,
+      compileStatus: "valid",
+    });
+    expect(movedFields.requestDefinition).toEqual(simpleTypedDefinition);
+    expect(movedFields.compiledPlan).toBeTruthy();
+  });
+});
+
 describe("mcp-studio safe curl import", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1428,6 +1667,56 @@ describe("mcp-studio safe curl import", () => {
         error.appCode === APP_ERROR_CODES.MCP_CURL_INVALID,
     );
     expect(db.insert).not.toHaveBeenCalled();
+  });
+
+  it("imports into an existing group as exactly one disabled curl draft", async () => {
+    const db = makeDb([
+      [server],
+      [], // loadCompileServerValueRefs: no existing variables
+      [{ count: 0 }], // assertToolCapacity
+      [{ id: "mtg_1" }], // group placement
+      [{ id: "mct_1", name: "get_contacts", enabled: false, source: "curl" }],
+    ]);
+
+    const result = await confirmCurlImport(db as never, "user-a", "mcs_1", {
+      expectedRevision: 1,
+      curl: `curl -H 'Authorization: Bearer super-secret' https://api.example.com/contacts`,
+      groupId: "mtg_1",
+    });
+
+    expect(db.insertedValues).toHaveLength(1);
+    expect(db.insertedValues[0]).toMatchObject({
+      groupId: "mtg_1",
+      enabled: false,
+      allowMutation: false,
+      source: "curl",
+    });
+    expect(result.enabled).toBe(false);
+    expect(result.excludedCredentials).toEqual([
+      { kind: "bearer", headerName: "Authorization" },
+    ]);
+    expect(db.updatedValues).toHaveLength(0);
+    expect(db.delete).not.toHaveBeenCalled();
+    expect(JSON.stringify(db.insertedValues)).not.toContain("super-secret");
+  });
+
+  it("creates nothing when the curl import targets a foreign group", async () => {
+    const db = makeDb([[server], [], [{ count: 0 }], []]);
+
+    await expect(
+      confirmCurlImport(db as never, "user-a", "mcs_1", {
+        expectedRevision: 1,
+        curl: `curl https://api.example.com/contacts`,
+        groupId: "mtg_foreign",
+      }),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.appCode === APP_ERROR_CODES.MCP_TOOL_GROUP_NOT_FOUND,
+    );
+    expect(db.insert).not.toHaveBeenCalled();
+    expect(db.updatedValues).toHaveLength(0);
+    expect(db.delete).not.toHaveBeenCalled();
   });
 
   it("resolves a serverValue marking to an existing value without creating one", async () => {

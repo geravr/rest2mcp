@@ -10,12 +10,13 @@ import {
   mcpServerRevisionTool,
   mcpServerVariable,
   mcpTool,
+  mcpToolGroup,
   type McpAuthConfigurationRow,
   type McpNamedEntryRow,
   type McpServer,
   type McpServerVariable,
 } from "@repo/db";
-import { and, count, desc, eq, inArray } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import {
   APP_ERROR_CODES,
@@ -45,6 +46,10 @@ import {
   type CurlImportPreview,
 } from "../lib/mcp-curl-import.js";
 import { encryptCredential } from "../lib/mcp-crypto.js";
+import {
+  MCP_TOOL_GROUP_FILTER_ALL,
+  MCP_TOOL_GROUP_FILTER_UNGROUPED,
+} from "../lib/mcp-domain-commands.js";
 import { isForbiddenTransportHeaderName } from "../lib/mcp-policy.js";
 import { MCP_MAX_TOOLS_PER_SERVER } from "../lib/mcp-redact.js";
 import {
@@ -123,7 +128,7 @@ function bufferCompileTelemetry(
 
 export type TrafficLight = "draft" | "green" | "yellow" | "red" | "paused";
 export type McpServerStatus = "draft" | "live" | "paused";
-export type McpToolSource = "manual" | "curl";
+export type McpToolSource = "manual" | "curl" | "openapi";
 export type McpHttpMethod =
   "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -164,6 +169,8 @@ export type CreateTypedToolInput = {
   requestDefinition: McpRequestDefinition;
   allowMutation?: boolean;
   enabled?: boolean;
+  /** Optional Studio group placement; null or absent leaves the tool ungrouped. */
+  groupId?: string | null;
 };
 
 export type UpdateTypedToolInput = {
@@ -175,6 +182,8 @@ export type UpdateTypedToolInput = {
   requestDefinition?: McpRequestDefinition;
   allowMutation?: boolean;
   enabled?: boolean;
+  /** Absent keeps the stored assignment; null ungroups; an id moves the tool. */
+  groupId?: string | null;
 };
 
 export type DuplicateTypedToolInput = {
@@ -1536,10 +1545,20 @@ export async function listTools(
   db: DB,
   userId: string,
   serverId: string,
-  input: PaginationInput,
+  input: PaginationInput & { group?: string },
 ) {
   await requireOwnedServer(db, userId, serverId);
-  const where = eq(mcpTool.serverId, serverId);
+  const conditions = [eq(mcpTool.serverId, serverId)];
+  if (input.group === MCP_TOOL_GROUP_FILTER_UNGROUPED) {
+    conditions.push(isNull(mcpTool.groupId));
+  } else if (
+    input.group !== undefined &&
+    input.group !== MCP_TOOL_GROUP_FILTER_ALL
+  ) {
+    conditions.push(eq(mcpTool.groupId, input.group));
+  }
+  // One predicate for the page and the count, so the two can never diverge.
+  const where = and(...conditions);
   return paginate({
     page: input.page,
     pageSize: input.pageSize,
@@ -1573,6 +1592,49 @@ async function assertToolCapacity(db: DB, serverId: string) {
       status: 400,
     });
   }
+}
+
+/**
+ * Owner-scoped group lookup inside the caller's transaction. The same-server
+ * predicate is mandatory so a foreign group is indistinguishable from a
+ * missing one.
+ */
+async function findOwnedGroupId(
+  db: DB,
+  serverId: string,
+  groupId: string,
+): Promise<string | null> {
+  const [group] = await db
+    .select({ id: mcpToolGroup.id })
+    .from(mcpToolGroup)
+    .where(
+      and(eq(mcpToolGroup.id, groupId), eq(mcpToolGroup.serverId, serverId)),
+    )
+    .limit(1);
+  return group?.id ?? null;
+}
+
+/**
+ * Resolves an optional placement. `null` or an absent value means ungrouped; a
+ * missing, stale, or foreign group fails as not found without revealing whether
+ * the group exists elsewhere.
+ */
+async function resolveGroupPlacement(
+  db: DB,
+  serverId: string,
+  groupId: string | null | undefined,
+): Promise<string | null> {
+  if (typeof groupId !== "string" || groupId.length === 0) return null;
+  const found = await findOwnedGroupId(db, serverId, groupId);
+  if (!found) {
+    throw appError({
+      appCode: APP_ERROR_CODES.MCP_TOOL_GROUP_NOT_FOUND,
+      message: "MCP tool group not found.",
+      status: 404,
+      details: { serverId },
+    });
+  }
+  return found;
 }
 
 /** Translate a tool-name uniqueness violation to a stable, secret-safe conflict. */
@@ -1788,6 +1850,11 @@ export async function createTool(
         input.allowMutation,
         input.enabled,
       );
+      const groupId = await resolveGroupPlacement(
+        ctx.tx,
+        server.id,
+        input.groupId,
+      );
       const emit = bufferCompileTelemetry(db, userId, ctx.onCommit);
       const compiled = await compileTypedToolForPersistence(
         ctx.tx,
@@ -1823,6 +1890,7 @@ export async function createTool(
             allowMutation: flags.allowMutation,
             enabled: compiled.enabled,
             source,
+            groupId,
           })
           .returning();
         await promoteServerIfReady(ctx.tx, server.id, server.status);
@@ -1988,6 +2056,12 @@ export async function updateTool(
         input.description === undefined
           ? existing.description
           : input.description?.trim() || null;
+      // Only an explicit `groupId` key touches the assignment, so an unrelated
+      // edit can never silently move the tool.
+      const placement =
+        input.groupId === undefined
+          ? undefined
+          : await resolveGroupPlacement(ctx.tx, server.id, input.groupId);
       const emit = bufferCompileTelemetry(db, userId, ctx.onCommit);
       const compiled = await compileTypedToolForPersistence(
         ctx.tx,
@@ -2021,6 +2095,7 @@ export async function updateTool(
             annotations: compiled.annotations,
             allowMutation: flags.allowMutation,
             enabled: compiled.enabled,
+            ...(placement !== undefined ? { groupId: placement } : {}),
           })
           .where(eq(mcpTool.id, existing.id))
           .returning();
@@ -2064,6 +2139,11 @@ export async function duplicateTool(
         });
       }
       await assertToolCapacity(ctx.tx, server.id);
+      // The copy inherits the source placement only while that group still
+      // exists on this server; a deleted or stale group degrades to ungrouped.
+      const groupId = existing.groupId
+        ? await findOwnedGroupId(ctx.tx, server.id, existing.groupId)
+        : null;
       const parsed = existing.requestDefinition
         ? mcpRequestDefinitionSchema.safeParse(existing.requestDefinition)
         : null;
@@ -2127,6 +2207,7 @@ export async function duplicateTool(
             allowMutation: flags.allowMutation,
             enabled: compiled.enabled,
             source: existing.source,
+            groupId,
           })
           .returning();
         await promoteServerIfReady(ctx.tx, server.id, server.status);
@@ -2270,6 +2351,8 @@ export type ConfirmCurlImportInput = {
   name?: string;
   description?: string | null;
   markings?: CurlImportMarking[];
+  /** Optional Studio group for the imported draft; null or absent is ungrouped. */
+  groupId?: string | null;
 };
 
 export type ConfirmCurlImportOptions = {
@@ -2316,6 +2399,11 @@ export async function confirmCurlImport(
       });
 
       await assertToolCapacity(ctx.tx, server.id);
+      const groupId = await resolveGroupPlacement(
+        ctx.tx,
+        server.id,
+        input.groupId,
+      );
       const name = toMcpToolName(input.name ?? draft.suggestedName);
       const basePath = new URL(server.baseUrl).pathname;
       const commonEntries = parseCommonEntries(server);
@@ -2356,6 +2444,7 @@ export async function confirmCurlImport(
             allowMutation: false,
             enabled: false,
             source: "curl",
+            groupId,
           })
           .returning();
         return {

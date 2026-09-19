@@ -244,6 +244,10 @@ function revisionToolToMcpTool(
     allowMutation: tool.allowMutation,
     enabled: tool.enabled,
     source: tool.source,
+    // Studio group placement and import provenance are authoring metadata, so
+    // the runtime projection is deliberately empty for both.
+    groupId: null,
+    sourceProvenance: null,
     createdAt: tool.createdAt,
     updatedAt: tool.createdAt,
   };

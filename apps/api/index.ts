@@ -44,6 +44,51 @@ export type {
   CurlImportMarking,
   CurlImportPreview,
 } from "./lib/mcp-curl-import.js";
+// OpenAPI import contracts, re-exported so consumers can name these shapes
+// instead of re-declaring them.
+export type {
+  McpOpenApiCapacityProjection,
+  McpOpenApiConfirmInput,
+  McpOpenApiConfirmResult,
+  McpOpenApiDocumentMetadata,
+  McpOpenApiDocumentSummary,
+  McpOpenApiGroupStrategy,
+  McpOpenApiGroupStrategyKind,
+  McpOpenApiInventory,
+  McpOpenApiInventoryMediaType,
+  McpOpenApiInventoryOperation,
+  McpOpenApiInventoryParameter,
+  McpOpenApiInventoryRequestBody,
+  McpOpenApiInventoryServer,
+  McpOpenApiMethod,
+  McpOpenApiOperationCandidate,
+  McpOpenApiOperationIssue,
+  McpOpenApiPointer,
+  McpOpenApiPreviewResult,
+  McpOpenApiSecurityRequirement,
+  McpOpenApiSelectionEntry,
+  McpOpenApiSource,
+  McpOpenApiSourceKind,
+  McpOpenApiSourceProvenance,
+  McpOpenApiSuggestedGroup,
+  McpOpenApiTelemetrySummary,
+} from "./lib/openapi-import-contracts.js";
+export type { McpToolGroupSummary } from "./services/mcp-tool-group-service.js";
+// Canonical request-definition types referenced by the OpenAPI import
+// contracts above; re-exported for the same naming reason.
+export type {
+  McpAgentInput,
+  McpBehaviorAnnotations,
+  McpBodyDefinition,
+  McpCompiledPlan,
+  McpCompileIssue,
+  McpCommonEntries,
+  McpJsonNode,
+  McpNamedEntry,
+  McpPathSegment,
+  McpRequestDefinition,
+  McpValueBinding,
+} from "./lib/mcp-request-definition.js";
 // Re-export context type to fix TypeScript portability issues
 export type * from "./lib/context.js";
 

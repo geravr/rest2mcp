@@ -4,8 +4,6 @@ import { serverAuthRecipeSchema } from "../lib/mcp-auth-recipe.js";
 import { mcpCommonEntriesSchema } from "../lib/mcp-request-definition.js";
 import {
   createPlatformPatCommandSchema,
-  createToolCommandSchema,
-  curlConfirmCommandSchema,
   duplicateToolCommandSchema,
   expectedRevisionSchema,
   previewToolCompileCommandSchema,
@@ -16,9 +14,24 @@ import {
   revisionHistoryCommandSchema,
   revokePlatformPatCommandSchema,
   rotatePlatformPatCommandSchema,
-  updateToolCommandSchema,
   verifyPlatformStepUpCommandSchema,
 } from "../lib/mcp-domain-commands.js";
+import {
+  assignToolGroupCommandSchema,
+  createToolGroupCommandSchema,
+  deleteToolGroupCommandSchema,
+  renameToolGroupCommandSchema,
+  toolGroupFilterSchema,
+} from "../lib/mcp-domain-commands.js";
+import {
+  studioCreateToolCommandSchema,
+  studioCurlConfirmCommandSchema,
+  studioUpdateToolCommandSchema,
+} from "../lib/mcp-studio-commands.js";
+import {
+  openApiImportConfirmCommandSchema,
+  openApiImportPreviewCommandSchema,
+} from "../lib/openapi-import-commands.js";
 import { APP_ERROR_CODES, appError } from "../lib/app-error.js";
 import { validatePlatformGrantRequest } from "../lib/mcp-platform-principal.js";
 import { protectedProcedure, router } from "../lib/trpc.js";
@@ -75,6 +88,17 @@ import {
   listPlatformSecurityEvents,
   recordPlatformSecurityEventBestEffort,
 } from "../services/mcp-platform-security-event-service.js";
+import {
+  assignToolsToGroup,
+  createToolGroup,
+  deleteToolGroup,
+  listToolGroups,
+  renameToolGroup,
+} from "../services/mcp-tool-group-service.js";
+import {
+  confirmOpenApiImport,
+  previewOpenApiImport,
+} from "../services/mcp-openapi-import-service.js";
 
 const serverIdInput = z.object({ serverId: z.string().min(1) });
 
@@ -190,19 +214,65 @@ export const mcpRouter = router({
     ),
 
   tools: protectedProcedure
-    .input(serverIdInput.extend(paginationInputSchema.shape))
+    .input(
+      serverIdInput
+        .extend(paginationInputSchema.shape)
+        .extend({ group: toolGroupFilterSchema }),
+    )
     .query(({ ctx, input }) =>
       listTools(ctx.db, ctx.user.id, input.serverId, input),
     ),
 
+  toolGroups: protectedProcedure
+    .input(serverIdInput)
+    .query(({ ctx, input }) =>
+      listToolGroups(ctx.db, ctx.user.id, input.serverId),
+    ),
+
+  createToolGroup: protectedProcedure
+    .input(createToolGroupCommandSchema)
+    .mutation(({ ctx, input }) =>
+      createToolGroup(ctx.dbDirect, ctx.user.id, input.serverId, input),
+    ),
+
+  renameToolGroup: protectedProcedure
+    .input(renameToolGroupCommandSchema)
+    .mutation(({ ctx, input }) =>
+      renameToolGroup(ctx.dbDirect, ctx.user.id, input.serverId, input),
+    ),
+
+  deleteToolGroup: protectedProcedure
+    .input(deleteToolGroupCommandSchema)
+    .mutation(({ ctx, input }) =>
+      deleteToolGroup(ctx.dbDirect, ctx.user.id, input.serverId, input),
+    ),
+
+  assignToolGroup: protectedProcedure
+    .input(assignToolGroupCommandSchema)
+    .mutation(({ ctx, input }) =>
+      assignToolsToGroup(ctx.dbDirect, ctx.user.id, input.serverId, input),
+    ),
+
+  previewOpenApiImport: protectedProcedure
+    .input(openApiImportPreviewCommandSchema)
+    .mutation(({ ctx, input }) =>
+      previewOpenApiImport(ctx.db, ctx.user.id, input.serverId, input),
+    ),
+
+  confirmOpenApiImport: protectedProcedure
+    .input(openApiImportConfirmCommandSchema)
+    .mutation(({ ctx, input }) =>
+      confirmOpenApiImport(ctx.dbDirect, ctx.user.id, input.serverId, input),
+    ),
+
   createTool: protectedProcedure
-    .input(createToolCommandSchema)
+    .input(studioCreateToolCommandSchema)
     .mutation(({ ctx, input }) =>
       createTool(ctx.dbDirect, ctx.user.id, input.serverId, input),
     ),
 
   createToolFromCurl: protectedProcedure
-    .input(curlConfirmCommandSchema)
+    .input(studioCurlConfirmCommandSchema)
     .mutation(({ ctx, input }) =>
       confirmCurlImport(ctx.dbDirect, ctx.user.id, input.serverId, input),
     ),
@@ -218,7 +288,7 @@ export const mcpRouter = router({
     ),
 
   updateTool: protectedProcedure
-    .input(updateToolCommandSchema)
+    .input(studioUpdateToolCommandSchema)
     .mutation(({ ctx, input }) =>
       updateTool(
         ctx.dbDirect,

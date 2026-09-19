@@ -39,6 +39,10 @@ export const MCP_TELEMETRY_EVENTS = {
   staleAgentCall: "mcp_stale_agent_call",
   /** A bounded revision retention cleanup run (counts only). */
   revisionRetentionCleanup: "mcp_revision_retention_cleanup",
+  /** A write-free OpenAPI import preview was returned (counts and stable codes only). */
+  openapiImportPreviewed: "mcp_openapi_import_previewed",
+  /** One committed OpenAPI import batch (counts, duration, and source kind only). */
+  openapiImportConfirmed: "mcp_openapi_import_confirmed",
 } as const;
 
 export type McpTelemetryEvent =

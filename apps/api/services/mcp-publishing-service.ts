@@ -11,6 +11,7 @@ import {
   mcpServerRevisionTool,
   mcpServerVariable,
   mcpTool,
+  mcpToolGroup,
   MCP_REVISION_COMPILER_VERSION,
   MCP_REVISION_SCHEMA_VERSION,
   type McpRevisionActorSource,
@@ -54,6 +55,7 @@ import {
   type McpCommonEntries,
   type McpCompileIssue,
 } from "../lib/mcp-request-definition.js";
+import { parseOpenApiSourceProvenance } from "../lib/openapi-import-contracts.js";
 import { paginate } from "../lib/paginate.js";
 import type { McpExecutionSnapshot } from "./mcp-executor-service.js";
 import { loadExecutionSnapshot } from "./mcp-executor-service.js";
@@ -898,6 +900,12 @@ async function runPublishTransaction(
       note: input.note ?? null,
     });
 
+    const provenanceByToolId = new Map<string, Record<string, unknown>>();
+    for (const tool of aggregate.tools) {
+      const provenance = parseOpenApiSourceProvenance(tool.sourceProvenance);
+      if (provenance) provenanceByToolId.set(tool.id, provenance);
+    }
+
     if (candidate.tools.length > 0) {
       await tx.insert(mcpServerRevisionTool).values(
         candidate.tools.map((tool) => ({
@@ -918,6 +926,7 @@ async function runPublishTransaction(
           allowMutation: tool.allowMutation,
           enabled: tool.enabled,
           source: tool.source,
+          sourceProvenance: provenanceByToolId.get(tool.sourceToolId) ?? null,
           contractFingerprint: tool.contractFingerprint,
           definitionHash: tool.definitionHash,
           toolOrder: tool.toolOrder,
@@ -1271,6 +1280,17 @@ export async function restoreRevisionToDraft(
         .map((row) => row.id),
     );
 
+    // Studio grouping is presentation state that survives a runtime rollback:
+    // capture current assignments before the draft tool rows are rebuilt.
+    const currentTools = await tx
+      .select({ id: mcpTool.id, groupId: mcpTool.groupId })
+      .from(mcpTool)
+      .where(eq(mcpTool.serverId, server.id));
+    const currentGroupIdByToolId = new Map<string, string>();
+    for (const tool of currentTools) {
+      if (tool.groupId) currentGroupIdByToolId.set(tool.id, tool.groupId);
+    }
+
     await tx.delete(mcpTool).where(eq(mcpTool.serverId, server.id));
     if (revisionTools.length > 0) {
       await tx.insert(mcpTool).values(
@@ -1289,8 +1309,46 @@ export async function restoreRevisionToDraft(
           allowMutation: tool.allowMutation,
           enabled: tool.enabled,
           source: tool.source,
+          sourceProvenance: parseOpenApiSourceProvenance(tool.sourceProvenance),
         })),
       );
+    }
+
+    // Reapply a group only when the restored tool id kept its current valid
+    // assignment. Group rows are never written by a revision operation.
+    const restoredGroupIds = [
+      ...new Set(
+        revisionTools
+          .map((tool) => currentGroupIdByToolId.get(tool.sourceToolId))
+          .filter((groupId): groupId is string => Boolean(groupId)),
+      ),
+    ];
+    if (restoredGroupIds.length > 0) {
+      const survivingGroups = await tx
+        .select({ id: mcpToolGroup.id })
+        .from(mcpToolGroup)
+        .where(
+          and(
+            eq(mcpToolGroup.serverId, server.id),
+            inArray(mcpToolGroup.id, restoredGroupIds),
+          ),
+        );
+      const survivingGroupIds = new Set(
+        survivingGroups.map((group) => group.id),
+      );
+      for (const tool of revisionTools) {
+        const groupId = currentGroupIdByToolId.get(tool.sourceToolId);
+        if (!groupId || !survivingGroupIds.has(groupId)) continue;
+        await tx
+          .update(mcpTool)
+          .set({ groupId })
+          .where(
+            and(
+              eq(mcpTool.serverId, server.id),
+              eq(mcpTool.id, tool.sourceToolId),
+            ),
+          );
+      }
     }
 
     const revisionConfigById = new Map(

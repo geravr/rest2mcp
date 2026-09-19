@@ -82,6 +82,8 @@ function makeTool(overrides: Partial<McpTool> = {}): McpTool {
     allowMutation: false,
     enabled: true,
     source: "manual",
+    groupId: null,
+    sourceProvenance: null,
     createdAt: CREATED,
     updatedAt: CREATED,
     ...overrides,
@@ -341,6 +343,104 @@ describe("canonical publication candidate", () => {
     expect(computeAggregateContractFingerprint([a, b])).toBe(
       computeAggregateContractFingerprint([b, a]),
     );
+  });
+});
+
+describe("authoring metadata isolation", () => {
+  const provenanceFixture = {
+    version: 1,
+    batchId: "provenance-batch-sentinel",
+    openApiVersion: "3.1",
+    operationKey: "listContacts",
+    documentFingerprint: "sha256:provenance-document-sentinel",
+    definitionHash: "sha256:provenance-definition-sentinel",
+    tags: ["Contacts"],
+    sourceLabel: "provenance-label-sentinel",
+  };
+
+  function metadataAggregate(): DraftAggregate {
+    return makeAggregate({
+      tools: [
+        makeTool({
+          groupId: "mtg_customers",
+          sourceProvenance: provenanceFixture,
+        }),
+      ],
+    });
+  }
+
+  function activeFrom(candidate: PublicationCandidate): ActiveRevisionSummary {
+    return {
+      id: "msr_unit",
+      revisionNumber: 1,
+      candidateFingerprint: candidate.candidateFingerprint,
+      contractFingerprint: candidate.contractFingerprint,
+      server: {
+        name: candidate.server.name,
+        description: candidate.server.description,
+        baseUrl: candidate.server.baseUrl,
+        allowedHosts: candidate.server.allowedHosts,
+        commonEntries: candidate.server.commonEntries,
+        authConfiguration: candidate.server.authConfiguration,
+      },
+      tools: candidate.tools.map((tool) => ({
+        sourceToolId: tool.sourceToolId,
+        name: tool.name,
+        enabled: tool.enabled,
+        allowMutation: tool.allowMutation,
+        method: tool.method,
+        contractFingerprint: tool.contractFingerprint,
+        definitionHash: tool.definitionHash,
+      })),
+      configs: candidate.configs.map((config) => ({
+        sourceValueId: config.sourceValueId,
+        name: config.name,
+        kind: config.kind,
+        value: config.value,
+      })),
+    };
+  }
+
+  it("excludes group placement and provenance from the candidate payload", () => {
+    const candidate = candidateOf(metadataAggregate());
+    const serialized = JSON.stringify(candidate);
+    expect(serialized).not.toContain("mtg_customers");
+    expect(serialized).not.toContain(provenanceFixture.batchId);
+    expect(serialized).not.toContain(provenanceFixture.sourceLabel);
+    expect(serialized).not.toContain(provenanceFixture.documentFingerprint);
+    for (const tool of candidate.tools) {
+      expect(Object.keys(tool)).not.toContain("groupId");
+      expect(Object.keys(tool)).not.toContain("sourceProvenance");
+    }
+  });
+
+  it("does not change candidate or contract fingerprints when metadata is present", () => {
+    const baseline = candidateOf(makeAggregate());
+    const withMetadata = candidateOf(metadataAggregate());
+    expect(withMetadata.candidateFingerprint).toBe(
+      baseline.candidateFingerprint,
+    );
+    expect(withMetadata.contractFingerprint).toBe(baseline.contractFingerprint);
+    expect(withMetadata.enabledContracts).toEqual(baseline.enabledContracts);
+  });
+
+  it("does not mark a revision diff changed by authoring metadata alone", () => {
+    const baseline = candidateOf(makeAggregate());
+    const diff = diffCandidateAgainstRevision(
+      candidateOf(metadataAggregate()),
+      activeFrom(baseline),
+    );
+    expect(diff.changed).toBe(false);
+    expect(diff.destructive).toBe(false);
+    expect(diff.summary).toMatchObject({
+      serverChanged: [],
+      toolsAdded: [],
+      toolsRemoved: [],
+      toolsChanged: [],
+      toolsEnabled: [],
+      toolsDisabled: [],
+      contractChanged: false,
+    });
   });
 });
 

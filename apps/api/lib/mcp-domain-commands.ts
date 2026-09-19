@@ -1,12 +1,18 @@
 /**
  * @file Shared domain command schemas for Studio tRPC and Platform MCP.
  * Keep field/payload limits identical across both transports.
+ *
+ * Studio-only authoring fields (notably Studio group placement) must NOT be
+ * added here: these schemas are the Platform MCP contract too. Derive a
+ * Studio-specific schema in `mcp-studio-commands.ts` instead.
  */
 import { z } from "zod";
 import {
   MCP_DEFAULT_PLATFORM_SCOPES,
+  MCP_OPENAPI_LIMITS,
   MCP_PLATFORM_RESOURCE_MODES,
   MCP_PLATFORM_SCOPES,
+  MCP_TOOL_GROUP_LIMITS,
   paginationInputSchema,
 } from "@repo/core";
 import {
@@ -346,3 +352,50 @@ export type PreviewToolCompileCommand = z.infer<
   typeof previewToolCompileCommandSchema
 >;
 export type CurlConfirmCommand = z.infer<typeof curlConfirmCommandSchema>;
+
+/** Studio tool groups are presentation-only and never publishable structure. */
+export const createToolGroupCommandSchema = z.strictObject({
+  serverId: z.string().min(1),
+  expectedRevision: expectedRevisionSchema,
+  name: z.string().trim().min(1).max(MCP_TOOL_GROUP_LIMITS.name),
+});
+export const renameToolGroupCommandSchema = z.strictObject({
+  serverId: z.string().min(1),
+  expectedRevision: expectedRevisionSchema,
+  groupId: z.string().min(1).max(64),
+  name: z.string().trim().min(1).max(MCP_TOOL_GROUP_LIMITS.name),
+});
+export const deleteToolGroupCommandSchema = z.strictObject({
+  serverId: z.string().min(1),
+  expectedRevision: expectedRevisionSchema,
+  groupId: z.string().min(1).max(64),
+});
+export const assignToolGroupCommandSchema = z.strictObject({
+  serverId: z.string().min(1),
+  expectedRevision: expectedRevisionSchema,
+  toolIds: z
+    .array(z.string().min(1))
+    .min(1)
+    .max(MCP_OPENAPI_LIMITS.maxSelection),
+  /** null ungroups; a group id assigns. */
+  groupId: z.string().min(1).max(64).nullable(),
+});
+
+export type CreateToolGroupCommand = z.infer<
+  typeof createToolGroupCommandSchema
+>;
+export type RenameToolGroupCommand = z.infer<
+  typeof renameToolGroupCommandSchema
+>;
+export type DeleteToolGroupCommand = z.infer<
+  typeof deleteToolGroupCommandSchema
+>;
+export type AssignToolGroupCommand = z.infer<
+  typeof assignToolGroupCommandSchema
+>;
+
+export const MCP_TOOL_GROUP_FILTER_UNGROUPED = "ungrouped";
+export const MCP_TOOL_GROUP_FILTER_ALL = "all";
+
+/** `"all"` and an absent value both mean unfiltered; `"ungrouped"` means groupId IS NULL. */
+export const toolGroupFilterSchema = z.string().min(1).max(64).optional();

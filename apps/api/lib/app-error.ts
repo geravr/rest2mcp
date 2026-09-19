@@ -126,6 +126,19 @@ export function extractDetailsFromTrpcCause(
   if (typeof source.resourceMode === "string") {
     result.resourceMode = source.resourceMode;
   }
+  if (typeof source.groupId === "string") result.groupId = source.groupId;
+  if (typeof source.groupName === "string") result.groupName = source.groupName;
+  if (typeof source.documentFingerprint === "string") {
+    result.documentFingerprint = source.documentFingerprint;
+  }
+  if (typeof source.limit === "number") result.limit = source.limit;
+  if (typeof source.observed === "number") result.observed = source.observed;
+  if (Array.isArray(source.operationKeys)) {
+    const operationKeys = source.operationKeys.filter(
+      (key): key is string => typeof key === "string",
+    );
+    if (operationKeys.length > 0) result.operationKeys = operationKeys;
+  }
   if (Array.isArray(source.references)) {
     result.references = source.references
       .filter(
