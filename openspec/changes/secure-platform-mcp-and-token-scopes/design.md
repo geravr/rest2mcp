@@ -48,16 +48,16 @@ Alternatives considered:
 
 The canonical scopes are:
 
-| Scope | Authority |
-| --- | --- |
-| `read` | List granted servers, safe tool/connection metadata, and non-secret value metadata |
-| `observe` | Read sanitized call logs and detailed operational health |
-| `author` | Create draft servers when account-wide; create/edit disabled drafts and unused non-secret config |
-| `publish` | Make runtime-effective changes, including enabling tools or modifying enabled tools/referenced config |
-| `invoke` | Test enabled GET/HEAD tools only |
-| `invoke_mutation` | Test enabled POST/PUT/PATCH/DELETE tools that already allow mutation |
-| `secret_reference` | Discover and bind existing secret ids without resolving their values |
-| `destructive` | Delete Studio servers, tools, and values after current-name confirmation |
+| Scope              | Authority                                                                                             |
+| ------------------ | ----------------------------------------------------------------------------------------------------- |
+| `read`             | List granted servers, safe tool/connection metadata, and non-secret value metadata                    |
+| `observe`          | Read sanitized call logs and detailed operational health                                              |
+| `author`           | Create draft servers when account-wide; create/edit disabled drafts and unused non-secret config      |
+| `publish`          | Make runtime-effective changes, including enabling tools or modifying enabled tools/referenced config |
+| `invoke`           | Test enabled GET/HEAD tools only                                                                      |
+| `invoke_mutation`  | Test enabled POST/PUT/PATCH/DELETE tools that already allow mutation                                  |
+| `secret_reference` | Discover and bind existing secret ids without resolving their values                                  |
+| `destructive`      | Delete Studio servers, tools, and values after current-name confirmation                              |
 
 Every token includes `read`. `observe`, `author`, `invoke`, and `destructive` require `read`; `publish` requires `author`; `invoke_mutation` requires `invoke`; and `secret_reference` requires `read`. Unknown scopes, duplicates, missing dependencies, the wrong policy version, or a mismatch between resource mode and server grants invalidate the PAT as a whole.
 
