@@ -8,13 +8,13 @@
 
 ## 2. Token Grant and Security-Event Persistence
 
-- [ ] 2.1 Extend the agent-token schema with Platform policy version, resource mode, rotation linkage, and lifecycle metadata while leaving server-token rows compatible.
+- [ ] 2.1 Extend the agent-token schema with Platform policy version, resource mode, rotation linkage, and lifecycle metadata while keeping server gateway tokens as a distinct credential audience.
 - [ ] 2.2 Add normalized Platform PAT scope rows with scope constraints, uniqueness, and cascading token ownership.
 - [ ] 2.3 Add normalized selected-server grant rows with token/server uniqueness and cascades that cannot promote a token to account-wide mode.
 - [ ] 2.4 Add active-name and token-hash uniqueness plus indexes for owner inventory, authentication, expiration, and revocation queries.
 - [ ] 2.5 Add session-bound, expiring, single-use Platform step-up grant storage with an exact authorization-request fingerprint.
 - [ ] 2.6 Add the owner-scoped Platform security-event schema, safe metadata type, indexes, and 90-day retention fields.
-- [ ] 2.7 Generate one Drizzle migration for the schema changes and inspect it without hand-editing generated SQL.
+- [ ] 2.7 Generate one Drizzle migration that adds normalized Platform grants/events, deletes development Platform PATs, and removes legacy Platform scope/singleton fields without hand-editing generated SQL.
 - [ ] 2.8 Add schema tests for normalized grant integrity, policy/resource consistency, cascades, token uniqueness, step-up consumption, and security-event ownership.
 
 ## 3. Grant Validation and Platform Principal
@@ -23,10 +23,10 @@
 - [ ] 3.2 Implement resource-mode validation for non-empty selected grants and account-wide grants without selected rows.
 - [ ] 3.3 Implement `PlatformPrincipal` as an immutable validated value containing token, user, scopes, resource boundary, policy version, and expiration.
 - [ ] 3.4 Split Platform PAT authentication from server-token authentication so each path validates only its own authoritative storage and audience.
-- [ ] 3.5 Load normalized scopes and server grants during Platform authentication and fail uniformly for malformed, unknown-version, expired, revoked, or legacy principals.
+- [ ] 3.5 Load normalized scopes and server grants during Platform authentication and fail uniformly for malformed, unknown-version, expired, or revoked principals.
 - [ ] 3.6 Throttle `lastUsedAt` persistence to avoid a database write on every MCP protocol request without losing useful owner activity data.
 - [ ] 3.7 Add table-driven tests for every valid/invalid scope combination, resource mode, policy version, expiration, revocation, and server-token rejection.
-- [ ] 3.8 Add tests proving malformed grants never fall back to legacy JSON scopes or broaden access.
+- [ ] 3.8 Add tests proving malformed grants have no alternate storage or fallback path and never broaden access.
 
 ## 4. Multiple PAT Lifecycle and Step-Up
 
@@ -110,17 +110,18 @@
 - [ ] 10.5 Add the email OTP step-up interaction for high-risk creation/rotation and handle expired, mismatched, and consumed grants clearly.
 - [ ] 10.6 Add individual rotate and revoke flows with destructive confirmation, one-time raw PAT display, and no browser persistence of the raw credential.
 - [ ] 10.7 Add a paginated recent security-event view that maps only safe event codes to user-facing copy.
-- [ ] 10.8 Add complete English and Spanish copy for presets, scopes, resource modes, risk, migration revocation, step-up, activity, and errors.
+- [ ] 10.8 Add complete English and Spanish copy for presets, scopes, resource modes, risk, step-up, activity, and errors without legacy-token migration messaging.
 - [ ] 10.9 Add SPA tests for safe defaults, dependency controls, server selection, high-risk step-up, TTL caps, multiple PATs, rotation, revocation, raw-token disappearance, and locale parity.
 
-## 11. Migration, Documentation, and Verification
+## 11. Clean Cutover, Documentation, and Verification
 
-- [ ] 11.1 Implement an idempotent migration/backfill command that revokes current legacy Platform tokens without touching server-scoped gateway tokens.
-- [ ] 11.2 Add a temporary compatibility flag for staged rollout that never translates legacy scopes into new grants and defaults to disabled after migration.
-- [ ] 11.3 Add a Settings migration notice explaining why Platform PATs must be recreated and confirming that product MCP server tokens remain valid.
+- [ ] 11.1 Delete existing development Platform PAT rows and obsolete JSON/singleton grant storage in the generated migration while leaving the distinct server-gateway credential audience unchanged.
+- [ ] 11.2 Remove old scope casts, singleton token procedures, serializers, UI state, compatibility flags, fixtures, and documentation in the same change.
+- [ ] 11.3 Update canonical seeds and document reset/reseed for local development without creating or persisting a raw Platform PAT automatically.
 - [ ] 11.4 Document Platform principal, scope dependencies, resource predicates, authorization-before-lookup, PAT/OAuth distinction, and safe event metadata in `apps/api/AGENTS.md`.
-- [ ] 11.5 Update human-facing command/onboarding documentation only where token recreation, PAT compatibility mode, or a new retention command needs explanation.
-- [ ] 11.6 Add end-to-end tests covering PAT creation, MCP connection, discovery, read, draft authoring, publish, read-only invoke, mutating invoke, denial, rotation, revocation, and legacy rejection.
+- [ ] 11.5 Update human-facing command/onboarding documentation only where PAT authentication mode or a new retention command needs explanation.
+- [ ] 11.6 Add end-to-end tests covering PAT creation, MCP connection, discovery, read, draft authoring, publish, read-only invoke, mutating invoke, denial, rotation, revocation, and unknown-policy rejection.
 - [ ] 11.7 Run focused API, Platform MCP, service, migration, database, and SPA test suites for every touched area.
 - [ ] 11.8 Run `bun typecheck`, `bun lint`, and `bun test`, fixing all regressions attributable to this change.
 - [ ] 11.9 Run `bunx prettier --write .`, inspect the final diff for unrelated changes or credential-bearing fixtures, and map every spec scenario to automated coverage.
+- [ ] 11.10 Search source, schemas, migrations, clients, tests, and docs for legacy Platform scope JSON, singleton-token assumptions, migration notices, or compatibility flags and remove every remaining occurrence.

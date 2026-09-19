@@ -4,7 +4,7 @@
 
 The existing scope groups have unsafe composition. `read` includes operational call logs, `author` can change enabled tools, and `invoke` can execute both GET and mutating HTTP methods. A default token can therefore author a runtime-effective tool, reference an existing secret, and invoke the result. Stored scopes are cast rather than validated during authentication, control-plane operations are not rate-limited consistently, and ordinary read results can expose typed definitions containing server-value ids even when secret metadata is hidden.
 
-The MCP 2026-07-28 authorization model is OAuth-based and expects resource-server discovery, audience restriction, and standards-compliant challenges. This repository uses MCP SDK v1 and has no authorization server. This change hardens the existing personal-access-token (PAT) compatibility mode without presenting it as full MCP OAuth conformance. The policy model is designed so a future OAuth access-token validator can produce the same internal principal.
+The MCP 2026-07-28 authorization model is OAuth-based and expects resource-server discovery, audience restriction, and standards-compliant challenges. This repository uses MCP SDK v1 and has no authorization server. This change defines an explicit personal-access-token (PAT) authentication mode without presenting it as full MCP OAuth conformance. The policy model is designed so a future OAuth access-token validator can produce the same internal principal.
 
 ## Goals / Non-Goals
 
@@ -42,7 +42,7 @@ Alternatives considered:
 
 - Keeping one account-wide token makes rotation simple but prevents per-agent least privilege and forces downtime or privilege sharing.
 - Mutable grants create authorization races and make audit history ambiguous. Immutable grants plus rotation provide a stable principal for every request.
-- Embedding all grants in JSON is easy to serialize but makes referential integrity and fail-closed validation weaker. Normalized rows are authoritative; legacy JSON remains only for rollback until migration completes.
+- Embedding grants in JSON is easy to serialize but makes referential integrity and fail-closed validation weaker. Normalized rows are the only authoritative grant storage; the migration removes the superseded Platform scope JSON and no runtime path reads it.
 
 ### 2. Use a composable scope model with explicit dependencies
 
@@ -95,7 +95,7 @@ Platform `set_variable` remains limited to non-secret configuration. Sensitive-n
 
 ### 5. Enforce authorization at the HTTP boundary and again in tools
 
-The route checks Origin and declared content length, extracts and validates the PAT, and acquires an authenticated control-plane rate/concurrency slot before reading the request body. A bounded streaming reader aborts once the byte limit is crossed, including chunked requests. Invalid, expired, revoked, legacy-policy, and malformed-grant tokens all return the same HTTP 401 response with an RFC 6750 Bearer challenge. A statically under-scoped tool call returns HTTP 403 with `error="insufficient_scope"` and the required public scope names; dynamic resource denials remain generic structured tool errors.
+The route checks Origin and declared content length, extracts and validates the PAT, and acquires an authenticated control-plane rate/concurrency slot before reading the request body. A bounded streaming reader aborts once the byte limit is crossed, including chunked requests. Invalid, expired, revoked, unknown-policy, and malformed-grant tokens all return the same HTTP 401 response with an RFC 6750 Bearer challenge. A statically under-scoped tool call returns HTTP 403 with `error="insufficient_scope"` and the required public scope names; dynamic resource denials remain generic structured tool errors.
 
 Per-token budgets cover all Platform requests, with stricter buckets for writes and invocations. Existing per-server upstream concurrency and invocation budgets remain. Slots are released on every success/failure path and state is cleared naturally when a token is revoked or expires. In-memory counters remain acceptable for the documented single-process deployment; their limitation is retained explicitly.
 
@@ -109,7 +109,7 @@ Owners can view a paginated recent event list in Settings; Platform PATs cannot 
 
 ## Risks / Trade-offs
 
-- **[Existing integrations stop working]** -> Revoke only Platform PATs, announce the migration in Settings, preserve server gateway tokens, and provide clear recreation presets.
+- **[Development Platform connections stop working]** -> Delete disposable Platform PATs, update seeds, and require owners to create new least-privilege PATs; do not ship a legacy authentication path or migration notice.
 - **[More scopes increase cognitive load]** -> Lead with three safe presets, hide custom composition behind an advanced control, show effective permissions and dependencies, and require explicit high-risk confirmation.
 - **[Multiple tokens expand credential inventory]** -> Cap active PATs, require names and expirations, show last use, support individual revocation, and retain owner security events.
 - **[Selected-server grants become stale after server deletion]** -> Cascade grant rows and keep the PAT valid for its remaining grants; a token with no remaining selected servers authenticates but sees no resources.
@@ -121,17 +121,16 @@ Owners can view a paginated recent event list in Settings; Platform PATs cannot 
 
 ## Migration Plan
 
-1. Reconcile `make-studio-writes-atomic` by removing its singleton-active-token uniqueness assumption and retaining only user-locked per-token rotation/revocation atomicity.
-2. Add normalized scope/server-grant tables, PAT policy/resource fields, hash and active-name constraints, step-up grants, and security events through generated Drizzle migrations.
-3. Ship read-only token inventory and policy validation while legacy tokens continue to work only behind a temporary compatibility flag; do not reinterpret their scopes.
-4. Implement the principal, registry policy metadata, safe projections, service-level resource checks, transport ordering, limits, and security events.
-5. Update Settings with multiple-token management, presets, selected-server grants, risk/TTL rules, step-up, individual rotation/revocation, and recent security events in en/es.
-6. Revoke every active legacy Platform token, disable the compatibility flag, and display a migration notice. Do not revoke or rewrite server-scoped gateway tokens.
-7. Monitor denial rates, token recreation, audit failures, and rate limiting; then remove legacy JSON-scope reads after the rollback window.
+1. Reconcile `make-studio-writes-atomic` by removing its singleton-active-token uniqueness assumption and retaining user-locked per-token rotation/revocation atomicity.
+2. Add normalized scope/server-grant tables, PAT policy/resource fields, hash and active-name constraints, step-up grants, and security events through one generated Drizzle migration.
+3. Delete existing development Platform PATs and remove their legacy scope JSON/singleton fields and APIs in that migration; update seeds to create no raw credential automatically.
+4. Implement the principal, registry policy metadata, safe projections, service-level resource checks, transport ordering, limits, and security events as the only Platform authorization path.
+5. Update Settings atomically with multiple-token management, presets, selected-server grants, risk/TTL rules, step-up, individual rotation/revocation, and recent security events in en/es.
+6. Remove old token serializers, singleton procedures, scope casts, UI state, tests, metrics, and documentation.
+7. Verify empty-database migration/seed and reset-development-database flows, then test that no malformed or unknown-policy principal can fall back to removed storage.
 
-Rollback may temporarily restore legacy PAT authentication only while normalized grants remain intact; it must not synthesize broad grants from the new scopes or reactivate revoked legacy tokens automatically.
+If development rollback is required before the migration is shared, revert the code and regenerate/reset the database. Once shared, use a forward generated migration. Legacy Platform PAT authentication is never restored.
 
 ## Open Questions
 
 - Should the subsequent standards-compliance change integrate an external OAuth authorization server or extend Better Auth with OAuth resource-server/authorization-server support? That decision requires a separate threat model and MCP SDK v2 migration plan.
-

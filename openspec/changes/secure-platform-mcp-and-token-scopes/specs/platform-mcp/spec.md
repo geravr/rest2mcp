@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Owner can connect a platform MCP
-The system SHALL expose `/api/platform-mcp` in personal-access-token compatibility mode and authenticate it with an individually revocable, expiring, policy-versioned Platform PAT. The raw PAT SHALL be shown once, stored only as a unique cryptographic hash, and distinguishable from server-scoped gateway tokens during validation. The endpoint SHALL enforce trusted Origin when present, bounded streaming request bodies, authenticated per-token request/write/invocation limits, and concurrency limits. Invalid credentials SHALL return HTTP 401 with an RFC 6750 Bearer challenge, and the product SHALL NOT advertise PAT mode as OAuth discovery or consent support.
+The system SHALL expose `/api/platform-mcp` in explicit personal-access-token authentication mode and authenticate it with an individually revocable, expiring, policy-versioned Platform PAT backed only by normalized grants. The raw PAT SHALL be shown once, stored only as a unique cryptographic hash, and distinguishable from server-scoped gateway tokens during validation. The endpoint SHALL enforce trusted Origin when present, bounded streaming request bodies, authenticated per-token request/write/invocation limits, and concurrency limits. Invalid credentials SHALL return HTTP 401 with an RFC 6750 Bearer challenge, and the product SHALL NOT advertise PAT mode as OAuth discovery or consent support.
 
 #### Scenario: Read-only PAT connects
 - **WHEN** a current-policy PAT has read scope and a valid resource grant
@@ -15,9 +15,9 @@ The system SHALL expose `/api/platform-mcp` in personal-access-token compatibili
 - **WHEN** a Platform PAT is expired or revoked
 - **THEN** the request is rejected before any Studio data or MCP request body is read
 
-#### Scenario: Legacy policy PAT is rejected
-- **WHEN** a token lacks the current policy version or authoritative normalized grants
-- **THEN** the endpoint fails closed as an invalid token and does not infer authority from legacy scope JSON
+#### Scenario: Unknown policy or malformed grants are rejected
+- **WHEN** a token has an unknown policy version, lacks authoritative normalized grants, or has inconsistent grant rows
+- **THEN** the endpoint fails closed as an invalid token and no alternate scope representation is consulted
 
 #### Scenario: Chunked oversized body is bounded
 - **WHEN** an authenticated request streams more bytes than the Platform MCP body limit without a usable content length
@@ -194,4 +194,3 @@ The Platform MCP boundary SHALL validate the Bearer principal and acquire contro
 - **WHEN** an authenticated PAT directly calls a known tool without its static required scope
 - **THEN** the endpoint returns HTTP 403 with `error="insufficient_scope"` and required public scopes
 - **AND** it does not look up the referenced server or resource
-
