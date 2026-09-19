@@ -30,10 +30,20 @@ const MAX_TRANSACTION_ATTEMPTS = 3;
 const RETRYABLE_PG_CODES = new Set(["40001", "40003", "40P01"]);
 const UNIQUE_VIOLATION_CODE = "23505";
 
+/**
+ * Extracts a PostgreSQL SQLSTATE from a driver error or any wrapped cause
+ * (Drizzle wraps `PostgresError` in a `DrizzleQueryError` whose `cause` holds
+ * the original `code`).
+ */
 export function pgErrorCode(error: unknown): string | undefined {
-  if (!error || typeof error !== "object") return undefined;
-  const code = (error as { code?: unknown }).code;
-  return typeof code === "string" ? code : undefined;
+  let current: unknown = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (!current || typeof current !== "object") return undefined;
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === "string") return code;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return undefined;
 }
 
 export function isUniqueViolation(error: unknown): boolean {
