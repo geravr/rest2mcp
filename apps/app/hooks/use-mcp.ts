@@ -192,7 +192,7 @@ export type McpToolGroupSummary = {
 
 export function useMcpTools(
   serverId: string,
-  input: PaginationInput & { group?: string },
+  input: PaginationInput & { group?: string; q?: string },
 ) {
   return useQuery({
     ...api.mcp.tools.queryOptions({ serverId, ...input }),

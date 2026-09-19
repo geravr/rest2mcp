@@ -164,6 +164,7 @@ function ServerDetailPage() {
                   page={page}
                   pageSize={pageSize}
                   group={search.group}
+                  q={search.q}
                   onPageChange={(next) =>
                     void navigate({
                       search: (prev) =>
@@ -188,6 +189,17 @@ function ServerDetailPage() {
                         omitPaginationDefaults({
                           ...prev,
                           group: next,
+                          page: undefined,
+                        }),
+                      replace: true,
+                    })
+                  }
+                  onSearchChange={(next) =>
+                    void navigate({
+                      search: (prev) =>
+                        omitPaginationDefaults({
+                          ...prev,
+                          q: next,
                           page: undefined,
                         }),
                       replace: true,

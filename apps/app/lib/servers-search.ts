@@ -19,4 +19,6 @@ export const serverDetailSearchSchema = listPaginationSearchSchema.extend({
   log: z.string().min(1).optional().catch(undefined),
   /** `"all"` and an absent value are both unfiltered; `"ungrouped"` and a group id filter. */
   group: z.string().min(1).optional().catch(undefined),
+  /** Optional trimmed tool-name search; an absent or blank value is unfiltered. */
+  q: z.string().max(200).optional().catch(undefined),
 });
