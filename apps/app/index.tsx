@@ -1,6 +1,5 @@
 import { PostHogProvider } from "@posthog/react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -39,9 +38,6 @@ const appContent = (
     <PostHogRuntime />
     <RouterProvider router={router} />
     <AppToaster />
-    {import.meta.env.DEV && (
-      <ReactQueryDevtools initialIsOpen={false} buttonPosition="bottom-right" />
-    )}
   </>
 );
 
