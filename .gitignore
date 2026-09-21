@@ -169,3 +169,4 @@ docs/
 # Claude Code local settings (machine-local hooks)
 .claude/settings.local.json
 .qoder/
+.qoder-collab-runtime/
