@@ -132,7 +132,7 @@ export async function seedMcp(db: PostgresJsDatabase<typeof schema>) {
       allowMutation: false,
       enabled: true,
       requestDefinition: {
-        version: 1,
+        version: 2,
         pathSegments: [
           { id: "seed_path_echo", value: { kind: "literal", value: "/echo" } },
         ],
@@ -169,7 +169,7 @@ export async function seedMcp(db: PostgresJsDatabase<typeof schema>) {
       allowMutation: false,
       enabled: true,
       requestDefinition: {
-        version: 1,
+        version: 2,
         pathSegments: [
           {
             id: "seed_path_contacts",
@@ -206,7 +206,7 @@ export async function seedMcp(db: PostgresJsDatabase<typeof schema>) {
       allowMutation: false,
       enabled: true,
       requestDefinition: {
-        version: 1,
+        version: 2,
         pathSegments: [
           {
             id: "seed_path_search",
@@ -247,7 +247,7 @@ export async function seedMcp(db: PostgresJsDatabase<typeof schema>) {
       allowMutation: false,
       enabled: true,
       requestDefinition: {
-        version: 1,
+        version: 2,
         pathSegments: [
           {
             id: "seed_path_tags",
@@ -288,7 +288,7 @@ export async function seedMcp(db: PostgresJsDatabase<typeof schema>) {
       allowMutation: false,
       enabled: true,
       requestDefinition: {
-        version: 1,
+        version: 2,
         pathSegments: [
           {
             id: "seed_path_headers",
@@ -313,7 +313,7 @@ export async function seedMcp(db: PostgresJsDatabase<typeof schema>) {
       allowMutation: false,
       enabled: false,
       sourceProvenance: {
-        version: 1,
+        version: 2,
         batchId: "oai_seed_echo_import",
         openApiVersion: "3.1",
         operationKey: "getEchoHistory",
@@ -325,7 +325,7 @@ export async function seedMcp(db: PostgresJsDatabase<typeof schema>) {
         sourceLabel: "https://echo.example.com/openapi.json",
       },
       requestDefinition: {
-        version: 1,
+        version: 2,
         pathSegments: [
           {
             id: "seed_path_history",
