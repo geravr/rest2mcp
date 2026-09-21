@@ -70,6 +70,7 @@ function renderTab(
         required: boolean;
         sensitive: boolean;
       }>;
+      requestDefinition?: Record<string, unknown> | null;
     }>;
   }>,
 ) {
@@ -204,6 +205,82 @@ describe("ServerPlaygroundTab", () => {
 
     expect(screen.getByText(/mutations are not allowed/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /invoke/i })).toBeDisabled();
+  });
+
+  it("parses array playground arguments as JSON and rejects invalid JSON", async () => {
+    const user = userEvent.setup();
+    invokeMutate.mockImplementation(
+      (
+        _input: unknown,
+        options?: {
+          onSuccess?: (payload: {
+            ok: boolean;
+            httpStatus: number;
+            callLogId: string | null;
+            envelope: { body?: string; data?: unknown };
+          }) => void;
+        },
+      ) => {
+        options?.onSuccess?.({
+          ok: true,
+          httpStatus: 200,
+          callLogId: null,
+          envelope: { body: "ok" },
+        });
+      },
+    );
+
+    renderTab({
+      publishedTools: [
+        {
+          id: "mct_1",
+          name: "get_contact",
+          method: "GET",
+          allowMutation: false,
+          params: [],
+          requestDefinition: {
+            version: 2,
+            pathSegments: [
+              { id: "path_1", value: { kind: "literal", value: "/contacts" } },
+            ],
+            query: [],
+            headers: [],
+            body: { bodyType: "none" },
+            agentInputs: [
+              {
+                id: "ain_tags",
+                name: "tags",
+                required: true,
+                sensitive: false,
+                type: "array",
+                items: { type: "string" },
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    await user.click(screen.getByRole("combobox", { name: /select a tool/i }));
+    await user.click(screen.getByRole("option", { name: "get_contact" }));
+
+    const tags = screen.getByLabelText(/tags/i);
+    await user.click(tags);
+    await user.paste("not-json");
+    await user.click(screen.getByRole("button", { name: /invoke/i }));
+    expect(
+      screen.getByText(/arguments must be valid JSON/i),
+    ).toBeInTheDocument();
+    expect(invokeMutate).not.toHaveBeenCalled();
+
+    await user.clear(tags);
+    await user.click(tags);
+    await user.paste('["red","blue"]');
+    await user.click(screen.getByRole("button", { name: /invoke/i }));
+    expect(invokeMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ args: { tags: ["red", "blue"] } }),
+      expect.anything(),
+    );
   });
 
   it("clears the previous result panel on a new submit", async () => {

@@ -101,6 +101,8 @@ export const esOpenApi = {
     capacityTitle: "Capacidad",
     capacityTools: "{current} de {limit} herramientas en uso",
     capacityGroups: "{current} de {limit} grupos en uso",
+    capacityRemaining:
+      "Quedan {remaining} huecos de herramienta en este servidor.",
     capacityToolExceeded:
       "Importar {selected} herramientas superaría el límite de {limit}. Este servidor ya tiene {current}.",
     capacityGroupExceeded:
@@ -158,6 +160,10 @@ export const esOpenApi = {
         "El documento la marca como obsoleta.",
       [MCP_OPENAPI_ISSUE_CODES.METADATA_IGNORED]:
         "Parte de los metadatos se ignoró.",
+      [MCP_OPENAPI_ISSUE_CODES.COMPOSITION_CONFLICT]:
+        "Su composición de esquemas asigna tipos o restricciones incompatibles.",
+      [MCP_OPENAPI_ISSUE_CODES.REDUCED_VALIDATION]:
+        "El valor JSON se puede enviar tal cual, pero la validación de ramas se reduce.",
     } satisfies Record<McpOpenApiIssueCode, string>,
     issueUnknown: "Esta versión de Studio no reconoce este diagnóstico.",
   },

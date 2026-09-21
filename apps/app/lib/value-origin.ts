@@ -1,4 +1,4 @@
-export type AgentParamType = "string" | "number" | "boolean" | "json";
+export type AgentParamType = "string" | "number" | "boolean" | "json" | "array";
 
 export type AgentInputFormat = "date" | "date-time" | "email" | "uri" | "uuid";
 
@@ -10,12 +10,24 @@ export const AGENT_INPUT_FORMATS: readonly AgentInputFormat[] = [
   "uuid",
 ];
 
+export type AgentInputItems = {
+  type: "string" | "number" | "boolean" | "integer" | "json";
+  minimum?: number;
+  maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+  format?: AgentInputFormat;
+  enum?: Array<string | number | boolean>;
+  allowEmpty?: boolean;
+};
+
 export type AgentMeta = {
   name: string;
   description?: string;
   type: AgentParamType;
   /** Original agent-input type, preserved for `integer` round trips. */
-  inputType?: "string" | "number" | "boolean" | "integer" | "json";
+  inputType?: "string" | "number" | "boolean" | "integer" | "json" | "array";
   required: boolean;
   /** Never logged/previewed; masked as a password field in the playground. */
   sensitive?: boolean;
@@ -29,6 +41,10 @@ export type AgentMeta = {
   enum?: Array<string | number | boolean>;
   examples?: unknown[];
   allowEmpty?: boolean;
+  items?: AgentInputItems;
+  minItems?: number;
+  maxItems?: number;
+  uniqueItems?: boolean;
 };
 
 export type ValueOrigin =
@@ -50,6 +66,8 @@ export type SourceRow = {
   omitWhenAbsent?: boolean;
   /** Declared JSON type for structured body rows. */
   jsonType?: "string" | "number" | "boolean" | "null" | "any";
+  /** Query-only form-array serialization metadata. */
+  serialization?: { style: "form"; explode: boolean };
 } & ValueOrigin;
 
 export type PathPart =
@@ -130,6 +148,10 @@ export type AgentConstraints = Pick<
   | "enum"
   | "examples"
   | "allowEmpty"
+  | "items"
+  | "minItems"
+  | "maxItems"
+  | "uniqueItems"
 >;
 
 /** Comma-separated editor value for `enum`/`examples` lists (kept as strings). */

@@ -186,7 +186,7 @@ describe("client request-definition adapters", () => {
 
   it("round-trips a typed definition preserving ids and order", () => {
     const definition: ClientRequestDefinition = {
-      version: 1,
+      version: 2,
       pathSegments: [
         { id: "path_1", value: { kind: "literal", value: "/contacts/" } },
         {
@@ -266,7 +266,7 @@ describe("client request-definition adapters", () => {
 
   it("loads typed JSON body rows with binding ids intact", () => {
     const definition: ClientRequestDefinition = {
-      version: 1,
+      version: 2,
       pathSegments: [{ id: "path_1", value: { kind: "literal", value: "/" } }],
       query: [],
       headers: [],
@@ -320,7 +320,7 @@ describe("client request-definition adapters", () => {
   it("guards persisted typed definitions", () => {
     expect(
       isClientRequestDefinition({
-        version: 1,
+        version: 2,
         pathSegments: [],
         query: [],
         headers: [],
@@ -350,7 +350,7 @@ describe("client request-definition adapters", () => {
 
   it("round-trips entry ids on reopen and keeps them when reordered", () => {
     const source: ClientRequestDefinition = {
-      version: 1,
+      version: 2,
       pathSegments: [{ id: "path_1", value: { kind: "literal", value: "/" } }],
       query: [
         { id: "query_a", name: "a", value: { kind: "literal", value: "1" } },
@@ -374,7 +374,7 @@ describe("client request-definition adapters", () => {
 
   it("regenerates local ids for a client-side duplicate", () => {
     const source: ClientRequestDefinition = {
-      version: 1,
+      version: 2,
       pathSegments: [{ id: "path_1", value: { kind: "literal", value: "/" } }],
       query: [
         {
@@ -400,7 +400,7 @@ describe("client request-definition adapters", () => {
 
   it("round-trips a shared agent binding by id", () => {
     const source: ClientRequestDefinition = {
-      version: 1,
+      version: 2,
       pathSegments: [{ id: "path_1", value: { kind: "literal", value: "/" } }],
       query: [
         {
@@ -454,7 +454,7 @@ describe("client request-definition adapters", () => {
 
   it("round-trips flat JSON literal types and field ids", () => {
     const source: ClientRequestDefinition = {
-      version: 1,
+      version: 2,
       pathSegments: [{ id: "path_1", value: { kind: "literal", value: "/" } }],
       query: [],
       headers: [],
@@ -519,7 +519,7 @@ describe("client request-definition adapters", () => {
 
   it("maps binding tokens in advanced JSON edits back to bindings", () => {
     const source: ClientRequestDefinition = {
-      version: 1,
+      version: 2,
       pathSegments: [{ id: "path_1", value: { kind: "literal", value: "/" } }],
       query: [],
       headers: [],
@@ -642,7 +642,7 @@ describe("client request-definition adapters", () => {
 
   it("preserves an integer agent input type on save", () => {
     const source: ClientRequestDefinition = {
-      version: 1,
+      version: 2,
       pathSegments: [{ id: "path_1", value: { kind: "literal", value: "/" } }],
       query: [
         {
@@ -710,7 +710,7 @@ describe("client request-definition adapters", () => {
 
   it("round-trips a string agent input format", () => {
     const source: ClientRequestDefinition = {
-      version: 1,
+      version: 2,
       pathSegments: [{ id: "path_1", value: { kind: "literal", value: "/" } }],
       query: [
         {
@@ -766,5 +766,99 @@ describe("client request-definition adapters", () => {
       }),
     );
     expect(rebuilt.agentInputs[0]?.format).toBeUndefined();
+  });
+
+  it("rejects the superseded client request-definition version", () => {
+    expect(
+      isClientRequestDefinition({
+        version: 1,
+        pathSegments: [],
+        query: [],
+        headers: [],
+        agentInputs: [],
+        body: { bodyType: "none" },
+      }),
+    ).toBe(false);
+  });
+
+  it("round-trips array agent inputs, item constraints, and query serialization", () => {
+    const source: ClientRequestDefinition = {
+      version: 2,
+      pathSegments: [{ id: "path_1", value: { kind: "literal", value: "/" } }],
+      query: [
+        {
+          id: "query_1",
+          name: "tags",
+          value: { kind: "agentInput", agentInputId: "ain_1" },
+          omitWhenAbsent: true,
+          serialization: { style: "form", explode: false },
+        },
+      ],
+      headers: [],
+      body: { bodyType: "none" },
+      agentInputs: [
+        {
+          id: "ain_1",
+          name: "tags",
+          description: "Filter tags",
+          required: false,
+          sensitive: false,
+          type: "array",
+          items: { type: "string", minLength: 1 },
+          minItems: 1,
+          maxItems: 8,
+          uniqueItems: true,
+        },
+      ],
+    };
+    const rows = definitionToSourceRows(
+      source.query,
+      lookup,
+      definitionAgentInputs(source),
+    );
+    expect(rows[0]).toMatchObject({
+      origin: "agent",
+      type: "array",
+      serialization: { style: "form", explode: false },
+      minItems: 1,
+      maxItems: 8,
+      uniqueItems: true,
+    });
+    const rebuilt = formStateToDefinition(baseInput({ query: rows }));
+    expect(rebuilt.query[0]?.id).toBe("query_1");
+    expect(rebuilt.query[0]?.serialization).toEqual({
+      style: "form",
+      explode: false,
+    });
+    expect(rebuilt.agentInputs[0]).toMatchObject({
+      id: "ain_1",
+      type: "array",
+      items: { type: "string", minLength: 1 },
+      minItems: 1,
+      maxItems: 8,
+      uniqueItems: true,
+    });
+  });
+
+  it("defaults query array serialization to form explode true", () => {
+    const rebuilt = formStateToDefinition(
+      baseInput({
+        query: [
+          {
+            key: "tags",
+            origin: "agent",
+            id: "ain_1",
+            name: "tags",
+            type: "array",
+            items: { type: "string" },
+            required: true,
+          },
+        ],
+      }),
+    );
+    expect(rebuilt.query[0]?.serialization).toEqual({
+      style: "form",
+      explode: true,
+    });
   });
 });

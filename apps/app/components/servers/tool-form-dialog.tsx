@@ -107,6 +107,10 @@ function pickAgentMeta(source: AgentMeta): AgentMeta {
     enum: source.enum,
     examples: source.examples,
     allowEmpty: source.allowEmpty,
+    items: source.items,
+    minItems: source.minItems,
+    maxItems: source.maxItems,
+    uniqueItems: source.uniqueItems,
   };
 }
 
@@ -176,7 +180,11 @@ type CompiledPlanPreview = {
     idempotentHint?: boolean;
   };
   headers: Array<{ name: string; source: PreviewBinding }>;
-  query: Array<{ name: string; source: PreviewBinding }>;
+  query: Array<{
+    name: string;
+    source: PreviewBinding;
+    serialization?: { style: "form"; explode: boolean };
+  }>;
   agentInputs: Array<{ id: string; name: string }>;
 };
 
@@ -1400,6 +1408,14 @@ export function ToolFormDialogForm({
                                           entry.source,
                                           bindingCtx,
                                         )}
+                                        {entry.serialization
+                                          ? ` (${
+                                              entry.serialization.explode
+                                                ? t.servers.previewQueryRepeated
+                                                : t.servers
+                                                    .previewQueryDelimited
+                                            })`
+                                          : ""}
                                       </li>
                                     ))}
                                   </ul>

@@ -16,7 +16,7 @@ const detailFixture = {
   isActive: true,
   createdAt: "2026-09-12T10:00:00.000Z",
   schemaVersion: 1,
-  compilerVersion: "1",
+  compilerVersion: "2",
   server: {
     name: "CRM",
     description: null,

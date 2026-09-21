@@ -60,7 +60,7 @@ const toolFixture: ToolFormTool = {
   description: null,
   method: "GET",
   requestDefinition: {
-    version: 1,
+    version: 2,
     pathSegments: [
       { id: "path_1", value: { kind: "literal", value: "/contacts" } },
     ],
@@ -318,7 +318,7 @@ describe("ToolFormDialog", () => {
         tool={{
           ...toolFixture,
           requestDefinition: {
-            version: 1,
+            version: 2,
             pathSegments: [
               { id: "path_1", value: { kind: "literal", value: "/contacts" } },
             ],
@@ -363,7 +363,7 @@ describe("ToolFormDialog", () => {
         tool={{
           ...toolFixture,
           requestDefinition: {
-            version: 1,
+            version: 2,
             pathSegments: [
               { id: "path_1", value: { kind: "literal", value: "/contacts" } },
             ],
@@ -406,7 +406,7 @@ describe("ToolFormDialog", () => {
         tool={{
           ...toolFixture,
           requestDefinition: {
-            version: 1,
+            version: 2,
             pathSegments: [
               { id: "path_1", value: { kind: "literal", value: "/contacts" } },
             ],
@@ -513,7 +513,7 @@ describe("ToolFormDialog", () => {
         tool={{
           ...toolFixture,
           requestDefinition: {
-            version: 1,
+            version: 2,
             pathSegments: [
               { id: "path_1", value: { kind: "literal", value: "/contacts" } },
             ],
@@ -617,7 +617,7 @@ describe("ToolFormDialog", () => {
     const typedTool: ToolFormTool = {
       ...toolFixture,
       requestDefinition: {
-        version: 1,
+        version: 2,
         pathSegments: [
           { id: "path_1", value: { kind: "literal", value: "/contacts" } },
           {
@@ -725,6 +725,42 @@ describe("ToolFormDialog", () => {
 
     expect(screen.getByText(/•••• \(secret value\)/i)).toBeInTheDocument();
     expect(screen.queryByText(/super-secret/i)).not.toBeInTheDocument();
+  });
+
+  it("shows repeated versus delimited query array serialization in the preview", async () => {
+    const user = userEvent.setup();
+    const queryPlan = (explode: boolean) => ({
+      annotations: { readOnlyHint: true },
+      headers: [],
+      query: [
+        {
+          name: "tags",
+          source: { kind: "agentInput", agentInputId: "ain_tags" },
+          serialization: { style: "form", explode },
+        },
+      ],
+      agentInputs: [{ id: "ain_tags", name: "tags" }],
+    });
+    previewResultQueue = [
+      { ok: true, issues: [], plan: queryPlan(true) },
+      { ok: true, issues: [], plan: queryPlan(false) },
+    ];
+
+    render(
+      <ToolFormDialog serverId="mcs_1" variableNames={[]} onClose={() => {}} />,
+    );
+
+    await user.type(screen.getByLabelText(/tool name/i), "list_tags");
+    await user.type(screen.getByLabelText(/^path$/i), "/tags");
+    await user.click(
+      screen.getByRole("button", { name: /effective request preview/i }),
+    );
+    await user.click(screen.getByRole("button", { name: /^preview$/i }));
+    expect(screen.getByText(/repeated keys/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^preview$/i }));
+    expect(screen.getByText(/comma-delimited/i)).toBeInTheDocument();
+    expect(screen.queryByText(/repeated keys/i)).not.toBeInTheDocument();
   });
 
   it("sends the tool title on save and in preview", async () => {
@@ -922,7 +958,7 @@ describe("ToolFormDialog", () => {
           title: "Get contact",
           description: "Fetch a contact by id.",
           method: "GET",
-          contractVersion: 1,
+          contractVersion: 2,
           inputSchema: {
             type: "object",
             additionalProperties: false,
@@ -943,7 +979,7 @@ describe("ToolFormDialog", () => {
             openWorldHint: true,
           },
           metadata: {
-            "io.rest2mcp/contract": { version: 1, fingerprint: "sha256:abc" },
+            "io.rest2mcp/contract": { version: 2, fingerprint: "sha256:abc" },
           },
           fingerprint: "sha256:abc",
         },

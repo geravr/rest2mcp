@@ -11,6 +11,8 @@ import {
   isHttpsDocumentUrl,
   planFirstTagGroups,
   projectOpenApiCapacity,
+  nextOpenApiSelection,
+  selectOpenApiKeysUpToCapacity,
   readOpenApiDocumentFile,
   resolveOpenApiIssueDescription,
   splitOpenApiIssues,
@@ -245,6 +247,11 @@ export function OpenApiImportDialog({
       : strategyKind === "firstTag"
         ? firstTagPlan.creationCount
         : 0;
+  const remainingSlots = preview
+    ? Math.max(preview.capacity.toolLimit - preview.capacity.currentTools, 0)
+    : 0;
+  const atToolCapacity = selectedKeys.length >= remainingSlots;
+
   const capacity = preview
     ? projectOpenApiCapacity({
         capacity: preview.capacity,
@@ -340,11 +347,7 @@ export function OpenApiImportDialog({
 
   const toggleSelection = (operationKey: string, selected: boolean) => {
     setSelectedKeys((keys) =>
-      selected
-        ? keys.includes(operationKey)
-          ? keys
-          : [...keys, operationKey]
-        : keys.filter((key) => key !== operationKey),
+      nextOpenApiSelection(keys, operationKey, selected, remainingSlots),
     );
   };
 
@@ -358,9 +361,12 @@ export function OpenApiImportDialog({
 
   const selectAll = () => {
     setSelectedKeys(
-      operations
-        .filter((operation) => operation.selectable)
-        .map((operation) => operation.operationKey),
+      selectOpenApiKeysUpToCapacity(
+        operations
+          .filter((operation) => operation.selectable)
+          .map((operation) => operation.operationKey),
+        remainingSlots,
+      ),
     );
   };
 
@@ -614,6 +620,12 @@ export function OpenApiImportDialog({
                       .replace("{current}", String(capacity.currentGroups))
                       .replace("{limit}", String(capacity.groupLimit))}
                   </p>
+                  <p className="text-xs text-muted-foreground">
+                    {copy.capacityRemaining.replace(
+                      "{remaining}",
+                      String(capacity.remainingTools),
+                    )}
+                  </p>
                   {capacity.toolsExceeded ? (
                     <p className="text-xs text-destructive">
                       {copy.capacityToolExceeded
@@ -725,7 +737,10 @@ export function OpenApiImportDialog({
                                   type="checkbox"
                                   className="h-4 w-4 accent-primary"
                                   checked={isSelected}
-                                  disabled={!operation.selectable}
+                                  disabled={
+                                    !operation.selectable ||
+                                    (!isSelected && atToolCapacity)
+                                  }
                                   aria-label={`${operation.method} ${operation.path}`}
                                   onChange={(event) =>
                                     toggleSelection(

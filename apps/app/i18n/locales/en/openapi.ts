@@ -100,6 +100,7 @@ export const enOpenApi = {
     capacityTitle: "Capacity",
     capacityTools: "{current} of {limit} tools used",
     capacityGroups: "{current} of {limit} groups used",
+    capacityRemaining: "{remaining} tool slots remain on this server.",
     capacityToolExceeded:
       "Importing {selected} tools would exceed the {limit}-tool limit. This server already has {current}.",
     capacityGroupExceeded:
@@ -158,6 +159,10 @@ export const enOpenApi = {
         "A tool with this name already exists on the server.",
       [MCP_OPENAPI_ISSUE_CODES.DEPRECATED]: "The document marks it deprecated.",
       [MCP_OPENAPI_ISSUE_CODES.METADATA_IGNORED]: "Some metadata was ignored.",
+      [MCP_OPENAPI_ISSUE_CODES.COMPOSITION_CONFLICT]:
+        "Its schema composition assigns conflicting types or constraints.",
+      [MCP_OPENAPI_ISSUE_CODES.REDUCED_VALIDATION]:
+        "The JSON value can be sent as-is, but branch validation is reduced.",
     } satisfies Record<McpOpenApiIssueCode, string>,
     issueUnknown: "This Studio version does not recognize this diagnostic.",
   },

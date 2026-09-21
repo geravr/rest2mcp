@@ -94,7 +94,7 @@ describe("DeleteVariableDialog", () => {
           {
             name: "get_contact",
             requestDefinition: {
-              version: 1,
+              version: 2,
               headers: [
                 {
                   id: "h1",
@@ -138,7 +138,7 @@ describe("DeleteVariableDialog", () => {
           {
             name: "get_contact",
             requestDefinition: {
-              version: 1,
+              version: 2,
               headers: [
                 {
                   id: "h1",
@@ -169,7 +169,7 @@ describe("DeleteVariableDialog", () => {
           {
             name: "get_contact",
             requestDefinition: {
-              version: 1,
+              version: 2,
               headers: [
                 {
                   id: "h1",

@@ -174,3 +174,40 @@ describe("SourceRowEditor agent input format", () => {
     expect(screen.queryByLabelText(/input format/i)).not.toBeInTheDocument();
   });
 });
+
+describe("SourceRowEditor array constraints", () => {
+  it("authors item type, collection bounds, and uniqueItems", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness
+        initial={[
+          {
+            key: "tags",
+            origin: "agent",
+            name: "tags",
+            description: "",
+            type: "array",
+            required: true,
+            items: { type: "string" },
+          },
+        ]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /constraints/i }));
+    expect(screen.getByLabelText(/^item type$/i)).toHaveTextContent("Text");
+    await user.click(screen.getByLabelText(/^item type$/i));
+    await user.click(screen.getByRole("option", { name: /^integer$/i }));
+    expect(screen.getByLabelText(/^item type$/i)).toHaveTextContent("Integer");
+
+    await user.type(screen.getByLabelText(/^min items$/i), "1");
+    await user.type(screen.getByLabelText(/^max items$/i), "8");
+    expect(screen.getByLabelText(/^min items$/i)).toHaveValue(1);
+    expect(screen.getByLabelText(/^max items$/i)).toHaveValue(8);
+
+    const unique = screen.getByLabelText(/^unique items$/i);
+    expect(unique).not.toBeChecked();
+    await user.click(unique);
+    expect(unique).toBeChecked();
+  });
+});

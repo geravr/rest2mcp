@@ -9,6 +9,8 @@ import {
   isHttpsDocumentUrl,
   planFirstTagGroups,
   projectOpenApiCapacity,
+  nextOpenApiSelection,
+  selectOpenApiKeysUpToCapacity,
   readOpenApiDocumentFile,
   resolveOpenApiIssueDescription,
   splitOpenApiIssues,
@@ -794,16 +796,75 @@ describe("OpenApiImportDialog curation", () => {
 
     await selectOperation(user, "GET /contacts");
     expect(screen.getByRole("button", { name: "Import 1 tool" })).toBeEnabled();
-
-    await selectOperation(user, "GET /invoices");
     expect(
-      screen.getByText(
-        "Importing 2 tools would exceed the 50-tool limit. This server already has 49.",
-      ),
+      screen.getByText("1 tool slots remain on this server."),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Import 2 tools" }),
+      screen.getByRole("checkbox", { name: "GET /invoices" }),
     ).toBeDisabled();
+
+    await selectOperation(user, "GET /invoices");
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Import 1 tool" })).toBeEnabled();
+    expect(
+      screen.queryByText(
+        "Importing 2 tools would exceed the 50-tool limit. This server already has 49.",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("selects at most remaining capacity and shows remaining slots", async () => {
+    const user = userEvent.setup();
+    mocks.preview = preview(
+      [
+        contactsOperation,
+        invoicesOperation,
+        operation({
+          operationKey: "listNotes",
+          method: "GET",
+          path: "/notes",
+          suggestedName: "list_notes",
+        }),
+        operation({
+          operationKey: "listTasks",
+          method: "GET",
+          path: "/tasks",
+          suggestedName: "list_tasks",
+        }),
+      ],
+      {
+        capacity: {
+          toolLimit: 80,
+          currentTools: 78,
+          groupLimit: 50,
+          currentGroups: 0,
+        },
+      },
+    );
+    renderDialog();
+    await previewPaste(user);
+
+    expect(
+      screen.getByText("2 tool slots remain on this server."),
+    ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "Select all importable" }),
+    );
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Import 2 tools" }),
+    ).toBeEnabled();
+    expect(screen.getByRole("checkbox", { name: "GET /notes" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "GET /tasks" })).toBeDisabled();
+
+    await selectOperation(user, "GET /notes");
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
+
+    await selectOperation(user, "GET /contacts");
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+    await selectOperation(user, "GET /tasks");
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
   });
 });
 
@@ -1132,9 +1193,19 @@ describe("openapi-import helpers", () => {
     });
   });
 
+  it("caps select-all and new selections at remaining capacity without dropping existing keys", () => {
+    expect(selectOpenApiKeysUpToCapacity(["a", "b", "c", "d"], 2)).toEqual([
+      "a",
+      "b",
+    ]);
+    expect(nextOpenApiSelection(["a", "b"], "c", true, 2)).toEqual(["a", "b"]);
+    expect(nextOpenApiSelection(["a", "b"], "b", false, 2)).toEqual(["a"]);
+    expect(nextOpenApiSelection(["a"], "c", true, 2)).toEqual(["a", "c"]);
+  });
+
   it("resolves every issue code through the active locale module", () => {
     const codes = Object.values(MCP_OPENAPI_ISSUE_CODES);
-    expect(codes).toHaveLength(16);
+    expect(codes).toHaveLength(18);
     for (const code of codes) {
       const english = resolveOpenApiIssueDescription(
         enOpenApi.issueDescriptions,

@@ -355,6 +355,33 @@ export function projectOpenApiCapacity(input: {
   };
 }
 
+/** Selectable operation keys that fit in remaining server tool capacity. */
+export function selectOpenApiKeysUpToCapacity(
+  selectableKeys: readonly string[],
+  remainingCapacity: number,
+): string[] {
+  return selectableKeys.slice(0, Math.max(remainingCapacity, 0));
+}
+
+/**
+ * Adds `operationKey` when capacity remains. Deselection always succeeds.
+ * Existing selected keys that no longer fit are not silently dropped here so
+ * the owner can deselect and reselect.
+ */
+export function nextOpenApiSelection(
+  selectedKeys: readonly string[],
+  operationKey: string,
+  selected: boolean,
+  remainingCapacity: number,
+): string[] {
+  if (!selected) {
+    return selectedKeys.filter((key) => key !== operationKey);
+  }
+  if (selectedKeys.includes(operationKey)) return [...selectedKeys];
+  if (selectedKeys.length >= remainingCapacity) return [...selectedKeys];
+  return [...selectedKeys, operationKey];
+}
+
 export type OpenApiRequestSummary = {
   pathParameters: number;
   queryParameters: number;

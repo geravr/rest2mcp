@@ -27,7 +27,13 @@ import {
 import { ChevronDown, ChevronRight, Plus, X } from "lucide-react";
 import { useState } from "react";
 
-const PARAM_TYPES: AgentParamType[] = ["string", "number", "boolean", "json"];
+const PARAM_TYPES: AgentParamType[] = [
+  "string",
+  "number",
+  "boolean",
+  "json",
+  "array",
+];
 
 export type SourceOriginMode = "tool" | "defaults";
 
@@ -204,6 +210,92 @@ function AgentConstraintsFields({
                 })
               }
             />
+          </Field>
+        </>
+      ) : null}
+      {type === "array" ? (
+        <>
+          <Field>
+            <Label className="text-xs">{t.servers.paramItemType}</Label>
+            <Select
+              value={constraints.items?.type ?? "string"}
+              disabled={disabled}
+              onValueChange={(next) =>
+                onChange({
+                  items: {
+                    ...(constraints.items ?? { type: "string" }),
+                    type: next as NonNullable<
+                      AgentConstraints["items"]
+                    >["type"],
+                  },
+                })
+              }
+            >
+              <SelectTrigger
+                className="w-full"
+                aria-label={t.servers.paramItemType}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(
+                  ["string", "number", "integer", "boolean", "json"] as const
+                ).map((item) => (
+                  <SelectItem key={item} value={item}>
+                    {t.servers.paramTypes[item]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field>
+            <Label className="text-xs">{t.servers.paramMinItems}</Label>
+            <Input
+              type="number"
+              min={0}
+              value={constraints.minItems ?? ""}
+              disabled={disabled}
+              aria-label={t.servers.paramMinItems}
+              onChange={(event) =>
+                onChange({
+                  minItems:
+                    event.target.value === ""
+                      ? undefined
+                      : Number(event.target.value),
+                })
+              }
+            />
+          </Field>
+          <Field>
+            <Label className="text-xs">{t.servers.paramMaxItems}</Label>
+            <Input
+              type="number"
+              min={0}
+              value={constraints.maxItems ?? ""}
+              disabled={disabled}
+              aria-label={t.servers.paramMaxItems}
+              onChange={(event) =>
+                onChange({
+                  maxItems:
+                    event.target.value === ""
+                      ? undefined
+                      : Number(event.target.value),
+                })
+              }
+            />
+          </Field>
+          <Field>
+            <Label className="text-xs">{t.servers.paramUniqueItems}</Label>
+            <div className="flex h-10 items-center">
+              <Switch
+                checked={constraints.uniqueItems === true}
+                disabled={disabled}
+                aria-label={t.servers.paramUniqueItems}
+                onCheckedChange={(checked) =>
+                  onChange({ uniqueItems: checked ? true : undefined })
+                }
+              />
+            </div>
           </Field>
         </>
       ) : null}
@@ -581,6 +673,14 @@ export function SourceRowEditor({
                   type: nextType,
                   inputType: undefined,
                   ...(nextType === "string" ? {} : { format: undefined }),
+                  ...(nextType === "array"
+                    ? { items: row.items ?? { type: "string" } }
+                    : {
+                        items: undefined,
+                        minItems: undefined,
+                        maxItems: undefined,
+                        uniqueItems: undefined,
+                      }),
                 })
               }
               format={row.format}
@@ -656,6 +756,14 @@ export function AgentLeftoverFields({
             update(param.name, {
               type,
               ...(type === "string" ? {} : { format: undefined }),
+              ...(type === "array"
+                ? { items: param.items ?? { type: "string" } }
+                : {
+                    items: undefined,
+                    minItems: undefined,
+                    maxItems: undefined,
+                    uniqueItems: undefined,
+                  }),
             })
           }
           format={param.format}

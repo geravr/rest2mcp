@@ -172,7 +172,7 @@ export function ServerPlaygroundTab({
         } else {
           args[param.name] = parsed;
         }
-      } else if (param.type === "json") {
+      } else if (param.type === "json" || param.type === "array") {
         try {
           args[param.name] = JSON.parse(String(raw));
         } catch {
@@ -369,7 +369,7 @@ export function ServerPlaygroundTab({
                   onCheckedChange={(checked) => setValue(param.name, checked)}
                 />
               </div>
-            ) : param.type === "json" ? (
+            ) : param.type === "json" || param.type === "array" ? (
               <Textarea
                 id={`play-param-${param.name}`}
                 value={typeof raw === "string" ? raw : ""}

@@ -14,7 +14,7 @@ import type {
 } from "./value-origin";
 import { PLACEHOLDER_PATTERN } from "./value-origin";
 
-export const REQUEST_DEFINITION_VERSION = 1 as const;
+export const REQUEST_DEFINITION_VERSION = 2 as const;
 
 export type ClientBinding =
   | { kind: "literal"; value: string | number | boolean | null }
@@ -31,6 +31,7 @@ export type ClientNamedEntry = {
   name: string;
   value: ClientBinding;
   omitWhenAbsent?: boolean;
+  serialization?: { style: "form"; explode: boolean };
 };
 
 export type ClientJsonNode =
@@ -57,7 +58,19 @@ export type ClientJsonNode =
   | { kind: "array"; items: ClientJsonNode[] };
 
 export type ClientAgentInputType =
-  "string" | "number" | "boolean" | "integer" | "json";
+  "string" | "number" | "boolean" | "integer" | "json" | "array";
+
+export type ClientAgentInputItems = {
+  type: "string" | "number" | "boolean" | "integer" | "json";
+  minimum?: number;
+  maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+  format?: AgentInputFormat;
+  enum?: Array<string | number | boolean>;
+  allowEmpty?: boolean;
+};
 
 export type ClientAgentInput = {
   id: string;
@@ -75,6 +88,10 @@ export type ClientAgentInput = {
   enum?: Array<string | number | boolean>;
   examples?: unknown[];
   allowEmpty?: boolean;
+  items?: ClientAgentInputItems;
+  minItems?: number;
+  maxItems?: number;
+  uniqueItems?: boolean;
 };
 
 export type ClientBodyDefinition =
@@ -186,6 +203,12 @@ export function agentMetaToInput(
     ...(meta.enum !== undefined ? { enum: meta.enum } : {}),
     ...(meta.examples !== undefined ? { examples: meta.examples } : {}),
     ...(meta.allowEmpty !== undefined ? { allowEmpty: meta.allowEmpty } : {}),
+    ...(meta.items !== undefined ? { items: meta.items } : {}),
+    ...(meta.minItems !== undefined ? { minItems: meta.minItems } : {}),
+    ...(meta.maxItems !== undefined ? { maxItems: meta.maxItems } : {}),
+    ...(meta.uniqueItems !== undefined
+      ? { uniqueItems: meta.uniqueItems }
+      : {}),
   };
 }
 
@@ -206,6 +229,10 @@ export function inputToAgentMeta(input: ClientAgentInput): AgentMeta {
     enum: input.enum,
     examples: input.examples,
     allowEmpty: input.allowEmpty,
+    items: input.items,
+    minItems: input.minItems,
+    maxItems: input.maxItems,
+    uniqueItems: input.uniqueItems,
   };
 }
 
@@ -332,6 +359,7 @@ export function definitionToSourceRows(
     ),
     nodeId: entry.id,
     ...(entry.omitWhenAbsent ? { omitWhenAbsent: true } : {}),
+    ...(entry.serialization ? { serialization: entry.serialization } : {}),
   }));
 }
 
@@ -707,6 +735,10 @@ function metaOf(input: {
   enum?: Array<string | number | boolean>;
   examples?: unknown[];
   allowEmpty?: boolean;
+  items?: AgentMeta["items"];
+  minItems?: number;
+  maxItems?: number;
+  uniqueItems?: boolean;
 }): AgentMeta {
   return {
     name: input.name,
@@ -724,6 +756,10 @@ function metaOf(input: {
     enum: input.enum,
     examples: input.examples,
     allowEmpty: input.allowEmpty,
+    items: input.items,
+    minItems: input.minItems,
+    maxItems: input.maxItems,
+    uniqueItems: input.uniqueItems,
   };
 }
 
@@ -1025,23 +1061,38 @@ export function formStateToDefinition(
           : sourceToBinding(partToSource(part), ctx),
     }));
 
-  const buildEntries = (rows: SourceRow[]): ClientNamedEntry[] =>
+  const buildEntries = (
+    rows: SourceRow[],
+    allowQuerySerialization = false,
+  ): ClientNamedEntry[] =>
     rows
       .filter((row) => row.key.trim().length > 0)
-      .map((row) => ({
-        id:
-          input.reuseNodeIds === false
-            ? createDefinitionId("entry")
-            : (row.nodeId ??
-              input.resolveNodeId?.(row, "entry") ??
-              createDefinitionId("entry")),
-        name: row.key.trim(),
-        value:
-          row.origin === "fixed"
-            ? ({ kind: "literal", value: row.value } as const)
-            : sourceToBinding(rowToSource(row), ctx),
-        ...(row.omitWhenAbsent ? { omitWhenAbsent: true } : {}),
-      }));
+      .map((row) => {
+        const isArrayAgent =
+          allowQuerySerialization &&
+          row.origin === "agent" &&
+          (row.type === "array" || row.inputType === "array");
+        const serialization = row.serialization
+          ? row.serialization
+          : isArrayAgent
+            ? { style: "form" as const, explode: true }
+            : undefined;
+        return {
+          id:
+            input.reuseNodeIds === false
+              ? createDefinitionId("entry")
+              : (row.nodeId ??
+                input.resolveNodeId?.(row, "entry") ??
+                createDefinitionId("entry")),
+          name: row.key.trim(),
+          value:
+            row.origin === "fixed"
+              ? ({ kind: "literal", value: row.value } as const)
+              : sourceToBinding(rowToSource(row), ctx),
+          ...(row.omitWhenAbsent ? { omitWhenAbsent: true } : {}),
+          ...(serialization ? { serialization } : {}),
+        };
+      });
 
   const agentNames = input.agentNames ?? new Set<string>();
   const serverValueIds = new Set(Object.values(ctx.serverValueIdByName));
@@ -1175,7 +1226,7 @@ export function formStateToDefinition(
   return {
     version: REQUEST_DEFINITION_VERSION,
     pathSegments,
-    query: buildEntries(input.query),
+    query: buildEntries(input.query, true),
     headers: buildEntries(input.headers),
     body,
     agentInputs: [...ctx.agentInputs.values()],
