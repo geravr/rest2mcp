@@ -132,6 +132,35 @@ export const APP_ERROR_CODES = {
   /** A PAT stores a policy version this build cannot evaluate. */
   MCP_POLICY_VERSION_UNSUPPORTED: "MCP_POLICY_VERSION_UNSUPPORTED",
 
+  /** The provider kind is not in the supported registry; no outbound call was made. */
+  AI_PROVIDER_UNSUPPORTED: "AI_PROVIDER_UNSUPPORTED",
+  /** The addressed AI provider connection does not exist for the calling owner. */
+  AI_CONNECTION_NOT_FOUND: "AI_CONNECTION_NOT_FOUND",
+  /** Stale `expectedConfigRevision` or `expectedCredentialRevision` on a connection mutation. */
+  AI_CONNECTION_REVISION_CONFLICT: "AI_CONNECTION_REVISION_CONFLICT",
+  /** The provider rejected the credential as unauthorized; nothing was persisted. */
+  AI_PROVIDER_CREDENTIAL_INVALID: "AI_PROVIDER_CREDENTIAL_INVALID",
+  /** The provider rejected the request for a reason other than authentication. Retrying the same call will not succeed. */
+  AI_PROVIDER_REQUEST_REJECTED: "AI_PROVIDER_REQUEST_REJECTED",
+  /** A provider call failed transiently (rate limit, outage); retry may succeed. */
+  AI_PROVIDER_TRANSIENT_FAILURE: "AI_PROVIDER_TRANSIENT_FAILURE",
+  /** A provider call exceeded its operation deadline. */
+  AI_PROVIDER_TIMEOUT: "AI_PROVIDER_TIMEOUT",
+  /** A provider redirect left the registered approved origins; the credential was not forwarded. */
+  AI_PROVIDER_REDIRECT_BLOCKED: "AI_PROVIDER_REDIRECT_BLOCKED",
+  /** A provider response exceeded the bounded response-size limit. */
+  AI_PROVIDER_RESPONSE_TOO_LARGE: "AI_PROVIDER_RESPONSE_TOO_LARGE",
+  /** Live model discovery failed and no same-revision cached snapshot could be served. */
+  AI_DISCOVERY_UNAVAILABLE: "AI_DISCOVERY_UNAVAILABLE",
+  /** The model is not selectable for the requested capability profile. */
+  AI_MODEL_NOT_SELECTABLE: "AI_MODEL_NOT_SELECTABLE",
+  /** The bounded structured-output smoke test did not produce schema-conforming output. */
+  AI_MODEL_VERIFICATION_FAILED: "AI_MODEL_VERIFICATION_FAILED",
+  /** No current verified selection satisfies the requested capability profile. */
+  AI_FEATURE_NOT_READY: "AI_FEATURE_NOT_READY",
+  /** AI credential key material is unavailable or cannot open the stored envelope. */
+  AI_CREDENTIAL_UNAVAILABLE: "AI_CREDENTIAL_UNAVAILABLE",
+
   ROUTE_NOT_FOUND: "ROUTE_NOT_FOUND",
   INTERNAL_ERROR: "INTERNAL_ERROR",
 } as const;
@@ -189,6 +218,14 @@ export type AppErrorDetails = {
   limit?: number;
   /** Observed count at the time of a capacity failure. */
   observed?: number;
+  /** AI provider kind involved in the failure, when known. */
+  providerKind?: string;
+  /** Capability profile involved in an AI readiness or qualification failure. */
+  capabilityProfile?: string;
+  /** Public model ID involved in an AI failure, when known. */
+  modelId?: string;
+  /** Why a catalog entry does not satisfy a capability profile. */
+  unsupportedReason?: string;
 };
 
 const appErrorCodeValues = Object.values(APP_ERROR_CODES);

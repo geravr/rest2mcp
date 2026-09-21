@@ -9,6 +9,49 @@ export {
 } from "./src/error-codes.js";
 export type { AppErrorCode, AppErrorDetails } from "./src/error-codes.js";
 
+// AI provider foundation
+export {
+  AI_CAPABILITY_PROFILES,
+  AI_CATALOG_BOUNDS,
+  AI_MODALITIES,
+  AI_MODEL_PROTOCOLS,
+  AI_PROVIDER_CLASSES,
+  AI_PROVIDER_KINDS,
+  AI_SELECTION_STALE_REASONS,
+  AI_UNSUPPORTED_REASONS,
+  aiCapabilityProfileIdSchema,
+  aiCatalogEntrySchema,
+  aiCatalogSnapshotSchema,
+  aiConnectionProjectionSchema,
+  aiModalitySchema,
+  aiModelDescriptorSchema,
+  aiModelProtocolSchema,
+  aiModelQualificationSchema,
+  aiModelRouteSchema,
+  aiProviderKindSchema,
+  aiReadinessSchema,
+  aiSelectionProjectionSchema,
+  aiUnsupportedReasonSchema,
+  compareAiCatalogEntries,
+} from "./src/ai-providers.js";
+export type {
+  AiCapabilityProfileId,
+  AiCatalogEntry,
+  AiCatalogSnapshot,
+  AiConnectionProjection,
+  AiModelDescriptor,
+  AiModelProtocol,
+  AiModelQualification,
+  AiModelRoute,
+  AiModality,
+  AiProviderClass,
+  AiProviderKind,
+  AiReadiness,
+  AiSelectionProjection,
+  AiSelectionStaleReason,
+  AiUnsupportedReason,
+} from "./src/ai-providers.js";
+
 // Platform MCP authorization policy
 export {
   canonicalPlatformGrant,
