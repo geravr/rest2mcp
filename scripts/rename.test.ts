@@ -46,6 +46,6 @@ describe("rename utility", () => {
       false,
     );
     expect(relativePaths).toContain(".env.example");
-    expect(relativePaths).toContain("apps/api/lib/env.ts");
+    expect(relativePaths).toContain("apps/api/lib/env-schema.ts");
   });
 });
