@@ -23,7 +23,7 @@ function makeDefinition(
   overrides: Partial<McpRequestDefinition> = {},
 ): McpRequestDefinition {
   return {
-    version: 1,
+    version: 2,
     pathSegments: [{ id: "seg0", value: { kind: "literal", value: "/items" } }],
     query: inputs.map((input, index) => ({
       id: `query_${index}`,
@@ -86,7 +86,7 @@ describe("compileAgentToolContract", () => {
     const result = compile([input({})]);
     expect(result.ok).toBe(true);
     const contract = result.contract!;
-    expect(contract.contractVersion).toBe(1);
+    expect(contract.contractVersion).toBe(2);
     expect(contract.fingerprint).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(contract.metadata[MCP_CONTRACT_META_KEY].fingerprint).toBe(
       contract.fingerprint,
@@ -293,5 +293,112 @@ describe("compileAgentToolContract", () => {
     const contract = result.contract!;
     expect(contract.inputValidator.safeParse({}).success).toBe(true);
     expect(contract.inputValidator.safeParse({ extra: 1 }).success).toBe(false);
+  });
+
+  it("advertises array item types, bounds, and uniqueItems in the contract", () => {
+    const tags: McpAgentInput = {
+      id: "ain_tags",
+      name: "tags",
+      description: "Filter tags the agent supplies.",
+      required: true,
+      sensitive: false,
+      type: "array",
+      items: { type: "string", minLength: 1, maxLength: 32 },
+      minItems: 1,
+      maxItems: 8,
+      uniqueItems: true,
+    };
+    const result = compileAgentToolContract({
+      name: "search",
+      title: "Search items",
+      description: "Search upstream items by query.",
+      method: "GET",
+      plan: assertCompileSuccess(
+        compileToolDefinition({
+          method: "GET",
+          definition: {
+            version: 2,
+            pathSegments: [
+              { id: "seg0", value: { kind: "literal", value: "/items" } },
+            ],
+            query: [
+              {
+                id: "query_0",
+                name: "tags",
+                value: { kind: "agentInput", agentInputId: "ain_tags" },
+                serialization: { style: "form", explode: true },
+              },
+            ],
+            headers: [],
+            body: { bodyType: "none" },
+            agentInputs: [tags],
+          },
+          common: { headers: [], query: [] },
+          auth: null,
+          serverValues: [],
+          basePath: "/v1",
+          allowMutation: false,
+        }),
+      ),
+    });
+    expect(result.ok).toBe(true);
+    const contract = result.contract!;
+    const tagsSchema = (
+      contract.inputSchema as {
+        properties: Record<string, Record<string, unknown>>;
+      }
+    ).properties.tags;
+    expect(tagsSchema).toMatchObject({
+      type: "array",
+      minItems: 1,
+      maxItems: 8,
+      uniqueItems: true,
+      items: { type: "string", minLength: 1, maxLength: 32 },
+    });
+    expect(
+      contract.inputValidator.safeParse({ tags: ["a", "b"] }).success,
+    ).toBe(true);
+    expect(contract.inputValidator.safeParse({ tags: [] }).success).toBe(false);
+    expect(
+      contract.inputValidator.safeParse({ tags: ["a", "a"] }).success,
+    ).toBe(false);
+    expect(contract.inputValidator.safeParse({ tags: [1] }).success).toBe(
+      false,
+    );
+    const fingerprint = contract.fingerprint;
+    const again = compileAgentToolContract({
+      name: "search",
+      title: "Search items",
+      description: "Search upstream items by query.",
+      method: "GET",
+      plan: assertCompileSuccess(
+        compileToolDefinition({
+          method: "GET",
+          definition: {
+            version: 2,
+            pathSegments: [
+              { id: "seg0", value: { kind: "literal", value: "/items" } },
+            ],
+            query: [
+              {
+                id: "query_0",
+                name: "tags",
+                value: { kind: "agentInput", agentInputId: "ain_tags" },
+                serialization: { style: "form", explode: true },
+              },
+            ],
+            headers: [],
+            body: { bodyType: "none" },
+            agentInputs: [{ ...tags, maxItems: 7 }],
+          },
+          common: { headers: [], query: [] },
+          auth: null,
+          serverValues: [],
+          basePath: "/v1",
+          allowMutation: false,
+        }),
+      ),
+    });
+    expect(again.contract!.fingerprint).not.toBe(fingerprint);
   });
 });

@@ -16,7 +16,7 @@ import type {
 
 function definition(agentInputs: McpAgentInput[]): McpRequestDefinition {
   return {
-    version: 1,
+    version: 2,
     pathSegments: [{ id: "seg0", value: { kind: "literal", value: "/items" } }],
     query: agentInputs.map((input, index) => ({
       id: `query_${index}`,
@@ -229,7 +229,7 @@ describe("platform contract fixtures", () => {
       expect(inputSchema.properties).toBeDefined();
       expect(contract.outputSchema).toMatchObject({ type: "object" });
       expect(contract.metadata[MCP_CONTRACT_META_KEY]).toMatchObject({
-        version: 1,
+        version: 2,
       });
       expect(contract.fingerprint).toBe(
         contract.metadata[MCP_CONTRACT_META_KEY].fingerprint,

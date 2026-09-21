@@ -44,7 +44,7 @@ function makeDefinition(
   overrides: Partial<McpRequestDefinition> = {},
 ): McpRequestDefinition {
   return {
-    version: 1,
+    version: 2,
     pathSegments: [{ id: "seg0", value: literal("/items") }],
     query: [],
     headers: [],
@@ -875,5 +875,118 @@ describe("compileToolDefinition: form body", () => {
     });
     const result = compileToolDefinition(ctx);
     expect(result.ok).toBe(true);
+  });
+});
+
+describe("compileToolDefinition: array inputs and query serialization", () => {
+  const arrayInput = makeInput({
+    id: "ain_tags",
+    name: "tags",
+    type: "array",
+    items: { type: "string" },
+    minItems: 1,
+    maxItems: 4,
+  });
+
+  it("compiles a query array with form serialization into the plan", () => {
+    const ctx = makeContext({
+      definition: makeDefinition({
+        query: [
+          {
+            id: "query_0",
+            name: "tags",
+            value: agentInputRef("ain_tags"),
+            serialization: { style: "form", explode: false },
+          },
+        ],
+        agentInputs: [arrayInput],
+      }),
+    });
+    const result = compileToolDefinition(ctx);
+    expect(result.ok).toBe(true);
+    expect(result.plan?.query[0]).toMatchObject({
+      name: "tags",
+      serialization: { style: "form", explode: false },
+    });
+  });
+
+  it("rejects a query array without serialization metadata", () => {
+    const ctx = makeContext({
+      definition: makeDefinition({
+        query: [
+          {
+            id: "query_0",
+            name: "tags",
+            value: agentInputRef("ain_tags"),
+          },
+        ],
+        agentInputs: [arrayInput],
+      }),
+    });
+    const result = compileToolDefinition(ctx);
+    expect(result.ok).toBe(false);
+    expect(errorCodes(result)).toContain(APP_ERROR_CODES.MCP_COMPILE_INVALID);
+  });
+
+  it("rejects array inputs in path segments", () => {
+    const ctx = makeContext({
+      definition: makeDefinition({
+        pathSegments: [
+          { id: "seg0", value: literal("/items/") },
+          { id: "seg1", value: agentInputRef("ain_tags") },
+        ],
+        agentInputs: [arrayInput],
+      }),
+    });
+    const result = compileToolDefinition(ctx);
+    expect(result.ok).toBe(false);
+    expect(errorCodes(result)).toContain(APP_ERROR_CODES.MCP_COMPILE_INVALID);
+  });
+
+  it("compiles a JSON body array bound as opaque jsonType any", () => {
+    const ctx = makeContext({
+      method: "POST",
+      allowMutation: true,
+      definition: makeDefinition({
+        body: {
+          bodyType: "json",
+          root: {
+            kind: "binding",
+            binding: agentInputRef("ain_tags"),
+            jsonType: "any",
+          },
+        },
+        agentInputs: [arrayInput],
+      }),
+    });
+    const result = compileToolDefinition(ctx);
+    expect(result.ok).toBe(true);
+    expect(result.plan?.body).toEqual({
+      bodyType: "json",
+      root: {
+        kind: "binding",
+        binding: { kind: "agentInput", agentInputId: "ain_tags" },
+        jsonType: "any",
+      },
+    });
+  });
+
+  it("rejects serialization on a scalar query input", () => {
+    const ctx = makeContext({
+      definition: makeDefinition({
+        query: [
+          {
+            id: "query_0",
+            name: "q",
+            value: agentInputRef("input_1"),
+            serialization: { style: "form", explode: true },
+          },
+        ],
+        agentInputs: [makeInput()],
+      }),
+    });
+    const result = compileToolDefinition(ctx);
+    expect(result.ok).toBe(false);
+    expect(errorCodes(result)).toContain(APP_ERROR_CODES.MCP_COMPILE_INVALID);
   });
 });

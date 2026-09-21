@@ -55,6 +55,7 @@ type CompiledEntry = {
   name: string;
   source: McpValueBinding;
   omitWhenAbsent?: boolean;
+  serialization?: McpNamedEntry["serialization"];
 };
 
 type CompiledFormField = CompiledEntry;
@@ -322,6 +323,18 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
         segment.id,
       );
     }
+    if (
+      segment.value.kind === "agentInput" &&
+      agentInputById.get(segment.value.agentInputId)?.type === "array"
+    ) {
+      push(
+        path,
+        APP_ERROR_CODES.MCP_COMPILE_INVALID,
+        "Array-valued agent inputs cannot be used in path segments.",
+        "error",
+        segment.id,
+      );
+    }
   }
 
   if (!checkBasePathConfinement(ctx.basePath, ctx.definition.pathSegments)) {
@@ -432,6 +445,7 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
     entry: McpNamedEntry,
     path: string,
     allowSecret: boolean,
+    location: "query" | "other" = "other",
   ): void {
     resolveBinding(entry.value, path, entry.id);
     if (!allowSecret && isSecretBinding(entry.value)) {
@@ -455,6 +469,47 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
           entry.id,
         );
       }
+    }
+    const boundInput =
+      entry.value.kind === "agentInput"
+        ? agentInputById.get(entry.value.agentInputId)
+        : undefined;
+    if (location === "query") {
+      if (entry.serialization) {
+        if (boundInput?.type !== "array") {
+          push(
+            path,
+            APP_ERROR_CODES.MCP_COMPILE_INVALID,
+            `Form-array serialization at ${path} requires an array-valued agent input.`,
+            "error",
+            entry.id,
+          );
+        }
+      } else if (boundInput?.type === "array") {
+        push(
+          path,
+          APP_ERROR_CODES.MCP_COMPILE_INVALID,
+          `Array-valued query input at ${path} requires form serialization metadata.`,
+          "error",
+          entry.id,
+        );
+      }
+    } else if (entry.serialization) {
+      push(
+        path,
+        APP_ERROR_CODES.MCP_COMPILE_INVALID,
+        `Query serialization is only valid on query entries (${path}).`,
+        "error",
+        entry.id,
+      );
+    } else if (boundInput?.type === "array") {
+      push(
+        path,
+        APP_ERROR_CODES.MCP_COMPILE_INVALID,
+        `Array-valued agent inputs cannot be serialized at ${path}.`,
+        "error",
+        entry.id,
+      );
     }
   }
 
@@ -503,7 +558,12 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
           entry.id,
         );
       }
-      validateNamedEntry(entry, path, allowSecret);
+      validateNamedEntry(
+        entry,
+        path,
+        allowSecret,
+        pathPrefix.tool === "query" ? "query" : "other",
+      );
     }
 
     const seenTool = new Map<string, McpNamedEntry>();
@@ -539,7 +599,12 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
           entry.id,
         );
       }
-      validateNamedEntry(entry, path, allowSecret);
+      validateNamedEntry(
+        entry,
+        path,
+        allowSecret,
+        pathPrefix.tool === "query" ? "query" : "other",
+      );
     }
 
     const merged: CompiledEntry[] = [];
@@ -558,6 +623,7 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
       name: entry.name,
       source: entry.value,
       ...(entry.omitWhenAbsent ? { omitWhenAbsent: true } : {}),
+      ...(entry.serialization ? { serialization: entry.serialization } : {}),
     };
   }
 
@@ -619,6 +685,7 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
   ): boolean {
     if (jsonType === "any" || jsonType === "null") return true;
     if (inputType === "json") return true;
+    if (inputType === "array") return false;
     if (jsonType === "string") return inputType === "string";
     if (jsonType === "number")
       return inputType === "number" || inputType === "integer";
@@ -757,6 +824,18 @@ export function compileToolDefinition(ctx: CompileContext): CompileResult {
           path,
           APP_ERROR_CODES.MCP_COMPILE_INVALID,
           "Raw bodies do not support optional agent inputs; there is no per-binding omission mechanism.",
+          "error",
+          entry.id,
+        );
+      }
+      if (
+        entry.binding.kind === "agentInput" &&
+        agentInputById.get(entry.binding.agentInputId)?.type === "array"
+      ) {
+        push(
+          path,
+          APP_ERROR_CODES.MCP_COMPILE_INVALID,
+          "Raw bodies do not support array-valued agent inputs.",
           "error",
           entry.id,
         );

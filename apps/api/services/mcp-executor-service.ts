@@ -590,6 +590,44 @@ function toStringValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
+function appendQueryParam(
+  searchParams: URLSearchParams,
+  name: string,
+  value: unknown,
+  serialization: McpCompiledPlan["query"][number]["serialization"],
+): void {
+  if (serialization) {
+    if (!Array.isArray(value)) {
+      throw appError({
+        appCode: APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED,
+        message: `Query parameter "${name}" requires an array value.`,
+        status: 400,
+        details: { placeholder: name },
+      });
+    }
+    if (serialization.explode) {
+      for (const item of value) {
+        searchParams.append(name, toStringValue(item));
+      }
+      return;
+    }
+    searchParams.append(
+      name,
+      value.map((item) => toStringValue(item)).join(","),
+    );
+    return;
+  }
+  if (Array.isArray(value)) {
+    throw appError({
+      appCode: APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED,
+      message: `Query parameter "${name}" cannot serialize an array without form serialization metadata.`,
+      status: 400,
+      details: { placeholder: name },
+    });
+  }
+  searchParams.append(name, toStringValue(value));
+}
+
 function buildArgsByInputId(
   agentInputs: McpAgentInput[],
   args: Record<string, unknown>,
@@ -741,7 +779,12 @@ function buildRequestFromPlan(
         details: { placeholder: entry.name },
       });
     }
-    searchParams.append(entry.name, toStringValue(resolved.value));
+    appendQueryParam(
+      searchParams,
+      entry.name,
+      resolved.value,
+      entry.serialization,
+    );
   }
   const search = searchParams.toString();
   if (search) url.search = search;

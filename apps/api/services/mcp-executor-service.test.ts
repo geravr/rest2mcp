@@ -128,7 +128,7 @@ function makeTool(overrides: Partial<McpTool> = {}): McpTool {
     description: "Fetch one contact by id.",
     method: "GET",
     requestDefinition: {
-      version: 1,
+      version: 2,
       pathSegments: [
         { id: "path_1", value: { kind: "literal", value: "/contacts/" } },
         { id: "path_2", value: { kind: "agentInput", agentInputId: "ain_id" } },
@@ -600,7 +600,7 @@ describe("executeMappedTool: envelope for completed responses", () => {
     vi.stubGlobal("fetch", fetchMock);
     const tool = {
       requestDefinition: {
-        version: 1,
+        version: 2,
         pathSegments: [
           { id: "path_1", value: { kind: "literal", value: "/contacts/" } },
           {
@@ -694,7 +694,7 @@ describe("executeMappedTool: redirects", () => {
     method: "POST" as const,
     allowMutation: true,
     requestDefinition: {
-      version: 1,
+      version: 2,
       pathSegments: [
         { id: "path_1", value: { kind: "literal", value: "/contacts/" } },
         { id: "path_2", value: { kind: "agentInput", agentInputId: "ain_id" } },
@@ -869,7 +869,7 @@ describe("executeMappedTool: deadline and network failures", () => {
           method: "POST",
           allowMutation: true,
           requestDefinition: {
-            version: 1,
+            version: 2,
             pathSegments: [
               {
                 id: "path_1",
@@ -917,7 +917,7 @@ describe("executeMappedTool: deadline and network failures", () => {
             method: "POST",
             allowMutation: true,
             requestDefinition: {
-              version: 1,
+              version: 2,
               pathSegments: [
                 {
                   id: "path_1",
@@ -996,5 +996,228 @@ describe("executeMappedTool: audit logging", () => {
       revisionNumber: 3,
       aggregateFingerprint: "agg_fp",
     });
+  });
+});
+
+describe("executeMappedTool: query array serialization", () => {
+  function arrayQueryTool(explode: boolean): Partial<McpTool> {
+    return {
+      requestDefinition: {
+        version: 2,
+        pathSegments: [
+          { id: "path_1", value: { kind: "literal", value: "/contacts" } },
+        ],
+        query: [
+          {
+            id: "query_1",
+            name: "tags",
+            value: { kind: "agentInput", agentInputId: "ain_tags" },
+            serialization: { style: "form", explode },
+          },
+        ],
+        headers: [],
+        body: { bodyType: "none" },
+        agentInputs: [
+          {
+            id: "ain_tags",
+            name: "tags",
+            required: true,
+            type: "array",
+            items: { type: "string" },
+          },
+        ],
+      },
+    };
+  }
+
+  it("repeats the query key when explode is true", async () => {
+    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { db } = makeDb({ server: [makeServer()] });
+
+    await executeMappedTool(db as never, {
+      serverId: "mcs_1",
+      ownerUserId: "usr_owner",
+      toolId: "mct_1",
+      args: { tags: ["a", "b"] },
+      source: "playground",
+      credentialSecret: SECRET,
+      snapshot: makeSnapshot({ tool: arrayQueryTool(true) }),
+    });
+
+    const url = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(url.searchParams.getAll("tags")).toEqual(["a", "b"]);
+  });
+
+  it("joins items with commas when explode is false", async () => {
+    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { db } = makeDb({ server: [makeServer()] });
+
+    await executeMappedTool(db as never, {
+      serverId: "mcs_1",
+      ownerUserId: "usr_owner",
+      toolId: "mct_1",
+      args: { tags: ["a", "b"] },
+      source: "playground",
+      credentialSecret: SECRET,
+      snapshot: makeSnapshot({ tool: arrayQueryTool(false) }),
+    });
+
+    const url = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(url.searchParams.get("tags")).toBe("a,b");
+    expect(url.searchParams.getAll("tags")).toHaveLength(1);
+  });
+
+  it("rejects an unsourced array query before contacting upstream", async () => {
+    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { db } = makeDb({ server: [makeServer()] });
+
+    await expect(
+      executeMappedTool(db as never, {
+        serverId: "mcs_1",
+        ownerUserId: "usr_owner",
+        toolId: "mct_1",
+        args: {},
+        source: "playground",
+        credentialSecret: SECRET,
+        snapshot: makeSnapshot({ tool: arrayQueryTool(true) }),
+      }),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.appCode === APP_ERROR_CODES.MCP_TEMPLATE_UNRESOLVED,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("sends a complete JSON body array", async () => {
+    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { db } = makeDb({ server: [makeServer()] });
+
+    await executeMappedTool(db as never, {
+      serverId: "mcs_1",
+      ownerUserId: "usr_owner",
+      toolId: "mct_1",
+      args: { tags: ["red", "blue"] },
+      source: "playground",
+      credentialSecret: SECRET,
+      snapshot: makeSnapshot({
+        tool: {
+          method: "POST",
+          allowMutation: true,
+          requestDefinition: {
+            version: 2,
+            pathSegments: [
+              { id: "path_1", value: { kind: "literal", value: "/contacts" } },
+            ],
+            query: [],
+            headers: [],
+            body: {
+              bodyType: "json",
+              root: {
+                kind: "object",
+                fields: [
+                  {
+                    id: "field_1",
+                    key: "tags",
+                    value: {
+                      kind: "binding",
+                      binding: {
+                        kind: "agentInput",
+                        agentInputId: "ain_tags",
+                      },
+                      jsonType: "any",
+                    },
+                  },
+                ],
+              },
+            },
+            agentInputs: [
+              {
+                id: "ain_tags",
+                name: "tags",
+                required: true,
+                type: "array",
+                items: { type: "string" },
+              },
+            ],
+          },
+        },
+      }),
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({ tags: ["red", "blue"] });
+  });
+
+  it("omits an optional JSON body array when the agent input is absent", async () => {
+    lookupMock.mockResolvedValue([{ address: "8.8.8.8" }]);
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { db } = makeDb({ server: [makeServer()] });
+
+    await executeMappedTool(db as never, {
+      serverId: "mcs_1",
+      ownerUserId: "usr_owner",
+      toolId: "mct_1",
+      args: {},
+      source: "playground",
+      credentialSecret: SECRET,
+      snapshot: makeSnapshot({
+        tool: {
+          method: "POST",
+          allowMutation: true,
+          requestDefinition: {
+            version: 2,
+            pathSegments: [
+              { id: "path_1", value: { kind: "literal", value: "/contacts" } },
+            ],
+            query: [],
+            headers: [],
+            body: {
+              bodyType: "json",
+              root: {
+                kind: "object",
+                fields: [
+                  {
+                    id: "field_1",
+                    key: "tags",
+                    omitWhenAbsent: true,
+                    value: {
+                      kind: "binding",
+                      binding: {
+                        kind: "agentInput",
+                        agentInputId: "ain_tags",
+                      },
+                      jsonType: "any",
+                      omitWhenAbsent: true,
+                    },
+                  },
+                ],
+              },
+            },
+            agentInputs: [
+              {
+                id: "ain_tags",
+                name: "tags",
+                required: false,
+                type: "array",
+                items: { type: "string" },
+              },
+            ],
+          },
+        },
+      }),
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({});
   });
 });

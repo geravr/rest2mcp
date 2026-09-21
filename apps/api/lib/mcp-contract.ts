@@ -15,8 +15,8 @@ import {
 } from "./mcp-request-definition.js";
 import { mcpToolOutputJsonSchema } from "./mcp-result.js";
 
-/** Clean contract boundary: only ever version 1 in this change. */
-export const MCP_CONTRACT_VERSION = 1 as const;
+/** Advertised agent-contract version. Bumped with the request-definition model. */
+export const MCP_CONTRACT_VERSION = 2 as const;
 
 /** Namespaced `_meta` key carrying contract version + fingerprint. */
 export const MCP_CONTRACT_META_KEY = "io.rest2mcp/contract";
@@ -150,7 +150,7 @@ function pushIssue(
 }
 
 function isEnumValueCompatible(
-  type: McpAgentInput["type"],
+  type: "string" | "number" | "boolean" | "integer" | "json" | "array",
   value: string | number | boolean,
 ): boolean {
   switch (type) {
@@ -163,11 +163,195 @@ function isEnumValueCompatible(
       return typeof value === "boolean";
     case "json":
       return true;
+    case "array":
+      return false;
   }
 }
 
 function literalFromValue(value: string | number | boolean): z.ZodTypeAny {
   return z.literal(value);
+}
+
+type PrimitiveFieldType = "string" | "number" | "boolean" | "integer" | "json";
+
+type PrimitiveFieldConstraints = {
+  format?: McpAgentInput["format"];
+  minimum?: number;
+  maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+  enum?: Array<string | number | boolean>;
+};
+
+function buildPrimitiveZod(
+  type: PrimitiveFieldType,
+  constraints: PrimitiveFieldConstraints,
+  issues: McpCompileIssue[],
+  path: string,
+  inputId: string | undefined,
+  label: string,
+): z.ZodTypeAny {
+  const format = constraints.format;
+  if (format !== undefined && !SUPPORTED_FORMAT_SET.has(format)) {
+    pushIssue(
+      issues,
+      path,
+      APP_ERROR_CODES.MCP_COMPILE_INVALID,
+      `${label} declares unsupported format "${format}".`,
+      inputId,
+    );
+  }
+
+  let field: z.ZodTypeAny;
+  switch (type) {
+    case "string": {
+      let s: z.ZodTypeAny;
+      if (format === "date") s = z.iso.date();
+      else if (format === "date-time") s = z.iso.datetime();
+      else if (format === "email") s = z.email();
+      else if (format === "uri") s = z.url();
+      else if (format === "uuid") s = z.uuid();
+      else s = z.string();
+      if (constraints.minLength !== undefined) {
+        s = (s as z.ZodString).min(constraints.minLength);
+      }
+      if (constraints.maxLength !== undefined) {
+        s = (s as z.ZodString).max(constraints.maxLength);
+      }
+      if (constraints.pattern) {
+        try {
+          s = (s as z.ZodString).regex(new RegExp(constraints.pattern));
+        } catch {
+          pushIssue(
+            issues,
+            path,
+            APP_ERROR_CODES.MCP_COMPILE_INVALID,
+            `${label} has an invalid regular expression.`,
+            inputId,
+          );
+        }
+      }
+      field = s;
+      break;
+    }
+    case "number": {
+      let n = z.number();
+      if (constraints.minimum !== undefined) n = n.min(constraints.minimum);
+      if (constraints.maximum !== undefined) n = n.max(constraints.maximum);
+      field = n;
+      break;
+    }
+    case "integer": {
+      let n = z.number().int();
+      if (constraints.minimum !== undefined) n = n.min(constraints.minimum);
+      if (constraints.maximum !== undefined) n = n.max(constraints.maximum);
+      field = n;
+      break;
+    }
+    case "boolean":
+      field = z.boolean();
+      break;
+    default:
+      field = z.unknown();
+      break;
+  }
+
+  const numericBounds = type === "number" || type === "integer";
+  if (
+    numericBounds &&
+    constraints.minimum !== undefined &&
+    constraints.maximum !== undefined &&
+    constraints.minimum > constraints.maximum
+  ) {
+    pushIssue(
+      issues,
+      path,
+      APP_ERROR_CODES.MCP_COMPILE_INVALID,
+      `${label} has contradictory numeric bounds.`,
+      inputId,
+    );
+  }
+  if (
+    type === "string" &&
+    constraints.minLength !== undefined &&
+    constraints.maxLength !== undefined &&
+    constraints.minLength > constraints.maxLength
+  ) {
+    pushIssue(
+      issues,
+      path,
+      APP_ERROR_CODES.MCP_COMPILE_INVALID,
+      `${label} has contradictory length bounds.`,
+      inputId,
+    );
+  }
+
+  if (constraints.enum && constraints.enum.length > 0) {
+    const seen = new Set<string>();
+    for (const value of constraints.enum) {
+      const key = `${typeof value}:${String(value)}`;
+      if (seen.has(key)) {
+        pushIssue(
+          issues,
+          path,
+          APP_ERROR_CODES.MCP_COMPILE_INVALID,
+          `${label} repeats an enum value.`,
+          inputId,
+        );
+      }
+      seen.add(key);
+      if (!isEnumValueCompatible(type, value)) {
+        pushIssue(
+          issues,
+          path,
+          APP_ERROR_CODES.MCP_COMPILE_INVALID,
+          `${label} has an enum value incompatible with type "${type}".`,
+          inputId,
+        );
+      }
+      const numericValue = typeof value === "number" ? value : null;
+      if (
+        numericBounds &&
+        numericValue !== null &&
+        ((constraints.minimum !== undefined &&
+          numericValue < constraints.minimum) ||
+          (constraints.maximum !== undefined &&
+            numericValue > constraints.maximum))
+      ) {
+        pushIssue(
+          issues,
+          path,
+          APP_ERROR_CODES.MCP_COMPILE_INVALID,
+          `${label} has an enum value outside its bounds.`,
+          inputId,
+        );
+      }
+      if (
+        type === "string" &&
+        typeof value === "string" &&
+        ((constraints.minLength !== undefined &&
+          value.length < constraints.minLength) ||
+          (constraints.maxLength !== undefined &&
+            value.length > constraints.maxLength))
+      ) {
+        pushIssue(
+          issues,
+          path,
+          APP_ERROR_CODES.MCP_COMPILE_INVALID,
+          `${label} has an enum value outside its length bounds.`,
+          inputId,
+        );
+      }
+    }
+    const literals = constraints.enum.map(literalFromValue);
+    field =
+      literals.length === 1
+        ? literals[0]!
+        : z.union([literals[0]!, ...literals.slice(1)]);
+  }
+
+  return field;
 }
 
 /**
@@ -181,160 +365,59 @@ function buildAgentInput(
   issues: McpCompileIssue[],
 ): z.ZodTypeAny {
   const path = `agentInputs.${input.name}`;
+  const label = `Input "${input.name}"`;
   let field: z.ZodTypeAny;
 
-  const format = input.format;
-  if (format !== undefined && !SUPPORTED_FORMAT_SET.has(format)) {
-    pushIssue(
-      issues,
-      path,
-      APP_ERROR_CODES.MCP_COMPILE_INVALID,
-      `Input "${input.name}" declares unsupported format "${format}".`,
-      input.id,
-    );
-  }
-
-  switch (input.type) {
-    case "string": {
-      let s: z.ZodTypeAny;
-      if (format === "date") s = z.iso.date();
-      else if (format === "date-time") s = z.iso.datetime();
-      else if (format === "email") s = z.email();
-      else if (format === "uri") s = z.url();
-      else if (format === "uuid") s = z.uuid();
-      else s = z.string();
-      if (input.minLength !== undefined) {
-        s = (s as z.ZodString).min(input.minLength);
-      }
-      if (input.maxLength !== undefined) {
-        s = (s as z.ZodString).max(input.maxLength);
-      }
-      if (input.pattern) {
-        try {
-          s = (s as z.ZodString).regex(new RegExp(input.pattern));
-        } catch {
-          pushIssue(
-            issues,
-            path,
-            APP_ERROR_CODES.MCP_COMPILE_INVALID,
-            `Input "${input.name}" has an invalid regular expression.`,
-            input.id,
-          );
-        }
-      }
-      field = s;
-      break;
-    }
-    case "number": {
-      let n = z.number();
-      if (input.minimum !== undefined) n = n.min(input.minimum);
-      if (input.maximum !== undefined) n = n.max(input.maximum);
-      field = n;
-      break;
-    }
-    case "integer": {
-      let n = z.number().int();
-      if (input.minimum !== undefined) n = n.min(input.minimum);
-      if (input.maximum !== undefined) n = n.max(input.maximum);
-      field = n;
-      break;
-    }
-    case "boolean":
-      field = z.boolean();
-      break;
-    default:
-      field = z.unknown();
-      break;
-  }
-
-  const numericBounds = input.type === "number" || input.type === "integer";
-  if (
-    numericBounds &&
-    input.minimum !== undefined &&
-    input.maximum !== undefined &&
-    input.minimum > input.maximum
-  ) {
-    pushIssue(
-      issues,
-      path,
-      APP_ERROR_CODES.MCP_COMPILE_INVALID,
-      `Input "${input.name}" has contradictory numeric bounds.`,
-      input.id,
-    );
-  }
-  if (
-    input.type === "string" &&
-    input.minLength !== undefined &&
-    input.maxLength !== undefined &&
-    input.minLength > input.maxLength
-  ) {
-    pushIssue(
-      issues,
-      path,
-      APP_ERROR_CODES.MCP_COMPILE_INVALID,
-      `Input "${input.name}" has contradictory length bounds.`,
-      input.id,
-    );
-  }
-
-  if (input.enum && input.enum.length > 0) {
-    const seen = new Set<string>();
-    for (const value of input.enum) {
-      const key = `${typeof value}:${String(value)}`;
-      if (seen.has(key)) {
-        pushIssue(
-          issues,
-          path,
-          APP_ERROR_CODES.MCP_COMPILE_INVALID,
-          `Input "${input.name}" repeats an enum value.`,
-          input.id,
-        );
-      }
-      seen.add(key);
-      if (!isEnumValueCompatible(input.type, value)) {
-        pushIssue(
-          issues,
-          path,
-          APP_ERROR_CODES.MCP_COMPILE_INVALID,
-          `Input "${input.name}" has an enum value incompatible with type "${input.type}".`,
-          input.id,
-        );
-      }
-      const numericValue = typeof value === "number" ? value : null;
-      if (
-        numericBounds &&
-        numericValue !== null &&
-        ((input.minimum !== undefined && numericValue < input.minimum) ||
-          (input.maximum !== undefined && numericValue > input.maximum))
-      ) {
-        pushIssue(
-          issues,
-          path,
-          APP_ERROR_CODES.MCP_COMPILE_INVALID,
-          `Input "${input.name}" has an enum value outside its bounds.`,
-          input.id,
-        );
-      }
-      if (
-        input.type === "string" &&
-        typeof value === "string" &&
-        ((input.minLength !== undefined && value.length < input.minLength) ||
-          (input.maxLength !== undefined && value.length > input.maxLength))
-      ) {
-        pushIssue(
-          issues,
-          path,
-          APP_ERROR_CODES.MCP_COMPILE_INVALID,
-          `Input "${input.name}" has an enum value outside its length bounds.`,
-          input.id,
-        );
+  if (input.type === "array") {
+    const items = input.items;
+    if (items === undefined) {
+      pushIssue(
+        issues,
+        path,
+        APP_ERROR_CODES.MCP_COMPILE_INVALID,
+        `${label} is an array without an item descriptor.`,
+        input.id,
+      );
+      field = z.array(z.unknown());
+    } else {
+      const itemField = buildPrimitiveZod(
+        items.type,
+        items,
+        issues,
+        `${path}.items`,
+        input.id,
+        `Items of "${input.name}"`,
+      );
+      let arr = z.array(itemField);
+      if (input.minItems !== undefined) arr = arr.min(input.minItems);
+      if (input.maxItems !== undefined) arr = arr.max(input.maxItems);
+      field = input.uniqueItems
+        ? arr.refine(
+            (values) =>
+              new Set(values.map((value) => stableStringify(value))).size ===
+              values.length,
+            { message: `${label} requires unique items.` },
+          )
+        : arr;
+      if (input.uniqueItems) {
+        field = field.meta({ uniqueItems: true });
       }
     }
-    const literals = input.enum.map(literalFromValue);
-    field =
-      literals.length === 1
-        ? literals[0]!
-        : z.union([literals[0]!, ...literals.slice(1)]);
+    if (
+      input.minItems !== undefined &&
+      input.maxItems !== undefined &&
+      input.minItems > input.maxItems
+    ) {
+      pushIssue(
+        issues,
+        path,
+        APP_ERROR_CODES.MCP_COMPILE_INVALID,
+        `${label} has contradictory item-count bounds.`,
+        input.id,
+      );
+    }
+  } else {
+    field = buildPrimitiveZod(input.type, input, issues, path, input.id, label);
   }
 
   if (!input.description || input.description.trim().length === 0) {
@@ -342,7 +425,7 @@ function buildAgentInput(
       issues,
       path,
       APP_ERROR_CODES.MCP_COMPILE_INVALID,
-      `Input "${input.name}" must describe the value the agent supplies.`,
+      `${label} must describe the value the agent supplies.`,
       input.id,
     );
   } else if (input.description.length > MCP_INPUT_DESCRIPTION_MAX) {
@@ -350,7 +433,7 @@ function buildAgentInput(
       issues,
       path,
       APP_ERROR_CODES.MCP_COMPILE_INVALID,
-      `Input "${input.name}" description is too long.`,
+      `${label} description is too long.`,
       input.id,
     );
   }

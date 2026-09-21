@@ -34,7 +34,7 @@ function planFor(agentInputs: McpAgentInput[]) {
     compileToolDefinition({
       method: "GET",
       definition: {
-        version: 1,
+        version: 2,
         pathSegments: [
           { id: "seg0", value: { kind: "literal", value: "/items" } },
         ],
