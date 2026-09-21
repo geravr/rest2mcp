@@ -34,8 +34,6 @@ export const MCP_OPENAPI_LIMITS = {
    * whole document is rejected before any recursive walk instead.
    */
   maxDocumentDepth: 64,
-  /** Maximum operations selected in one confirmation. */
-  maxSelection: 50,
 } as const;
 
 /** OpenAPI versions this build can import. */
@@ -83,6 +81,13 @@ export const MCP_OPENAPI_ISSUE_CODES = {
   DEPRECATED: "OPENAPI_DEPRECATED",
   /** Metadata was safely ignored rather than mapped. */
   METADATA_IGNORED: "OPENAPI_METADATA_IGNORED",
+  /** Schema composition branches assign incompatible types or constraints. */
+  COMPOSITION_CONFLICT: "OPENAPI_COMPOSITION_CONFLICT",
+  /**
+   * The complete JSON value can be transported faithfully, but branch
+   * constraints cannot be represented so structural validation is reduced.
+   */
+  REDUCED_VALIDATION: "OPENAPI_REDUCED_VALIDATION",
 } as const;
 
 export type McpOpenApiIssueCode =
@@ -115,6 +120,7 @@ export const MCP_OPENAPI_BLOCKING_ISSUE_CODES = [
   MCP_OPENAPI_ISSUE_CODES.LIMIT_EXCEEDED,
   MCP_OPENAPI_ISSUE_CODES.DUPLICATE_NAME,
   MCP_OPENAPI_ISSUE_CODES.NAME_CONFLICT,
+  MCP_OPENAPI_ISSUE_CODES.COMPOSITION_CONFLICT,
 ] as const satisfies readonly McpOpenApiIssueCode[];
 
 const blockingIssueCodes = new Set<string>(MCP_OPENAPI_BLOCKING_ISSUE_CODES);
