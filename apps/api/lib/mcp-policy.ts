@@ -61,7 +61,7 @@ export const MCP_LOG_PREVIEW_BYTE_LIMIT = 8 * 1024;
 /** Bounded in-process audit queue depth before drops are counted. */
 export const MCP_AUDIT_QUEUE_CAPACITY = 256;
 
-export const MCP_REQUEST_DEFINITION_VERSION = 1 as const;
+export const MCP_REQUEST_DEFINITION_VERSION = 2 as const;
 
 export {
   canonicalPlatformGrant,

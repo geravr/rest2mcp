@@ -23,7 +23,17 @@ export const MCP_DEFINITION_LIMITS = {
   rawBindings: 40,
   jsonNodes: 400,
   jsonDepth: 32,
+  /** Maximum items an array-valued agent input may declare. */
+  maxArrayItems: 256,
 } as const;
+
+/** Supported OpenAPI `form` query-array serialization. */
+export const mcpQuerySerializationSchema = z.strictObject({
+  style: z.literal("form"),
+  explode: z.boolean(),
+});
+
+export type McpQuerySerialization = z.infer<typeof mcpQuerySerializationSchema>;
 
 export const mcpLiteralBindingSchema = z.strictObject({
   kind: z.literal("literal"),
@@ -56,6 +66,11 @@ export const mcpNamedEntrySchema = z.strictObject({
   value: mcpValueBindingSchema,
   /** When true and the bound agent input is absent, omit this entry. */
   omitWhenAbsent: z.boolean().optional(),
+  /**
+   * Query-only form-array serialization. Invalid on headers, form fields, and
+   * common entries; the request-definition refine rejects those placements.
+   */
+  serialization: mcpQuerySerializationSchema.optional(),
 });
 
 export type McpNamedEntry = z.infer<typeof mcpNamedEntrySchema>;
@@ -130,26 +145,95 @@ export const mcpAgentInputTypeSchema = z.enum([
   "boolean",
   "integer",
   "json",
+  "array",
 ]);
 
-export const mcpAgentInputSchema = z.strictObject({
-  id: mcpAgentInputIdSchema,
-  name: mcpValueNameSchema,
-  description: z.string().max(2000).optional(),
-  required: z.boolean(),
-  sensitive: z.boolean().default(false),
-  type: mcpAgentInputTypeSchema,
+export const mcpAgentInputItemTypeSchema = z.enum([
+  "string",
+  "number",
+  "boolean",
+  "integer",
+  "json",
+]);
+
+export const mcpAgentInputItemsSchema = z.strictObject({
+  type: mcpAgentInputItemTypeSchema,
   minimum: z.number().optional(),
   maximum: z.number().optional(),
   minLength: z.number().int().nonnegative().optional(),
   maxLength: z.number().int().nonnegative().optional(),
   pattern: z.string().max(512).optional(),
-  /** Supported string format preserved in the advertised schema and runtime. */
   format: z.enum(["date", "date-time", "email", "uri", "uuid"]).optional(),
   enum: z.array(z.union([z.string(), z.number(), z.boolean()])).optional(),
-  examples: z.array(z.unknown()).max(8).optional(),
   allowEmpty: z.boolean().optional(),
 });
+
+export type McpAgentInputItems = z.infer<typeof mcpAgentInputItemsSchema>;
+
+export const mcpAgentInputSchema = z
+  .strictObject({
+    id: mcpAgentInputIdSchema,
+    name: mcpValueNameSchema,
+    description: z.string().max(2000).optional(),
+    required: z.boolean(),
+    sensitive: z.boolean().default(false),
+    type: mcpAgentInputTypeSchema,
+    minimum: z.number().optional(),
+    maximum: z.number().optional(),
+    minLength: z.number().int().nonnegative().optional(),
+    maxLength: z.number().int().nonnegative().optional(),
+    pattern: z.string().max(512).optional(),
+    /** Supported string format preserved in the advertised schema and runtime. */
+    format: z.enum(["date", "date-time", "email", "uri", "uuid"]).optional(),
+    enum: z.array(z.union([z.string(), z.number(), z.boolean()])).optional(),
+    examples: z.array(z.unknown()).max(8).optional(),
+    allowEmpty: z.boolean().optional(),
+    /** Item descriptor required when `type` is `array`. */
+    items: mcpAgentInputItemsSchema.optional(),
+    minItems: z
+      .number()
+      .int()
+      .nonnegative()
+      .max(MCP_DEFINITION_LIMITS.maxArrayItems)
+      .optional(),
+    maxItems: z
+      .number()
+      .int()
+      .nonnegative()
+      .max(MCP_DEFINITION_LIMITS.maxArrayItems)
+      .optional(),
+    uniqueItems: z.boolean().optional(),
+  })
+  .superRefine((input, ctx) => {
+    if (input.type === "array") {
+      if (input.items === undefined) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["items"],
+          message: "Array inputs require an item descriptor.",
+        });
+      }
+      return;
+    }
+    if (input.items !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["items"],
+        message: "Item descriptors are only valid on array inputs.",
+      });
+    }
+    if (
+      input.minItems !== undefined ||
+      input.maxItems !== undefined ||
+      input.uniqueItems !== undefined
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["minItems"],
+        message: "Collection constraints are only valid on array inputs.",
+      });
+    }
+  });
 
 export type McpAgentInput = z.infer<typeof mcpAgentInputSchema>;
 
@@ -393,6 +477,43 @@ function refineRequestDefinition(
       message: `A JSON body supports at most ${MCP_DEFINITION_LIMITS.jsonDepth} levels of nesting.`,
     });
   }
+
+  definition.headers.forEach((entry, index) => {
+    if (entry.serialization !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["headers", index, "serialization"],
+        message: "Query serialization is only valid on query entries.",
+      });
+    }
+  });
+
+  if (definition.body.bodyType === "form") {
+    definition.body.fields.forEach((field, index) => {
+      if (field.serialization !== undefined) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["body", "fields", index, "serialization"],
+          message: "Query serialization is only valid on query entries.",
+        });
+      }
+    });
+  }
+
+  definition.agentInputs.forEach((input, index) => {
+    if (
+      input.type === "array" &&
+      input.minItems !== undefined &&
+      input.maxItems !== undefined &&
+      input.minItems > input.maxItems
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["agentInputs", index, "minItems"],
+        message: "minItems cannot exceed maxItems.",
+      });
+    }
+  });
 }
 
 const mcpRequestDefinitionSchemaBase = z
@@ -461,6 +582,14 @@ export const mcpCommonEntriesSchema = z
           path: ["entries"],
           message:
             "Agent input bindings are not allowed in server common entries.",
+        });
+      }
+      if (entry.serialization !== undefined) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["entries"],
+          message:
+            "Query serialization is not allowed on server common entries.",
         });
       }
     }
@@ -638,6 +767,7 @@ export const mcpCompiledPlanSchema = z.object({
       name: z.string(),
       source: mcpValueBindingSchema,
       omitWhenAbsent: z.boolean().optional(),
+      serialization: mcpQuerySerializationSchema.optional(),
     }),
   ),
   headers: z.array(

@@ -8,7 +8,7 @@ import {
 
 function definition(overrides: Record<string, unknown> = {}) {
   return {
-    version: 1 as const,
+    version: 2 as const,
     pathSegments: [
       { id: "path_1", value: { kind: "literal" as const, value: "/contacts" } },
     ],
@@ -244,5 +244,79 @@ describe("server-value changes cannot reclassify typed bindings", () => {
         (issue) => issue.code === "MCP_VARIABLE_NAME_CONFLICT",
       ),
     ).toBe(true);
+  });
+});
+
+describe("mcpRequestDefinitionSchema: array inputs and query serialization", () => {
+  it("rejects the superseded request-definition version", () => {
+    const result = mcpRequestDefinitionSchema.safeParse({
+      ...definition(),
+      version: 1,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts a bounded array agent input with form query serialization", () => {
+    const parsed = mcpRequestDefinitionSchema.parse(
+      definition({
+        query: [
+          {
+            id: "query_1",
+            name: "tags",
+            value: { kind: "agentInput", agentInputId: "ain_1" },
+            serialization: { style: "form", explode: true },
+          },
+        ],
+        agentInputs: [
+          {
+            id: "ain_1",
+            name: "tags",
+            required: true,
+            type: "array",
+            items: { type: "string", minLength: 1 },
+            minItems: 1,
+            maxItems: 8,
+            uniqueItems: true,
+          },
+        ],
+      }),
+    );
+    expect(parsed.version).toBe(2);
+    expect(parsed.query[0]?.serialization).toEqual({
+      style: "form",
+      explode: true,
+    });
+    expect(parsed.agentInputs[0]).toMatchObject({
+      type: "array",
+      items: { type: "string", minLength: 1 },
+      maxItems: 8,
+    });
+  });
+
+  it("rejects query serialization on headers", () => {
+    const result = mcpRequestDefinitionSchema.safeParse(
+      definition({
+        headers: [
+          {
+            id: "hdr_1",
+            name: "X-Tags",
+            value: { kind: "literal", value: "a" },
+            serialization: { style: "form", explode: true },
+          },
+        ],
+      }),
+    );
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects an array input without an item descriptor", () => {
+    const result = mcpRequestDefinitionSchema.safeParse(
+      definition({
+        agentInputs: [
+          { id: "ain_1", name: "tags", required: true, type: "array" },
+        ],
+      }),
+    );
+    expect(result.success).toBe(false);
   });
 });

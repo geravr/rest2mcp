@@ -9,7 +9,7 @@
 import { z } from "zod";
 import {
   MCP_DEFAULT_PLATFORM_SCOPES,
-  MCP_OPENAPI_LIMITS,
+  MCP_MAX_TOOLS_PER_SERVER_BOUNDS,
   MCP_PLATFORM_RESOURCE_MODES,
   MCP_PLATFORM_SCOPES,
   MCP_TOOL_GROUP_LIMITS,
@@ -376,7 +376,7 @@ export const assignToolGroupCommandSchema = z.strictObject({
   toolIds: z
     .array(z.string().min(1))
     .min(1)
-    .max(MCP_OPENAPI_LIMITS.maxSelection),
+    .max(MCP_MAX_TOOLS_PER_SERVER_BOUNDS.max),
   /** null ungroups; a group id assigns. */
   groupId: z.string().min(1).max(64).nullable(),
 });

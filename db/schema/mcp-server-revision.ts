@@ -19,7 +19,7 @@ import {
 export const MCP_REVISION_SCHEMA_VERSION = 1;
 
 /** Compiler version recorded with every published revision. */
-export const MCP_REVISION_COMPILER_VERSION = "1";
+export const MCP_REVISION_COMPILER_VERSION = "2";
 
 /** Where a publication originated. Never a raw token or session identifier. */
 export type McpRevisionActorSource = "studio" | "platform";
