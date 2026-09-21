@@ -18,6 +18,12 @@ export const envSchema = z.object({
   BETTER_AUTH_SECRET: z.string().min(32),
   /** AES-256-GCM key material for upstream MCP credentials. Do not reuse BETTER_AUTH_SECRET. */
   MCP_CREDENTIAL_SECRET: z.string().min(32),
+  /**
+   * AES-256-GCM key material for account AI provider credentials.
+   * Dedicated to the AI credential envelope; do not reuse BETTER_AUTH_SECRET
+   * or MCP_CREDENTIAL_SECRET.
+   */
+  AI_CREDENTIAL_SECRET: z.string().min(32),
   /** Public API origin for MCP connection snippets. Falls back to the request origin. */
   API_ORIGIN: z.url().optional(),
   /**

@@ -11,6 +11,7 @@ const validEnv = {
   DATABASE_URL: "postgres://postgres:postgres@localhost:5452/example",
   BETTER_AUTH_SECRET: "x".repeat(32),
   MCP_CREDENTIAL_SECRET: "y".repeat(32),
+  AI_CREDENTIAL_SECRET: "z".repeat(32),
   RESEND_API_KEY: "re_test",
   RESEND_EMAIL_FROM: "onboarding@example.com",
 } satisfies Record<string, string>;
