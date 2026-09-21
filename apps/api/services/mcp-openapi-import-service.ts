@@ -518,12 +518,12 @@ function assertSelectionShape(
       },
     );
   }
-  if (selection.length > MCP_OPENAPI_LIMITS.maxSelection) {
+  if (selection.length > MCP_OPENAPI_LIMITS.maxOperations) {
     invalidSelection(
       serverId,
-      `At most ${MCP_OPENAPI_LIMITS.maxSelection} operations can be imported at once.`,
+      `At most ${MCP_OPENAPI_LIMITS.maxOperations} operations can be imported at once.`,
       {
-        limit: MCP_OPENAPI_LIMITS.maxSelection,
+        limit: MCP_OPENAPI_LIMITS.maxOperations,
         observed: selection.length,
       },
     );

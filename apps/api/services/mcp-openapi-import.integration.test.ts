@@ -109,6 +109,24 @@ function contentSource(text: string = OPERATIONS_DOC) {
   return { kind: "content" as const, content: text, label: "paste" as const };
 }
 
+function manyGetDocument(count: number): string {
+  const paths: Record<string, unknown> = {};
+  for (let index = 0; index < count; index += 1) {
+    paths[`/items/${index}`] = {
+      get: {
+        operationId: `listItem${index}`,
+        summary: `List item ${index}`,
+      },
+    };
+  }
+  return JSON.stringify({
+    openapi: "3.1.0",
+    info: { title: "Bulk Import API", version: "1.0.0" },
+    servers: [{ url: "https://api.example.com/v1" }],
+    paths,
+  });
+}
+
 /** A common header the canonical compiler rejects for every tool. */
 const FORBIDDEN_COMMON_ENTRIES = {
   headers: [
@@ -126,7 +144,7 @@ type JsonValue =
 
 function definitionFor(path: string, name: string): Record<string, JsonValue> {
   return {
-    version: 1,
+    version: 2,
     pathSegments: [
       { id: `path_${name}`, value: { kind: "literal", value: path } },
     ],
@@ -921,6 +939,35 @@ describeIntegration("OpenAPI import confirmation against PostgreSQL", () => {
       const serverAfter = await readServer(serverId);
       expect(serverAfter.configRevision).toBe(1);
       expect(serverAfter.draftRevision).toBe(1);
+    },
+  );
+
+  it.skipIf(toolLimit < 51)(
+    "imports 51 tools in one revision when remaining capacity permits",
+    async () => {
+      const serverId = await seedServer("bulk51");
+      const text = manyGetDocument(51);
+      const preview = await previewOpenApiImport(importDb(), userId, serverId, {
+        source: contentSource(text),
+      });
+      expect(preview.document.selectableCount).toBe(51);
+      expect(preview.capacity).toMatchObject({
+        toolLimit,
+        currentTools: 0,
+      });
+
+      const result = await confirmOpenApiImport(importDb(), userId, serverId, {
+        expectedRevision: preview.configRevision,
+        source: contentSource(text),
+        fingerprint: preview.document.fingerprint,
+        selection: preview.operations.map((operation) => ({
+          operationKey: operation.operationKey,
+        })),
+        groupStrategy: { kind: "ungrouped" },
+      });
+      expect(result.tools).toHaveLength(51);
+      expect(await countTools(serverId)).toBe(51);
+      expect(result.revision).toBe(preview.configRevision + 1);
     },
   );
 });

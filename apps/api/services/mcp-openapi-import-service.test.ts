@@ -179,6 +179,40 @@ function fingerprintOf(text: string): string {
   return parseOpenApiDocument(text).document.fingerprint;
 }
 
+function manyGetDocument(count: number): string {
+  const paths: Record<string, unknown> = {};
+  for (let index = 0; index < count; index += 1) {
+    paths[`/items/${index}`] = {
+      get: {
+        operationId: `listItem${index}`,
+        summary: `List item ${index}`,
+      },
+    };
+  }
+  return JSON.stringify({
+    openapi: "3.1.0",
+    info: { title: "Bulk API", version: "1.0.0" },
+    paths,
+  });
+}
+
+function confirmDbResults(
+  returning: Array<{ id: string; name: string }>,
+  currentCount = 0,
+) {
+  return [
+    [serverRow],
+    [],
+    [],
+    [],
+    [serverRow],
+    [{ count: currentCount }],
+    [],
+    [],
+    ...returning.map((row) => [row]),
+  ];
+}
+
 function contentSource(text: string = OPERATIONS_DOC) {
   return { kind: "content" as const, content: text, label: "paste" as const };
 }
@@ -918,7 +952,7 @@ describe("confirmOpenApiImport", () => {
   it("rejects an oversized selection", async () => {
     const db = makeDb([[serverRow]]);
     const selection = Array.from(
-      { length: MCP_OPENAPI_LIMITS.maxSelection + 1 },
+      { length: MCP_OPENAPI_LIMITS.maxOperations + 1 },
       (_, index) => ({ operationKey: `op_${index}` }),
     );
 
@@ -933,8 +967,8 @@ describe("confirmOpenApiImport", () => {
     ).rejects.toMatchObject({
       appCode: APP_ERROR_CODES.MCP_OPENAPI_INVALID_SELECTION,
       details: {
-        limit: MCP_OPENAPI_LIMITS.maxSelection,
-        observed: MCP_OPENAPI_LIMITS.maxSelection + 1,
+        limit: MCP_OPENAPI_LIMITS.maxOperations,
+        observed: MCP_OPENAPI_LIMITS.maxOperations + 1,
       },
     });
     expect(db.transaction).not.toHaveBeenCalled();
@@ -1196,5 +1230,123 @@ describe("confirmOpenApiImport", () => {
     ).rejects.toSatisfy(isAppErrorWith(APP_ERROR_CODES.MCP_SERVER_NOT_FOUND));
     expect(db.transaction).not.toHaveBeenCalled();
     expect(db.insert).not.toHaveBeenCalled();
+  });
+
+  it("previews and confirms more than 50 operations when server capacity permits", async () => {
+    vi.stubEnv("MCP_MAX_TOOLS_PER_SERVER", "80");
+    const text = manyGetDocument(51);
+    const previewDb = makeDb([[serverRow], [], [], []]);
+    const preview = await previewOpenApiImport(
+      previewDb as never,
+      USER_ID,
+      SERVER_ID,
+      { source: contentSource(text) },
+    );
+    expect(preview.document.operationCount).toBe(51);
+    expect(preview.document.selectableCount).toBe(51);
+    expect(preview.capacity.toolLimit).toBe(80);
+    expect(previewDb.transaction).not.toHaveBeenCalled();
+    telemetry.capture.mockClear();
+
+    const returning = preview.operations.map((operation, index) => ({
+      id: `mct_${index}`,
+      name: operation.suggestedName,
+    }));
+    const db = makeDb(confirmDbResults(returning));
+    const result = await confirmOpenApiImport(db as never, USER_ID, SERVER_ID, {
+      expectedRevision: 1,
+      source: contentSource(text),
+      fingerprint: fingerprintOf(text),
+      selection: preview.operations.map((operation) => ({
+        operationKey: operation.operationKey,
+      })),
+      groupStrategy: ungrouped,
+    });
+    expect(result.tools).toHaveLength(51);
+    expect(db.transaction).toHaveBeenCalledTimes(1);
+    expect(db.telemetryCallsAtFirstLockedInsert).toBe(0);
+  });
+
+  it("imports exactly the remaining capacity and rejects one extra tool", async () => {
+    vi.stubEnv("MCP_MAX_TOOLS_PER_SERVER", "52");
+    const text = manyGetDocument(3);
+    const exactReturning = [
+      { id: "mct_a", name: "listitem0" },
+      { id: "mct_b", name: "listitem1" },
+    ];
+    const exactDb = makeDb(confirmDbResults(exactReturning, 50));
+    const exact = await confirmOpenApiImport(
+      exactDb as never,
+      USER_ID,
+      SERVER_ID,
+      {
+        expectedRevision: 1,
+        source: contentSource(text),
+        fingerprint: fingerprintOf(text),
+        selection: [
+          { operationKey: "listItem0" },
+          { operationKey: "listItem1" },
+        ],
+        groupStrategy: ungrouped,
+      },
+    );
+    expect(exact.tools).toHaveLength(2);
+
+    const overflowDb = makeDb(confirmDbResults([], 50));
+    await expect(
+      confirmOpenApiImport(overflowDb as never, USER_ID, SERVER_ID, {
+        expectedRevision: 1,
+        source: contentSource(text),
+        fingerprint: fingerprintOf(text),
+        selection: [
+          { operationKey: "listItem0" },
+          { operationKey: "listItem1" },
+          { operationKey: "listItem2" },
+        ],
+        groupStrategy: ungrouped,
+      }),
+    ).rejects.toMatchObject({
+      appCode: APP_ERROR_CODES.MCP_TOOL_LIMIT_REACHED,
+      details: { limit: 52, observed: 50 },
+    });
+    expect(overflowDb.committed.inserted).toEqual([]);
+  });
+
+  it("keeps a 200-operation confirmation atomic with bounded telemetry", async () => {
+    vi.stubEnv("MCP_MAX_TOOLS_PER_SERVER", "200");
+    const text = manyGetDocument(MCP_OPENAPI_LIMITS.maxOperations);
+    const inventory = parseOpenApiDocument(text);
+    const returning = inventory.operations.map((operation, index) => ({
+      id: `mct_${index}`,
+      name: operation.operationId
+        ? operation.operationId.toLowerCase()
+        : `op_${index}`,
+    }));
+    const db = makeDb(confirmDbResults(returning));
+    const result = await confirmOpenApiImport(db as never, USER_ID, SERVER_ID, {
+      expectedRevision: 1,
+      source: contentSource(text),
+      fingerprint: fingerprintOf(text),
+      selection: inventory.operations.map((operation) => ({
+        operationKey: operation.operationKey,
+      })),
+      groupStrategy: ungrouped,
+    });
+    expect(result.tools).toHaveLength(MCP_OPENAPI_LIMITS.maxOperations);
+    expect(db.transaction).toHaveBeenCalledTimes(1);
+    expect(db.telemetryCallsAtFirstLockedInsert).toBe(0);
+    const confirmed = telemetryCallFor("mcp_openapi_import_confirmed");
+    expect(confirmed?.[1]).toMatchObject({
+      properties: {
+        selectedCount: MCP_OPENAPI_LIMITS.maxOperations,
+        createdToolCount: MCP_OPENAPI_LIMITS.maxOperations,
+      },
+    });
+    const serialized = JSON.stringify(
+      (confirmed?.[1] as { properties?: unknown })?.properties,
+    );
+    expect(serialized).not.toContain("/items/0");
+    expect(serialized).not.toContain("listItem0");
+    expect(serialized).not.toContain(text.slice(0, 40));
   });
 });
