@@ -101,8 +101,9 @@ Follows **Router/Handler → Service → Database/Infrastructure**:
 
 ## Environment
 
-- Environment variables are validated on startup using Zod in [lib/env.ts](lib/env.ts).
-- Schema fields: `ENVIRONMENT`, `APP_NAME`, `APP_ORIGIN`, `DATABASE_URL`, `BETTER_AUTH_SECRET`, `RESEND_API_KEY`, `RESEND_EMAIL_FROM`. Optional: PostHog (`POSTHOG_*`), S3 (`STORAGE_S3_*`), `SUPER_ADMIN_EMAIL`. `API_ORIGIN` is consumed by the SPA proxy / marketing templates, not by [lib/env.ts](lib/env.ts).
+- Environment variables are validated on startup using Zod in [lib/env-schema.ts](lib/env-schema.ts); [lib/env.ts](lib/env.ts) parses `Bun.env` through that schema. Keep the schema module free of runtime access so modules that resolve configuration stay loadable under the Node-based test runner.
+- Schema fields: `ENVIRONMENT`, `APP_NAME`, `APP_ORIGIN`, `DATABASE_URL`, `BETTER_AUTH_SECRET`, `RESEND_API_KEY`, `RESEND_EMAIL_FROM`. Optional: PostHog (`POSTHOG_*`), S3 (`STORAGE_S3_*`), `SUPER_ADMIN_EMAIL`, `MCP_MAX_TOOLS_PER_SERVER` (per-server tool cap; default `50`, accepted `1-500`). `API_ORIGIN` is consumed by the SPA proxy / marketing templates, not by [lib/env.ts](lib/env.ts).
+- The per-server tool cap is deployment configuration, never a literal: resolve it through [lib/mcp-limits.ts](lib/mcp-limits.ts), which every enforcement point (tool creation, duplication, curl import, settings recompilation, OpenAPI import) and the Studio `getServer` projection share.
 - Non-Zod process env used by this package: `PORT` (listen), `AUTO_MIGRATE` (Docker entrypoint only).
 - Shared template: root [`.env.example`](../../.env.example). Do not treat removed ghost keys as required config.
 
