@@ -3,6 +3,7 @@
  * to a canonical MCP request definition plus structured per-operation
  * diagnostics. Never reads the source document, the database, or the network.
  */
+import { createHash } from "node:crypto";
 import {
   isMcpOpenApiBlockingIssueCode,
   MCP_OPENAPI_ISSUE_CODES,
@@ -23,9 +24,15 @@ import {
   type McpJsonNode,
   type McpNamedEntry,
   type McpPathSegment,
+  type McpQuerySerialization,
   type McpRequestDefinition,
   type McpValueBinding,
 } from "./mcp-request-definition.js";
+import {
+  isLocallyResolvedUnion,
+  normalizeOpenApiSchema,
+  unionHasForbiddenTransport,
+} from "./openapi-schema-normalize.js";
 import { assertHttpUrl } from "./mcp-ssrf.js";
 import {
   REDACTION_PLACEHOLDER,
@@ -119,7 +126,6 @@ const UNSUPPORTED_SCHEMA_KEYWORDS = [
   "$ref",
   "oneOf",
   "anyOf",
-  "allOf",
   "not",
   "prefixItems",
 ] as const;
@@ -128,6 +134,8 @@ const SCHEMA_LIST_KEYWORDS = ["allOf", "anyOf", "oneOf"] as const;
 
 type JsonRecord = Record<string, unknown>;
 type AgentInputType = McpAgentInput["type"];
+
+type InputLocation = "path" | "query" | "header" | "body";
 
 type InputFields = {
   type: AgentInputType;
@@ -141,6 +149,11 @@ type InputFields = {
   allowEmpty?: boolean;
   examples?: unknown[];
   sensitive?: boolean;
+  items?: McpAgentInput["items"];
+  minItems?: number;
+  maxItems?: number;
+  uniqueItems?: boolean;
+  reducedValidation?: boolean;
 };
 
 type SchemaResolution =
@@ -183,6 +196,20 @@ function normalizeMcpInputName(raw: string): string {
       : name.replace(/^_+/, "");
   }
   return name.length > 0 ? name : "value";
+}
+
+const MAX_INPUT_NAME_LENGTH = 64;
+
+function shortenMcpInputName(name: string, hashSource: string): string {
+  if (name.length <= MAX_INPUT_NAME_LENGTH && /^[a-z]/.test(name)) return name;
+  const digest = createHash("sha256")
+    .update(hashSource)
+    .digest("hex")
+    .slice(0, 8);
+  const budget = Math.max(1, MAX_INPUT_NAME_LENGTH - 1 - digest.length);
+  let prefix = name.slice(0, budget).replace(/_+$/g, "");
+  if (!/^[a-z]/.test(prefix)) prefix = `n_${prefix}`.slice(0, budget);
+  return `${prefix}_${digest}`;
 }
 
 function readFiniteNumber(value: unknown): number | undefined {
@@ -268,7 +295,10 @@ export function mapInventoryOperation(
 
   // ---- Agent input registry ------------------------------------------------
   const agentInputs: McpAgentInput[] = [];
-  const inputNameSources = new Map<string, string>();
+  const inputOrigins = new Map<
+    string,
+    { location: InputLocation; originalName: string }
+  >();
   let agentInputLimitFlagged = false;
   let jsonNodeCount = 0;
   let jsonNodeLimitFlagged = false;
@@ -279,23 +309,16 @@ export function mapInventoryOperation(
     name: string;
     required: boolean;
     source: string;
+    location: InputLocation;
     pointer?: string;
     schema?: JsonRecord;
     extraExamples?: unknown[];
     structuredAsJson?: boolean;
+    allowArray?: boolean;
     unknownType?: AgentInputType;
     sensitive?: boolean;
   }): McpAgentInput | null => {
     const inputName = normalizeMcpInputName(draft.name);
-    const existingSource = inputNameSources.get(inputName);
-    if (existingSource !== undefined) {
-      addIssue(
-        ISSUE.AMBIGUOUS_PARAMETER,
-        `${draft.source} and ${existingSource} both map to agent input name "${inputName}".`,
-        draft.pointer,
-      );
-      return null;
-    }
     if (agentInputs.length >= MCP_DEFINITION_LIMITS.agentInputs) {
       if (!agentInputLimitFlagged) {
         agentInputLimitFlagged = true;
@@ -313,6 +336,7 @@ export function mapInventoryOperation(
       propertyName: draft.name,
       extraExamples: draft.extraExamples,
       structuredAsJson: draft.structuredAsJson,
+      allowArray: draft.allowArray,
       unknownType: draft.unknownType ?? "string",
     });
     if (fields === null) return null;
@@ -343,10 +367,57 @@ export function mapInventoryOperation(
         ? { allowEmpty: fields.allowEmpty }
         : {}),
       ...(fields.examples !== undefined ? { examples: fields.examples } : {}),
+      ...(fields.items !== undefined ? { items: fields.items } : {}),
+      ...(fields.minItems !== undefined ? { minItems: fields.minItems } : {}),
+      ...(fields.maxItems !== undefined ? { maxItems: fields.maxItems } : {}),
+      ...(fields.uniqueItems !== undefined
+        ? { uniqueItems: fields.uniqueItems }
+        : {}),
     };
     agentInputs.push(agentInput);
-    inputNameSources.set(inputName, draft.source);
+    inputOrigins.set(agentInput.id, {
+      location: draft.location,
+      originalName: draft.name,
+    });
+    if (fields.reducedValidation) {
+      addIssue(
+        ISSUE.REDUCED_VALIDATION,
+        `${draft.source} is transported faithfully as JSON, but item structure is not validated.`,
+        draft.pointer,
+      );
+    }
     return agentInput;
+  };
+
+  const applyCollisionNames = (): void => {
+    const byName = new Map<string, McpAgentInput[]>();
+    for (const input of agentInputs) {
+      const group = byName.get(input.name) ?? [];
+      group.push(input);
+      byName.set(input.name, group);
+    }
+    for (const group of byName.values()) {
+      if (group.length < 2) continue;
+      for (const input of group) {
+        const origin = inputOrigins.get(input.id);
+        const namespaced = normalizeMcpInputName(
+          `${origin?.location ?? "body"}_${origin?.originalName ?? input.name}`,
+        );
+        input.name = shortenMcpInputName(
+          namespaced,
+          `${origin?.location ?? "body"}:${origin?.originalName ?? input.name}:${input.id}`,
+        );
+      }
+    }
+    const used = new Set<string>();
+    for (const input of agentInputs) {
+      let candidate = input.name;
+      if (used.has(candidate)) {
+        candidate = shortenMcpInputName(candidate, `${candidate}:${input.id}`);
+      }
+      input.name = candidate;
+      used.add(candidate);
+    }
   };
 
   const resolveSchemaType = (
@@ -457,11 +528,29 @@ export function mapInventoryOperation(
       propertyName: string;
       extraExamples?: readonly unknown[];
       structuredAsJson?: boolean;
+      allowArray?: boolean;
       unknownType: AgentInputType;
     },
   ): InputFields | null => {
+    const normalized = normalizeOpenApiSchema(schema);
+    if (!normalized.ok) {
+      addIssue(
+        normalized.code,
+        `${options.label}: ${normalized.message}`,
+        options.pointer,
+      );
+      return null;
+    }
+    schema = normalized.schema;
+
     for (const keyword of UNSUPPORTED_SCHEMA_KEYWORDS) {
       if (schema[keyword] === undefined) continue;
+      if (
+        options.structuredAsJson === true &&
+        (keyword === "oneOf" || keyword === "anyOf")
+      ) {
+        continue;
+      }
       addIssue(
         ISSUE.UNSUPPORTED_SCHEMA,
         keyword === "$ref"
@@ -484,21 +573,157 @@ export function mapInventoryOperation(
 
     let type: AgentInputType;
     if (resolution.kind === "structured") {
-      if (options.structuredAsJson !== true) {
+      if (resolution.typeName === "array" && options.allowArray === true) {
+        type = "array";
+      } else if (options.structuredAsJson !== true) {
         addIssue(
           ISSUE.UNSUPPORTED_SCHEMA,
           `${options.label} is a structured ${resolution.typeName} value the canonical parameter model cannot carry.`,
           options.pointer,
         );
         return null;
+      } else {
+        type = "json";
       }
-      type = "json";
     } else {
       type = resolution.type;
     }
 
     const fields: InputFields = { type };
-    if (type === "string") {
+    if (type === "array") {
+      const itemsSchema = schema.items;
+      if (
+        itemsSchema === undefined ||
+        itemsSchema === null ||
+        Array.isArray(itemsSchema)
+      ) {
+        addIssue(
+          ISSUE.UNSUPPORTED_SCHEMA,
+          `${options.label} declares an array without a single representable item schema.`,
+          options.pointer,
+        );
+        return null;
+      }
+      const itemNormalized = normalizeOpenApiSchema(asSchema(itemsSchema));
+      if (!itemNormalized.ok) {
+        addIssue(
+          itemNormalized.code,
+          `${options.label} items: ${itemNormalized.message}`,
+          options.pointer,
+        );
+        return null;
+      }
+      for (const keyword of UNSUPPORTED_SCHEMA_KEYWORDS) {
+        if (itemNormalized.schema[keyword] === undefined) continue;
+        addIssue(
+          ISSUE.UNSUPPORTED_SCHEMA,
+          `${options.label} items declare "${keyword}", which the canonical model cannot represent.`,
+          options.pointer,
+        );
+        return null;
+      }
+      const itemResolution = resolveSchemaType(itemNormalized.schema, "json");
+      if (itemResolution.kind === "unsupported") {
+        addIssue(
+          ISSUE.UNSUPPORTED_SCHEMA,
+          `${options.label} items ${itemResolution.detail}.`,
+          options.pointer,
+        );
+        return null;
+      }
+      if (itemResolution.kind === "structured") {
+        if (options.structuredAsJson !== true) {
+          addIssue(
+            ISSUE.UNSUPPORTED_SERIALIZATION,
+            `${options.label} array items are structured values this location cannot serialize.`,
+            options.pointer,
+          );
+          return null;
+        }
+        fields.items = { type: "json" };
+        fields.reducedValidation = true;
+      } else {
+        const itemType = itemResolution.type;
+        if (itemType === "array") {
+          addIssue(
+            ISSUE.UNSUPPORTED_SCHEMA,
+            `${options.label} items declare nested arrays the canonical model cannot represent.`,
+            options.pointer,
+          );
+          return null;
+        }
+        const itemFields: NonNullable<InputFields["items"]> = {
+          type: itemType,
+        };
+        if (itemType === "string") {
+          const format =
+            typeof itemNormalized.schema.format === "string"
+              ? itemNormalized.schema.format
+              : undefined;
+          if (format !== undefined && ALLOWED_STRING_FORMATS.has(format)) {
+            itemFields.format = format as McpAgentInput["format"];
+          }
+          const minLength = readNonNegativeInteger(
+            itemNormalized.schema.minLength,
+          );
+          if (minLength !== undefined) {
+            itemFields.minLength = minLength;
+            if (minLength === 0) itemFields.allowEmpty = true;
+          }
+          const maxLength = readNonNegativeInteger(
+            itemNormalized.schema.maxLength,
+          );
+          if (maxLength !== undefined) itemFields.maxLength = maxLength;
+          const pattern =
+            typeof itemNormalized.schema.pattern === "string"
+              ? itemNormalized.schema.pattern
+              : undefined;
+          if (
+            pattern !== undefined &&
+            pattern.length > 0 &&
+            pattern.length <= 512
+          ) {
+            itemFields.pattern = pattern;
+          }
+        } else if (itemType === "number" || itemType === "integer") {
+          const minimum = readFiniteNumber(itemNormalized.schema.minimum);
+          if (minimum !== undefined) itemFields.minimum = minimum;
+          const maximum = readFiniteNumber(itemNormalized.schema.maximum);
+          if (maximum !== undefined) itemFields.maximum = maximum;
+        }
+        if (itemType !== "json") {
+          const enumValues = itemNormalized.schema.enum;
+          if (Array.isArray(enumValues) && enumValues.length > 0) {
+            const primitives = enumValues.filter(isPrimitiveEnumValue);
+            if (primitives.length !== enumValues.length) {
+              addIssue(
+                ISSUE.UNSUPPORTED_SCHEMA,
+                `${options.label} items declare an enum the canonical model cannot carry.`,
+                options.pointer,
+              );
+              return null;
+            }
+            itemFields.enum = primitives;
+          }
+        }
+        fields.items = itemFields;
+      }
+      const minItems = readNonNegativeInteger(schema.minItems);
+      if (minItems !== undefined) {
+        fields.minItems = Math.min(
+          minItems,
+          MCP_DEFINITION_LIMITS.maxArrayItems,
+        );
+      }
+      const maxItems = readNonNegativeInteger(schema.maxItems);
+      if (maxItems !== undefined) {
+        fields.maxItems = Math.min(
+          maxItems,
+          MCP_DEFINITION_LIMITS.maxArrayItems,
+        );
+      }
+      if (schema.uniqueItems === true) fields.uniqueItems = true;
+    } else if (type === "string") {
       const format =
         typeof schema.format === "string" ? schema.format : undefined;
       if (format !== undefined && ALLOWED_STRING_FORMATS.has(format)) {
@@ -539,7 +764,7 @@ export function mapInventoryOperation(
       if (maximum !== undefined) fields.maximum = maximum;
     }
 
-    if (type !== "json") {
+    if (type !== "json" && type !== "array") {
       const enumValues = schema.enum;
       if (Array.isArray(enumValues) && enumValues.length > 0) {
         const primitives = enumValues.filter(isPrimitiveEnumValue);
@@ -586,6 +811,10 @@ export function mapInventoryOperation(
         options.pointer,
       );
       if (examples.length > 0) fields.examples = examples;
+    }
+
+    if (type === "json" && schema.additionalProperties !== undefined) {
+      fields.reducedValidation = true;
     }
 
     return fields;
@@ -715,8 +944,7 @@ export function mapInventoryOperation(
       );
       return false;
     }
-    const supportsExplode = location === "query";
-    if (!supportsExplode && param.explode === true) {
+    if (location !== "query" && param.explode === true) {
       addIssue(
         ISSUE.UNSUPPORTED_SERIALIZATION,
         `The ${location} parameter "${param.name}" declares explode=true; the canonical executor reproduces plain serialization only.`,
@@ -724,31 +952,40 @@ export function mapInventoryOperation(
       );
       return false;
     }
-    if (supportsExplode && param.explode === false) {
-      addIssue(
-        ISSUE.UNSUPPORTED_SERIALIZATION,
-        `The ${location} parameter "${param.name}" declares explode=false; only the default explode=true is representable.`,
-        param.pointer,
-      );
-      return false;
-    }
     return true;
+  };
+
+  const querySerializationFor = (
+    param: McpOpenApiInventoryParameter,
+    inputType: AgentInputType,
+  ): McpQuerySerialization | undefined => {
+    if (param.in !== "query" || inputType !== "array") return undefined;
+    return {
+      style: "form",
+      explode: param.explode !== false,
+    };
   };
 
   const mapParameterBinding = (
     param: McpOpenApiInventoryParameter,
-  ): McpValueBinding | null => {
+  ): { binding: McpValueBinding; input: McpAgentInput } | null => {
     if (!checkParameterSerialization(param)) return null;
+    if (param.in === "cookie") return null;
     const agentInput = registerAgentInput({
       name: param.name,
       required: param.in === "path" ? true : param.required,
       source: `The ${param.in} parameter "${param.name}"`,
+      location: param.in,
       pointer: param.pointer,
       schema: param.schema,
       extraExamples: param.examples,
+      allowArray: param.in === "query",
     });
     if (agentInput === null) return null;
-    return { kind: "agentInput", agentInputId: agentInput.id };
+    return {
+      binding: { kind: "agentInput", agentInputId: agentInput.id },
+      input: agentInput,
+    };
   };
 
   const pathParameterByName = new Map<string, McpOpenApiInventoryParameter>();
@@ -802,6 +1039,7 @@ export function mapInventoryOperation(
       name: placeholderName,
       required: true,
       source: label,
+      location: "path",
     });
     if (agentInput === null) return null;
     return { kind: "agentInput", agentInputId: agentInput.id };
@@ -824,10 +1062,14 @@ export function mapInventoryOperation(
       const placeholderName = placeholder[1] ?? "";
       const declared = pathParameterByName.get(placeholderName);
       if (declared !== undefined) matchedPathParameters.add(placeholderName);
+      const mapped =
+        declared !== undefined ? mapParameterBinding(declared) : null;
       const binding =
-        declared !== undefined
-          ? mapParameterBinding(declared)
-          : synthesizePathBinding(placeholderName);
+        mapped !== null
+          ? mapped.binding
+          : declared === undefined
+            ? synthesizePathBinding(placeholderName)
+            : null;
       if (binding === null) continue;
       pathSegments.push({ id: `path_${pathSegments.length}`, value: binding });
     }
@@ -860,13 +1102,15 @@ export function mapInventoryOperation(
       );
       continue;
     }
-    const binding = mapParameterBinding(param);
-    if (binding === null) continue;
+    const mapped = mapParameterBinding(param);
+    if (mapped === null) continue;
+    const serialization = querySerializationFor(param, mapped.input.type);
     query.push({
       id: `query_${query.length}`,
       name: param.name,
-      value: binding,
+      value: mapped.binding,
       ...(param.required ? {} : { omitWhenAbsent: true }),
+      ...(serialization ? { serialization } : {}),
     });
   }
   if (query.length > MCP_DEFINITION_LIMITS.namedEntries) {
@@ -895,12 +1139,12 @@ export function mapInventoryOperation(
       );
       continue;
     }
-    const binding = mapParameterBinding(param);
-    if (binding === null) continue;
+    const mapped = mapParameterBinding(param);
+    if (mapped === null) continue;
     headers.push({
       id: `header_${headers.length}`,
       name: param.name,
-      value: binding,
+      value: mapped.binding,
       ...(param.required ? {} : { omitWhenAbsent: true }),
     });
   }
@@ -954,6 +1198,51 @@ export function mapInventoryOperation(
       );
     }
 
+    const normalized = normalizeOpenApiSchema(schema);
+    if (!normalized.ok) {
+      addIssue(normalized.code, `${label}: ${normalized.message}`, pointer);
+      return null;
+    }
+    schema = normalized.schema;
+
+    if (schema.oneOf !== undefined || schema.anyOf !== undefined) {
+      const keyword = schema.oneOf !== undefined ? "oneOf" : "anyOf";
+      if (
+        isLocallyResolvedUnion(schema, keyword) &&
+        !unionHasForbiddenTransport(schema)
+      ) {
+        addIssue(
+          ISSUE.REDUCED_VALIDATION,
+          `${label} uses "${keyword}" that can be sent as JSON, but structural validation is reduced.`,
+          pointer,
+        );
+        const unionRequired = context === "field" ? required : true;
+        const unionInput = registerAgentInput({
+          name: context === "root" ? "body" : label,
+          required: unionRequired,
+          source: label,
+          location: "body",
+          pointer,
+          schema,
+          structuredAsJson: true,
+          unknownType: "json",
+        });
+        if (unionInput === null) return null;
+        return {
+          kind: "binding",
+          binding: { kind: "agentInput", agentInputId: unionInput.id },
+          jsonType: "any",
+          ...(context === "field" && !required ? { omitWhenAbsent: true } : {}),
+        };
+      }
+      addIssue(
+        ISSUE.UNSUPPORTED_SCHEMA,
+        `${label} declares "${keyword}", which the canonical model cannot represent faithfully.`,
+        pointer,
+      );
+      return null;
+    }
+
     for (const keyword of UNSUPPORTED_SCHEMA_KEYWORDS) {
       if (schema[keyword] === undefined) continue;
       addIssue(
@@ -990,6 +1279,7 @@ export function mapInventoryOperation(
         name: context === "root" ? "body" : label,
         required: constantInputRequired,
         source: label,
+        location: "body",
         pointer,
         schema,
         sensitive: true,
@@ -1016,6 +1306,26 @@ export function mapInventoryOperation(
     }
 
     if (resolution.kind === "structured") {
+      if (context === "field" && !required) {
+        const structuredInput = registerAgentInput({
+          name: label,
+          required: false,
+          source: label,
+          location: "body",
+          pointer,
+          schema,
+          structuredAsJson: resolution.typeName === "object",
+          allowArray: resolution.typeName === "array",
+          unknownType: "json",
+        });
+        if (structuredInput === null) return null;
+        return {
+          kind: "binding",
+          binding: { kind: "agentInput", agentInputId: structuredInput.id },
+          jsonType: "any",
+          omitWhenAbsent: true,
+        };
+      }
       return resolution.typeName === "object"
         ? buildObjectNode(schema, context, label, required, depth, pointer)
         : buildArrayNode(schema, context, label, required, depth, pointer);
@@ -1026,6 +1336,7 @@ export function mapInventoryOperation(
       name: context === "root" ? "body" : label,
       required: inputRequired,
       source: label,
+      location: "body",
       pointer,
       schema,
       unknownType: "json",
@@ -1072,6 +1383,7 @@ export function mapInventoryOperation(
         name: context === "root" ? "body" : label,
         required: context === "field" ? required : true,
         source: label,
+        location: "body",
         pointer,
         schema,
         structuredAsJson: true,
@@ -1151,39 +1463,28 @@ export function mapInventoryOperation(
     context: "root" | "field" | "item",
     label: string,
     required: boolean,
-    depth: number,
+    _depth: number,
     pointer: string | undefined,
   ): McpJsonNode | null => {
-    const items = schema.items;
-    if (items === undefined || items === null || Array.isArray(items)) {
-      const agentInput = registerAgentInput({
-        name: context === "root" ? "body" : label,
-        required: context === "field" ? required : true,
-        source: label,
-        pointer,
-        schema,
-        structuredAsJson: true,
-        unknownType: "json",
-      });
-      if (agentInput === null) return null;
-      return {
-        kind: "binding",
-        binding: { kind: "agentInput", agentInputId: agentInput.id },
-        jsonType: "any",
-        ...(context === "field" && !required ? { omitWhenAbsent: true } : {}),
-      };
-    }
-
-    const itemNode = buildJsonNode(
-      asSchema(items),
-      "item",
-      label,
-      true,
-      depth + 1,
+    const inputRequired = context === "field" ? required : true;
+    const agentInput = registerAgentInput({
+      name: context === "root" ? "body" : label,
+      required: inputRequired,
+      source: label,
+      location: "body",
       pointer,
-    );
-    if (itemNode === null) return null;
-    return { kind: "array", items: [itemNode] };
+      schema,
+      allowArray: true,
+      structuredAsJson: true,
+      unknownType: "json",
+    });
+    if (agentInput === null) return null;
+    return {
+      kind: "binding",
+      binding: { kind: "agentInput", agentInputId: agentInput.id },
+      jsonType: "any",
+      ...(context === "field" && !required ? { omitWhenAbsent: true } : {}),
+    };
   };
 
   const mapRequestBody = (
@@ -1303,6 +1604,7 @@ export function mapInventoryOperation(
           name: key,
           required: fieldRequired,
           source: `The form field "${key}"`,
+          location: "body",
           pointer: requestBody.pointer,
           schema: property,
         });
@@ -1362,6 +1664,7 @@ export function mapInventoryOperation(
       name: "body",
       required: true,
       source: "The raw request body",
+      location: "body",
       pointer: requestBody.pointer,
       sensitive:
         credentialConstant || isCredentialLikeSchemaPosition(schema, undefined),
@@ -1475,6 +1778,7 @@ export function mapInventoryOperation(
   }
 
   const blocked = issues.some((issue) => issue.severity === "error");
+  if (!blocked) applyCollisionNames();
   return {
     operationKey: operation.operationKey,
     selectable: !blocked,

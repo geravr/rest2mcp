@@ -308,41 +308,38 @@ describe("mapInventoryOperation", () => {
       binding: { kind: "agentInput", agentInputId: "ain_0" },
       jsonType: "string",
     });
-    expect(fieldNamed(root, "tags")).toEqual({
-      kind: "array",
-      items: [
-        {
-          kind: "binding",
-          binding: { kind: "agentInput", agentInputId: "ain_1" },
-          jsonType: "string",
-        },
-      ],
+    const tagsField = fieldNamed(root, "tags");
+    expect(tagsField).toMatchObject({
+      kind: "binding",
+      jsonType: "any",
+      omitWhenAbsent: true,
     });
-    expect(fieldNamed(root, "meta")).toEqual({
-      kind: "object",
-      fields: [
-        {
-          id: "field_3",
-          key: "active",
-          value: {
-            kind: "binding",
-            binding: { kind: "agentInput", agentInputId: "ain_2" },
-            jsonType: "boolean",
-            omitWhenAbsent: true,
-          },
-        },
-        {
-          id: "field_4",
-          key: "count",
-          value: {
-            kind: "binding",
-            binding: { kind: "agentInput", agentInputId: "ain_3" },
-            jsonType: "number",
-            omitWhenAbsent: true,
-          },
-        },
-      ],
+    const metaField = fieldNamed(root, "meta");
+    expect(metaField).toMatchObject({
+      kind: "binding",
+      jsonType: "any",
+      omitWhenAbsent: true,
     });
+    const tagsInput = definition.agentInputs.find(
+      (input) =>
+        tagsField &&
+        tagsField.kind === "binding" &&
+        tagsField.binding.kind === "agentInput" &&
+        input.id === tagsField.binding.agentInputId,
+    );
+    expect(tagsInput).toMatchObject({
+      type: "array",
+      required: false,
+      items: { type: "string" },
+    });
+    const metaInput = definition.agentInputs.find(
+      (input) =>
+        metaField &&
+        metaField.kind === "binding" &&
+        metaField.binding.kind === "agentInput" &&
+        input.id === metaField.binding.agentInputId,
+    );
+    expect(metaInput).toMatchObject({ type: "json", required: false });
     expect(definition.agentInputs).toMatchObject([
       {
         id: "ain_0",
@@ -352,17 +349,15 @@ describe("mapInventoryOperation", () => {
         minLength: 1,
         maxLength: 50,
       },
-      { id: "ain_1", name: "tags", required: true, type: "string" },
-      { id: "ain_2", name: "active", required: false, type: "boolean" },
       {
-        id: "ain_3",
-        name: "count",
+        id: "ain_1",
+        name: "tags",
         required: false,
-        type: "integer",
-        minimum: 0,
+        type: "array",
+        items: { type: "string" },
       },
+      { id: "ain_2", name: "meta", required: false, type: "json" },
     ]);
-    expect(issueCodes(result)).toContain(ISSUE.METADATA_IGNORED);
     expect(compile(definition, "POST").ok).toBe(true);
   });
 
@@ -715,29 +710,39 @@ describe("mapInventoryOperation blockers", () => {
             name: "tags",
             in: "query",
             explode: false,
-            schema: { type: "string" },
+            schema: { type: "array", items: { type: "string" } },
           }),
         ],
       }),
     });
-    expectBlocked(nonExplodedQuery, ISSUE.UNSUPPORTED_SERIALIZATION);
+    expect(nonExplodedQuery.selectable).toBe(true);
+    expect(nonExplodedQuery.requestDefinition?.query[0]).toMatchObject({
+      name: "tags",
+      serialization: { style: "form", explode: false },
+    });
+    expect(nonExplodedQuery.requestDefinition?.agentInputs[0]).toMatchObject({
+      type: "array",
+      items: { type: "string" },
+    });
   });
 
-  it("blocks structured parameters and schema composition", () => {
-    expectBlocked(
-      map({
-        operation: operation({
-          parameters: [
-            parameter({
-              name: "ids",
-              in: "query",
-              schema: { type: "array", items: { type: "string" } },
-            }),
-          ],
-        }),
+  it("maps query arrays and blocks structured parameters that cannot be serialized", () => {
+    const queryArray = map({
+      operation: operation({
+        parameters: [
+          parameter({
+            name: "ids",
+            in: "query",
+            schema: { type: "array", items: { type: "string" } },
+          }),
+        ],
       }),
-      ISSUE.UNSUPPORTED_SCHEMA,
-    );
+    });
+    expect(queryArray.selectable).toBe(true);
+    expect(queryArray.requestDefinition?.query[0]).toMatchObject({
+      name: "ids",
+      serialization: { style: "form", explode: true },
+    });
 
     expectBlocked(
       map({
@@ -754,26 +759,30 @@ describe("mapInventoryOperation blockers", () => {
       ISSUE.UNSUPPORTED_SCHEMA,
     );
 
-    expectBlocked(
-      map({
-        operation: operation({
-          method: "POST",
-          requestBody: {
-            required: true,
-            pointer: "#/paths/~1items/post/requestBody",
-            mediaTypes: [
-              mediaType("application/json", {
-                type: "object",
-                properties: {
-                  extra: { type: "object", additionalProperties: true },
-                },
-              }),
-            ],
-          },
-        }),
+    const extra = map({
+      operation: operation({
+        method: "POST",
+        requestBody: {
+          required: true,
+          pointer: "#/paths/~1items/post/requestBody",
+          mediaTypes: [
+            mediaType("application/json", {
+              type: "object",
+              properties: {
+                extra: { type: "object", additionalProperties: true },
+              },
+            }),
+          ],
+        },
       }),
-      ISSUE.UNSUPPORTED_SCHEMA,
-    );
+    });
+    expect(extra.selectable).toBe(true);
+    expect(issueCodes(extra)).toContain(ISSUE.REDUCED_VALIDATION);
+    expect(extra.requestDefinition?.agentInputs[0]).toMatchObject({
+      name: "extra",
+      type: "json",
+      required: false,
+    });
 
     expectBlocked(
       map({
@@ -791,27 +800,74 @@ describe("mapInventoryOperation blockers", () => {
     );
   });
 
-  it("blocks ambiguous parameter naming and required properties without a schema", () => {
-    expectBlocked(
-      map({
-        operation: operation({
-          parameters: [
-            parameter({
-              name: "user-id",
-              in: "query",
-              schema: { type: "string" },
-            }),
-            parameter({
-              name: "user.id",
-              in: "query",
-              schema: { type: "string" },
-            }),
-          ],
-        }),
+  it("namespaces colliding parameter identities without changing the upstream path", () => {
+    const result = map({
+      operation: operation({
+        path: "/items/{user-id}",
+        parameters: [
+          parameter({
+            name: "user-id",
+            in: "path",
+            required: true,
+            schema: { type: "string" },
+          }),
+          parameter({
+            name: "user.id",
+            in: "query",
+            schema: { type: "string" },
+          }),
+        ],
       }),
-      ISSUE.AMBIGUOUS_PARAMETER,
-    );
+    });
+    expect(result.selectable).toBe(true);
+    expect(
+      result.requestDefinition?.agentInputs.map((input) => input.name),
+    ).toEqual(["path_user_id", "query_user_id"]);
+    expect(result.path).toBe("/items/{user-id}");
+    expect(
+      result.requestDefinition?.pathSegments.some(
+        (segment) =>
+          segment.value.kind === "literal" &&
+          String(segment.value.value).includes("/items/"),
+      ),
+    ).toBe(true);
+    expect(compile(result.requestDefinition!, "GET").ok).toBe(true);
+  });
 
+  it("truncates colliding names with a stable hash without changing the upstream path", () => {
+    const longName = `campaign-identifier-${"x".repeat(70)}`;
+    const result = map({
+      operation: operation({
+        path: `/items/{${longName}}`,
+        parameters: [
+          parameter({
+            name: longName,
+            in: "path",
+            required: true,
+            schema: { type: "string" },
+          }),
+          parameter({
+            name: longName.replaceAll("-", "."),
+            in: "query",
+            schema: { type: "string" },
+          }),
+        ],
+      }),
+    });
+    expect(result.selectable).toBe(true);
+    const names = result.requestDefinition?.agentInputs.map(
+      (input) => input.name,
+    );
+    expect(names).toHaveLength(2);
+    expect(new Set(names).size).toBe(2);
+    expect(names?.every((name) => name.length <= 64)).toBe(true);
+    expect(names?.every((name) => /_[0-9a-f]{8}$/.test(name))).toBe(true);
+    expect(result.path).toBe(`/items/{${longName}}`);
+    expect(result.method).toBe("GET");
+    expect(compile(result.requestDefinition!, "GET").ok).toBe(true);
+  });
+
+  it("blocks required properties without a schema", () => {
     expectBlocked(
       map({
         operation: operation({
@@ -1013,6 +1069,134 @@ describe("mapInventoryOperation blockers", () => {
     expect(result.selectable).toBe(false);
     expect(result.requestDefinition).toBeUndefined();
     expect(issueCodes(result)).toContain(ISSUE.EXTERNAL_REFERENCE);
+  });
+});
+
+describe("mapInventoryOperation composition and collisions", () => {
+  it("unwraps conflict-safe allOf into one object graph", () => {
+    const result = map({
+      operation: operation({
+        method: "POST",
+        requestBody: {
+          required: true,
+          pointer: "#/paths/~1items/post/requestBody",
+          mediaTypes: [
+            mediaType("application/json", {
+              allOf: [
+                {
+                  type: "object",
+                  required: ["name"],
+                  properties: { name: { type: "string" } },
+                },
+                {
+                  type: "object",
+                  properties: { count: { type: "integer", minimum: 0 } },
+                },
+              ],
+            }),
+          ],
+        },
+      }),
+    });
+    expect(result.selectable).toBe(true);
+    expect(
+      result.requestDefinition?.agentInputs.map((input) => input.name),
+    ).toEqual(["name", "count"]);
+    expect(
+      result.requestDefinition?.agentInputs.find(
+        (input) => input.name === "name",
+      ),
+    ).toMatchObject({
+      type: "string",
+      required: true,
+    });
+    expect(
+      result.requestDefinition?.agentInputs.find(
+        (input) => input.name === "count",
+      ),
+    ).toMatchObject({
+      type: "integer",
+      required: false,
+    });
+    expect(compile(result.requestDefinition!, "POST").ok).toBe(true);
+  });
+
+  it("blocks contradictory allOf branches", () => {
+    const result = map({
+      operation: operation({
+        method: "POST",
+        requestBody: {
+          required: true,
+          pointer: "#/paths/~1items/post/requestBody",
+          mediaTypes: [
+            mediaType("application/json", {
+              allOf: [{ type: "string" }, { type: "object" }],
+            }),
+          ],
+        },
+      }),
+    });
+    expect(result.selectable).toBe(false);
+    expect(issueCodes(result)).toContain(ISSUE.COMPOSITION_CONFLICT);
+  });
+
+  it("blocks allOf branches that assign incompatible schemas to the same property", () => {
+    const result = map({
+      operation: operation({
+        method: "POST",
+        requestBody: {
+          required: true,
+          pointer: "#/paths/~1items/post/requestBody",
+          mediaTypes: [
+            mediaType("application/json", {
+              allOf: [
+                {
+                  type: "object",
+                  properties: { id: { type: "string" } },
+                },
+                {
+                  type: "object",
+                  properties: { id: { type: "number" } },
+                },
+              ],
+            }),
+          ],
+        },
+      }),
+    });
+    expect(result.selectable).toBe(false);
+    expect(issueCodes(result)).toContain(ISSUE.COMPOSITION_CONFLICT);
+  });
+
+  it("maps a locally resolved body oneOf as opaque JSON with a reduced-validation warning", () => {
+    const result = map({
+      operation: operation({
+        method: "POST",
+        requestBody: {
+          required: true,
+          pointer: "#/paths/~1items/post/requestBody",
+          mediaTypes: [
+            mediaType("application/json", {
+              oneOf: [
+                { type: "string" },
+                {
+                  type: "object",
+                  properties: { id: { type: "string" } },
+                },
+              ],
+            }),
+          ],
+        },
+      }),
+    });
+    expect(result.selectable).toBe(true);
+    expect(issueCodes(result)).toContain(ISSUE.REDUCED_VALIDATION);
+    expect(result.requestDefinition?.agentInputs[0]).toMatchObject({
+      name: "body",
+      type: "json",
+      required: true,
+    });
+    expect(compile(result.requestDefinition!, "POST").ok).toBe(true);
   });
 });
 

@@ -36,7 +36,7 @@ export const openApiImportConfirmCommandSchema = z.strictObject({
   selection: z
     .array(mcpOpenApiSelectionEntrySchema)
     .min(1)
-    .max(MCP_OPENAPI_LIMITS.maxSelection)
+    .max(MCP_OPENAPI_LIMITS.maxOperations)
     .describe("Selected operations with optional name overrides."),
   groupStrategy: mcpOpenApiGroupStrategySchema.describe(
     "Single group strategy applied to every selected operation.",
