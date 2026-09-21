@@ -6,6 +6,143 @@ export const esSettings = {
     tabSecurity: "Seguridad",
     tabPrivacy: "Privacidad y Cookies",
     tabPlatform: "MCP de plataforma",
+    tabAi: "IA",
+
+    ai: {
+      title: "Proveedores de IA",
+      description:
+        "Conecta un proveedor, verifica un modelo y consulta qué está listo para las funciones de IA.",
+      providersTitle: "Proveedores",
+      providersDescription:
+        "Se usa un proveedor a la vez. Elige un proveedor, conéctalo y verifica un modelo. Las credenciales se guardan cifradas y no se vuelven a mostrar.",
+      chooseProvider: "Elige un proveedor para configurar.",
+      changeProvider: "Cambiar de proveedor",
+      providerNames: {
+        openai: "OpenAI",
+        anthropic: "Anthropic",
+        xai: "xAI",
+        meta: "Meta",
+        openrouter: "OpenRouter",
+        opencode_zen: "OpenCode Zen",
+        opencode_go: "OpenCode Go",
+      },
+      providerDetails: {
+        openai: { model: "GPT-4o, o1", useCase: "Popular" },
+        anthropic: { model: "Claude Sonnet", useCase: "Recomendado" },
+        xai: { model: "Grok", useCase: "Rápido" },
+        meta: { model: "Llama", useCase: "Código abierto" },
+        openrouter: { model: "100+ modelos", useCase: "Flexible" },
+        opencode_zen: { model: "Modelos de código", useCase: "Optimizado" },
+        opencode_go: { model: "DeepSeek, GLM", useCase: "Optimizado" },
+      },
+      searchProviders: "Buscar proveedor...",
+      searchModels: "Buscar modelos compatibles...",
+      providerCount: "{count} proveedores",
+      noProvidersFound: "Ningún proveedor coincide con tu búsqueda.",
+      connectKeyTitle: "Conecta tu clave de {provider}",
+      connectedKeyTitle: "Tu clave de {provider} está conectada",
+      verifyModelTitle: "Verifica un modelo",
+      keyStored: "Clave guardada de forma segura",
+      keyHelp: "¿Dónde encuentro mi clave de {provider}?",
+      encryptedAfterVerify: "Se cifra tras verificar",
+      securityCallout:
+        "Tus claves se cifran en reposo, nunca se muestran completas y puedes revocarlas cuando quieras.",
+      showCredential: "Mostrar clave de API",
+      hideCredential: "Ocultar clave de API",
+      selectedModel: "Modelo seleccionado",
+      back: "Atrás",
+      stepperLabel: "Pasos de configuración",
+      stepName: "Paso {step}: {label}",
+      steps: {
+        chooseProvider: "Elige proveedor",
+        connectKey: "Conecta tu clave",
+        verifyModel: "Verifica un modelo",
+        next: "Siguiente",
+        done: "Listo",
+      },
+      states: {
+        notConnected: "Sin conectar",
+        verified: "Verificado",
+        verificationFailed: "Verificación fallida",
+      },
+      verifiedAtLabel: "Verificado el {date}",
+      lastAttemptLabel: "Último intento {date}",
+      credentialLabel: "Clave de API",
+      credentialPlaceholder: "Pega la clave de API",
+      credentialInputHint:
+        "Se guarda cifrada tras la verificación. No se vuelve a mostrar.",
+      connect: "Conectar y cifrar",
+      verifying: "Verificando...",
+      rotate: "Rotar clave",
+      rotateConfirm: "Guardar nueva clave",
+      rotating: "Rotando...",
+      remove: "Eliminar",
+      removing: "Eliminando...",
+      cancel: "Cancelar",
+      removeTitle: "Eliminar la conexión del proveedor",
+      removeDescription:
+        "¿Eliminar {provider}? La credencial almacenada, el catálogo de modelos y la selección verificada de este proveedor se eliminan. Las funciones de IA que la usan dejan de funcionar.",
+      removeConfirm: "Eliminar conexión",
+      conflictRetryHint:
+        "Esta conexión cambió en otro lugar. Se cargó el estado más reciente; inténtalo de nuevo.",
+      modelsTitle: "Modelos compatibles",
+      modelsDescription:
+        "Modelos del catálogo del proveedor calificados para salida de texto estructurado.",
+      modelsEmpty: "No se devolvieron modelos compatibles.",
+      refreshCatalog: "Actualizar",
+      refreshingCatalog: "Actualizando...",
+      retry: "Reintentar",
+      catalogRetrievedAt: "Obtenido el {date}",
+      staleCatalogBanner:
+        "La actualización en vivo falló, así que esta lista proviene de la última obtención exitosa.",
+      verification: {
+        show: "Verificar un modelo",
+        hide: "Ocultar verificación",
+        disclosure:
+          "La verificación envía una pequeña solicitud de salida estructurada al proveedor y puede generar un cargo mínimo en tu cuenta.",
+        verifyAndSelect: "Verificar y seleccionar",
+        verifying: "Verificando...",
+        inProgress:
+          "Verificando {model} con tu proveedor. Esto puede tardar unos segundos.",
+      },
+      configuredTitle: "IA configurada",
+      readiness: {
+        title: "Capacidades de IA",
+        description:
+          "Requerido por las funciones de IA que generan salida estructurada.",
+        readyLabel: "Listo",
+        notReadyLabel: "No listo",
+        selectionLabel: "Modelo {model}, verificado el {date}",
+        reasons: {
+          no_connection: "Aún no hay ningún proveedor conectado.",
+          connection_unverified:
+            "El proveedor conectado aún no ha sido verificado.",
+          no_selection:
+            "Conecta un proveedor y luego verifica un modelo para completar la configuración.",
+          selection_stale:
+            "El modelo verificado ya no es válido. Verifica un modelo de nuevo.",
+          model_unavailable:
+            "El modelo seleccionado no está disponible actualmente. Verifica un modelo diferente.",
+        },
+      },
+      unsupportedReasons: {
+        modality: "No admite la modalidad de texto requerida.",
+        context_window_too_small:
+          "La ventana de contexto es menor que la requerida.",
+        context_window_unknown: "La ventana de contexto es desconocida.",
+        structured_output_unsupported: "No admite salida estructurada.",
+        route_unresolved:
+          "No hay una ruta admitida disponible para este modelo.",
+        deprecated: "Este modelo está obsoleto.",
+        missing_identity:
+          "El modelo carece de metadatos de identidad requeridos.",
+      },
+      cta: {
+        guidance:
+          "Las funciones de IA están deshabilitadas hasta que conectes un proveedor y verifiques un modelo.",
+        link: "Abrir configuración de IA",
+      },
+    },
 
     platform: {
       title: "MCP de plataforma",

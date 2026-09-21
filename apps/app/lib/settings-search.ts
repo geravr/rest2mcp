@@ -5,6 +5,7 @@ export const settingsTabValues = [
   "security",
   "privacy",
   "platform",
+  "ai",
 ] as const;
 
 export type SettingsTab = (typeof settingsTabValues)[number];

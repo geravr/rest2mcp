@@ -192,6 +192,35 @@ export const esErrors = {
       [APP_ERROR_CODES.MCP_OPENAPI_INVALID_SELECTION]:
         "Revisa las operaciones seleccionadas, los nombres y el grupo antes de importar.",
 
+      [APP_ERROR_CODES.AI_PROVIDER_UNSUPPORTED]:
+        "Ese proveedor de IA no está soportado.",
+      [APP_ERROR_CODES.AI_CONNECTION_NOT_FOUND]:
+        "No se encontró la conexión de proveedor de IA.",
+      [APP_ERROR_CODES.AI_CONNECTION_REVISION_CONFLICT]:
+        "Esta conexión de IA cambió en otro lugar. Recarga e inténtalo de nuevo.",
+      [APP_ERROR_CODES.AI_PROVIDER_CREDENTIAL_INVALID]:
+        "El proveedor rechazó esta credencial. Revisa la clave e inténtalo de nuevo.",
+      [APP_ERROR_CODES.AI_PROVIDER_REQUEST_REJECTED]:
+        "El proveedor rechazó la solicitud. Revisa la configuración del proveedor e inténtalo de nuevo.",
+      [APP_ERROR_CODES.AI_PROVIDER_TRANSIENT_FAILURE]:
+        "El proveedor no está disponible temporalmente. Inténtalo en breve.",
+      [APP_ERROR_CODES.AI_PROVIDER_TIMEOUT]:
+        "El proveedor no respondió a tiempo. Inténtalo en breve.",
+      [APP_ERROR_CODES.AI_PROVIDER_REDIRECT_BLOCKED]:
+        "El proveedor redirigió fuera de sus endpoints aprobados.",
+      [APP_ERROR_CODES.AI_PROVIDER_RESPONSE_TOO_LARGE]:
+        "La respuesta del proveedor era demasiado grande para procesarse.",
+      [APP_ERROR_CODES.AI_DISCOVERY_UNAVAILABLE]:
+        "No se pudo actualizar el catálogo de modelos ahora. Inténtalo en breve.",
+      [APP_ERROR_CODES.AI_MODEL_NOT_SELECTABLE]:
+        "Este modelo no es seleccionable para las capacidades requeridas.",
+      [APP_ERROR_CODES.AI_MODEL_VERIFICATION_FAILED]:
+        "Este modelo no pasó la verificación de salida estructurada. No se guardaron cambios.",
+      [APP_ERROR_CODES.AI_FEATURE_NOT_READY]:
+        "La IA aún no está configurada. Conecta un proveedor y verifica un modelo en Ajustes de IA.",
+      [APP_ERROR_CODES.AI_CREDENTIAL_UNAVAILABLE]:
+        "Las credenciales de IA no están disponibles temporalmente. Contacta a soporte si persiste.",
+
       [APP_ERROR_CODES.ROUTE_NOT_FOUND]: "Esta ruta de API no existe.",
       [APP_ERROR_CODES.INTERNAL_ERROR]:
         "Ocurri\u00f3 un error inesperado. Int\u00e9ntalo de nuevo.",

@@ -178,6 +178,35 @@ export const enErrors = {
       [APP_ERROR_CODES.MCP_OPENAPI_INVALID_SELECTION]:
         "Check the selected operations, names, and group before importing.",
 
+      [APP_ERROR_CODES.AI_PROVIDER_UNSUPPORTED]:
+        "That AI provider is not supported.",
+      [APP_ERROR_CODES.AI_CONNECTION_NOT_FOUND]:
+        "AI provider connection not found.",
+      [APP_ERROR_CODES.AI_CONNECTION_REVISION_CONFLICT]:
+        "This AI connection changed elsewhere. Reload and try again.",
+      [APP_ERROR_CODES.AI_PROVIDER_CREDENTIAL_INVALID]:
+        "The provider rejected this credential. Check the key and try again.",
+      [APP_ERROR_CODES.AI_PROVIDER_REQUEST_REJECTED]:
+        "The provider rejected the request. Check the provider setup and try again.",
+      [APP_ERROR_CODES.AI_PROVIDER_TRANSIENT_FAILURE]:
+        "The provider is temporarily unavailable. Try again shortly.",
+      [APP_ERROR_CODES.AI_PROVIDER_TIMEOUT]:
+        "The provider did not respond in time. Try again shortly.",
+      [APP_ERROR_CODES.AI_PROVIDER_REDIRECT_BLOCKED]:
+        "The provider redirected outside its approved endpoints.",
+      [APP_ERROR_CODES.AI_PROVIDER_RESPONSE_TOO_LARGE]:
+        "The provider response was too large to process.",
+      [APP_ERROR_CODES.AI_DISCOVERY_UNAVAILABLE]:
+        "The model catalog could not be refreshed right now. Try again shortly.",
+      [APP_ERROR_CODES.AI_MODEL_NOT_SELECTABLE]:
+        "This model is not selectable for the required capabilities.",
+      [APP_ERROR_CODES.AI_MODEL_VERIFICATION_FAILED]:
+        "This model did not pass the structured-output verification. No changes were saved.",
+      [APP_ERROR_CODES.AI_FEATURE_NOT_READY]:
+        "AI is not configured yet. Connect a provider and verify a model in AI Settings.",
+      [APP_ERROR_CODES.AI_CREDENTIAL_UNAVAILABLE]:
+        "AI credentials are temporarily unavailable. Contact support if this persists.",
+
       [APP_ERROR_CODES.ROUTE_NOT_FOUND]: "This API route does not exist.",
       [APP_ERROR_CODES.INTERNAL_ERROR]:
         "An unexpected error occurred. Please try again.",

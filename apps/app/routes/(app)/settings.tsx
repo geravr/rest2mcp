@@ -1,4 +1,5 @@
 import { FeatureErrorBoundary } from "@/components/feature-error-boundary";
+import { AiSettingsTab } from "@/components/settings/ai-tab";
 import { ObservabilitySettingsTab } from "@/components/settings/observability-tab";
 import { PlatformTokenTab } from "@/components/settings/platform-token-tab";
 import { ProfileSettingsTab } from "@/components/settings/profile-tab";
@@ -50,6 +51,7 @@ function Settings() {
             <TabsTrigger value="security">{t.settings.tabSecurity}</TabsTrigger>
             <TabsTrigger value="privacy">{t.settings.tabPrivacy}</TabsTrigger>
             <TabsTrigger value="platform">{t.settings.tabPlatform}</TabsTrigger>
+            <TabsTrigger value="ai">{t.settings.tabAi}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="profile">
@@ -63,6 +65,9 @@ function Settings() {
           </TabsContent>
           <TabsContent value="platform">
             <PlatformTokenTab />
+          </TabsContent>
+          <TabsContent value="ai">
+            <AiSettingsTab />
           </TabsContent>
         </Tabs>
       </div>

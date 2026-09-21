@@ -6,6 +6,139 @@ export const enSettings = {
     tabSecurity: "Security",
     tabPrivacy: "Privacy & Cookies",
     tabPlatform: "Platform MCP",
+    tabAi: "AI",
+
+    ai: {
+      title: "AI providers",
+      description:
+        "Connect a provider, verify a model, and see what is ready for AI features.",
+      providersTitle: "Providers",
+      providersDescription:
+        "One provider is used at a time. Pick a provider, connect it, and verify a model. Credentials are stored encrypted and are never shown again.",
+      chooseProvider: "Choose a provider to configure.",
+      changeProvider: "Change provider",
+      providerNames: {
+        openai: "OpenAI",
+        anthropic: "Anthropic",
+        xai: "xAI",
+        meta: "Meta",
+        openrouter: "OpenRouter",
+        opencode_zen: "OpenCode Zen",
+        opencode_go: "OpenCode Go",
+      },
+      providerDetails: {
+        openai: { model: "GPT-4o, o1", useCase: "Popular" },
+        anthropic: { model: "Claude Sonnet", useCase: "Recommended" },
+        xai: { model: "Grok", useCase: "Fast" },
+        meta: { model: "Llama", useCase: "Open source" },
+        openrouter: { model: "100+ models", useCase: "Flexible" },
+        opencode_zen: { model: "Coding models", useCase: "Optimized" },
+        opencode_go: { model: "DeepSeek, GLM", useCase: "Optimized" },
+      },
+      searchProviders: "Search providers...",
+      searchModels: "Search compatible models...",
+      providerCount: "{count} providers",
+      noProvidersFound: "No providers match your search.",
+      connectKeyTitle: "Connect your {provider} key",
+      connectedKeyTitle: "Your {provider} key is connected",
+      verifyModelTitle: "Verify a model",
+      keyStored: "Key stored securely",
+      keyHelp: "Where do I find my {provider} key?",
+      encryptedAfterVerify: "Encrypted after verification",
+      securityCallout:
+        "Your keys are encrypted at rest, never shown in full, and can be revoked whenever you want.",
+      showCredential: "Show API key",
+      hideCredential: "Hide API key",
+      selectedModel: "Selected model",
+      back: "Back",
+      stepperLabel: "Setup steps",
+      stepName: "Step {step}: {label}",
+      steps: {
+        chooseProvider: "Choose provider",
+        connectKey: "Connect your key",
+        verifyModel: "Verify a model",
+        next: "Next",
+        done: "Done",
+      },
+      states: {
+        notConnected: "Not connected",
+        verified: "Verified",
+        verificationFailed: "Verification failed",
+      },
+      verifiedAtLabel: "Verified {date}",
+      lastAttemptLabel: "Last attempt {date}",
+      credentialLabel: "API key",
+      credentialPlaceholder: "Paste API key",
+      credentialInputHint:
+        "Stored encrypted after verification. It is never displayed again.",
+      connect: "Connect & encrypt",
+      verifying: "Verifying...",
+      rotate: "Rotate key",
+      rotateConfirm: "Save new key",
+      rotating: "Rotating...",
+      remove: "Remove",
+      removing: "Removing...",
+      cancel: "Cancel",
+      removeTitle: "Remove provider connection",
+      removeDescription:
+        "Remove {provider}? The stored credential, model catalog, and verified selection for this provider are deleted. AI features using it stop working.",
+      removeConfirm: "Remove connection",
+      conflictRetryHint:
+        "This connection changed elsewhere. The latest state has been loaded — try again.",
+      modelsTitle: "Compatible models",
+      modelsDescription:
+        "Models from the provider catalog qualified for structured text output.",
+      modelsEmpty: "No compatible models were returned.",
+      refreshCatalog: "Refresh",
+      refreshingCatalog: "Refreshing...",
+      retry: "Retry",
+      catalogRetrievedAt: "Retrieved {date}",
+      staleCatalogBanner:
+        "Live refresh failed, so this list comes from the last successful retrieval.",
+      verification: {
+        show: "Verify a model",
+        hide: "Hide verification",
+        disclosure:
+          "Verification sends one small structured-output request to the provider and may incur a minimal charge on your account.",
+        verifyAndSelect: "Verify & select",
+        verifying: "Verifying...",
+        inProgress:
+          "Verifying {model} with your provider. This may take a few seconds.",
+      },
+      configuredTitle: "AI is configured",
+      readiness: {
+        title: "AI capabilities",
+        description: "Required by AI features that generate structured output.",
+        readyLabel: "Ready",
+        notReadyLabel: "Not ready",
+        selectionLabel: "Model {model}, verified {date}",
+        reasons: {
+          no_connection: "No provider is connected yet.",
+          connection_unverified:
+            "The connected provider has not been verified yet.",
+          no_selection:
+            "Connect a provider, then verify a model to finish setup.",
+          selection_stale:
+            "The verified model is no longer valid. Verify a model again.",
+          model_unavailable:
+            "The selected model is currently unavailable. Verify a different model.",
+        },
+      },
+      unsupportedReasons: {
+        modality: "Does not support the required text modality.",
+        context_window_too_small: "Context window is smaller than required.",
+        context_window_unknown: "Context window is unknown.",
+        structured_output_unsupported: "Does not support structured output.",
+        route_unresolved: "No supported route is available for this model.",
+        deprecated: "This model is deprecated.",
+        missing_identity: "The model is missing required identity metadata.",
+      },
+      cta: {
+        guidance:
+          "AI features are disabled until a provider is connected and a model is verified.",
+        link: "Open AI settings",
+      },
+    },
 
     platform: {
       title: "Platform MCP",
