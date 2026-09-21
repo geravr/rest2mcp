@@ -37,6 +37,13 @@ Local guidance for the database workspace in `db/`. Read [../AGENTS.md](../AGENT
 - `mcp_call_log` keeps denormalized `published_revision_id`, `revision_number`, `aggregate_fingerprint`, and `tool_fingerprint` so attribution survives revision cleanup. Do not replace those columns with joins to revision tables.
 - `mcp_server.published_revision_id` is intentionally not a foreign key (it avoids a server/revision FK cycle); pointer integrity is enforced by the publication service and asserted in tests.
 
+## AI Provider Tables
+
+- `ai_provider_connection` holds at most one connection per `(user_id, provider_kind)`; `ai_model_selection` holds at most one selection per `(user_id, capability_profile)`.
+- Deleting a connection cascade-deletes its selections.
+- `ai_provider_connection.ciphertext` holds only versioned AES-256-GCM envelopes; never plaintext or a reversible credential derivative.
+- `provider_kind`, `protocol`, and `capability_profile` are stored as plain text and validated against `@repo/core` constants at the service layer.
+
 ## Environment
 
 - `DATABASE_URL` is loaded from the repo root `.env` file.

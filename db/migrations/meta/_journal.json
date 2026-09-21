@@ -71,6 +71,13 @@
       "when": 1789831570318,
       "tag": "0009_legal_tusk",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790005766865,
+      "tag": "0010_wild_husk",
+      "breakpoints": true
     }
   ]
 }

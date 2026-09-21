@@ -1,4 +1,7 @@
 export * from "./admin-audit-log";
+export * from "./ai-model-selection";
+export * from "./ai-provider-connection";
+export * from "./ai-relations";
 export * from "./id";
 export * from "./mcp-agent-token";
 export * from "./mcp-call-log";
