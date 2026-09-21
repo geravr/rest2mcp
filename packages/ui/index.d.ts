@@ -19,6 +19,7 @@ export * from "./components/field";
 export * from "./components/table";
 export * from "./components/textarea";
 export * from "./components/separator";
+export * from "./components/stepper";
 export * from "./components/skeleton";
 export * from "./components/pagination";
 export * from "./components/select";
