@@ -50,6 +50,12 @@ export type {
   PlatformScopeValidationFailure,
 } from "./src/mcp-platform.js";
 
+// MCP Studio limits
+export {
+  MCP_MAX_TOOLS_PER_SERVER_BOUNDS,
+  MCP_MAX_TOOLS_PER_SERVER_DEFAULT,
+} from "./src/mcp-limits.js";
+
 // OpenAPI import and Studio tool groups
 export {
   assertUniqueMcpOpenApiIssueCodes,
