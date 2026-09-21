@@ -52,7 +52,7 @@ import {
   MCP_TOOL_GROUP_FILTER_UNGROUPED,
 } from "../lib/mcp-domain-commands.js";
 import { isForbiddenTransportHeaderName } from "../lib/mcp-policy.js";
-import { MCP_MAX_TOOLS_PER_SERVER } from "../lib/mcp-redact.js";
+import { getMcpMaxToolsPerServer } from "../lib/mcp-limits.js";
 import {
   mcpAuthConfigurationSchema,
   mcpCommonEntriesSchema,
@@ -1144,6 +1144,7 @@ export async function getServer(db: DB, userId: string, serverId: string) {
     ...withMeta,
     tools,
     variables,
+    limits: { maxToolsPerServer: getMcpMaxToolsPerServer() },
     publishedRevisionNumber: activeRevision?.revisionNumber ?? null,
     publishedTools: publishedToolRows
       .filter((entry) => entry.enabled)
@@ -1403,10 +1404,11 @@ async function applyServerCommonWrite(
     .from(mcpTool)
     .where(and(eq(mcpTool.serverId, server.id), eq(mcpTool.enabled, true)));
 
-  if (enabledTools.length > MCP_MAX_TOOLS_PER_SERVER) {
+  const maxToolsPerServer = getMcpMaxToolsPerServer();
+  if (enabledTools.length > maxToolsPerServer) {
     throw appError({
       appCode: APP_ERROR_CODES.INVALID_INPUT,
-      message: `A server cannot have more than ${MCP_MAX_TOOLS_PER_SERVER} enabled tools.`,
+      message: `A server cannot have more than ${maxToolsPerServer} enabled tools.`,
       status: 400,
     });
   }
@@ -1590,10 +1592,11 @@ async function assertToolCapacity(db: DB, serverId: string) {
     .select({ count: count() })
     .from(mcpTool)
     .where(eq(mcpTool.serverId, serverId));
-  if ((row?.count ?? 0) >= MCP_MAX_TOOLS_PER_SERVER) {
+  const limit = getMcpMaxToolsPerServer();
+  if ((row?.count ?? 0) >= limit) {
     throw appError({
       appCode: APP_ERROR_CODES.INVALID_INPUT,
-      message: `A server cannot have more than ${MCP_MAX_TOOLS_PER_SERVER} tools.`,
+      message: `A server cannot have more than ${limit} tools.`,
       status: 400,
     });
   }

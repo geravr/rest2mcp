@@ -25,6 +25,7 @@ import {
 import { and, asc, count, desc, eq, inArray, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { APP_ERROR_CODES, AppError, appError } from "../lib/app-error.js";
+import { getMcpMaxToolsPerServer } from "../lib/mcp-limits.js";
 import {
   captureMcpTelemetry,
   MCP_TELEMETRY_EVENTS,
@@ -826,6 +827,25 @@ async function runPublishTransaction(
           toolNames: candidate.errors
             .map((issue) => issue.toolName)
             .filter((name): name is string => Boolean(name)),
+        },
+      });
+    }
+
+    // Lowering the configured cap leaves over-cap drafts behind, so the bound is
+    // re-checked here: the published revision is what agents can reach.
+    const maxToolsPerServer = getMcpMaxToolsPerServer();
+    const enabledToolCount = candidate.tools.filter(
+      (tool) => tool.enabled,
+    ).length;
+    if (enabledToolCount > maxToolsPerServer) {
+      throw appError({
+        appCode: APP_ERROR_CODES.MCP_TOOL_LIMIT_REACHED,
+        message: `A server cannot have more than ${maxToolsPerServer} enabled tools.`,
+        status: 400,
+        details: {
+          serverId: server.id,
+          limit: maxToolsPerServer,
+          observed: enabledToolCount,
         },
       });
     }

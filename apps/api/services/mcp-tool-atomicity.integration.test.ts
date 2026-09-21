@@ -4,13 +4,15 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { APP_ERROR_CODES } from "@repo/core";
 import { generateAuthId, schema, user } from "@repo/db";
+import { getMcpMaxToolsPerServer } from "../lib/mcp-limits.js";
 import { withOwnedServerWrite } from "./mcp-server-command.js";
 import { createTool, deleteServer } from "./mcp-studio-service.js";
 
 const connectionString = process.env.DATABASE_URL;
 const describeIntegration = connectionString ? describe : describe.skip;
 
-const MAX_TOOLS = 50;
+/** The deployment's effective cap, so seeded rows reach the real boundary. */
+const MAX_TOOLS = getMcpMaxToolsPerServer();
 const definition = {
   version: 1 as const,
   pathSegments: [

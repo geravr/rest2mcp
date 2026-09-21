@@ -17,6 +17,7 @@ import {
   drainAuditQueue,
 } from "../lib/mcp-audit-queue.js";
 import { encryptCredential } from "../lib/mcp-crypto.js";
+import { getMcpMaxToolsPerServer } from "../lib/mcp-limits.js";
 import { authenticateServerToken } from "./mcp-agent-auth-service.js";
 import {
   executeMappedTool,
@@ -185,104 +186,107 @@ describeIntegration("published boundary end to end", () => {
     return server;
   }
 
-  it("isolates unpublished edits from discovery and execution until a full aggregate publish", async () => {
-    lookupMock.mockResolvedValue([{ address: "93.184.216.34" }]);
-    const serverId = "mcs_boundary_atomic";
-    const secretId = `${serverId}_secret`;
-    await seedServer(serverId, secretId);
+  // Publishes a second tool alongside the seeded one, so it needs two slots.
+  it.skipIf(getMcpMaxToolsPerServer() < 2)(
+    "isolates unpublished edits from discovery and execution until a full aggregate publish",
+    async () => {
+      lookupMock.mockResolvedValue([{ address: "93.184.216.34" }]);
+      const serverId = "mcs_boundary_atomic";
+      const secretId = `${serverId}_secret`;
+      await seedServer(serverId, secretId);
 
-    // No active revision: discovery advertises nothing and execution is refused.
-    const beforePublish = await loadExecutionSnapshot(asDb, {
-      serverId,
-      credentialSecret: CREDENTIAL_SECRET,
-    });
-    expect(beforePublish?.publishedRevisionId).toBeNull();
-    expect(beforePublish?.tools).toHaveLength(0);
-
-    await expect(
-      executeMappedTool(asDb, {
+      // No active revision: discovery advertises nothing and execution is refused.
+      const beforePublish = await loadExecutionSnapshot(asDb, {
         serverId,
-        toolId: `${serverId}_tool`,
-        source: "agent",
         credentialSecret: CREDENTIAL_SECRET,
-      }),
-    ).rejects.toMatchObject({ appCode: APP_ERROR_CODES.MCP_TOOL_NOT_FOUND });
+      });
+      expect(beforePublish?.publishedRevisionId).toBeNull();
+      expect(beforePublish?.tools).toHaveLength(0);
 
-    await publishOnce(serverId, "req_boundary_atomic_1");
+      await expect(
+        executeMappedTool(asDb, {
+          serverId,
+          toolId: `${serverId}_tool`,
+          source: "agent",
+          credentialSecret: CREDENTIAL_SECRET,
+        }),
+      ).rejects.toMatchObject({ appCode: APP_ERROR_CODES.MCP_TOOL_NOT_FOUND });
 
-    const published = await loadExecutionSnapshot(asDb, {
-      serverId,
-      credentialSecret: CREDENTIAL_SECRET,
-    });
-    expect(published?.revisionNumber).toBe(1);
-    expect(published?.tools.map((entry) => entry.tool.name)).toEqual([
-      "get_contact",
-    ]);
-    expect(published?.tools[0]?.tool.description).toBe("Fetch one contact.");
+      await publishOnce(serverId, "req_boundary_atomic_1");
 
-    // Unpublished edit: change the tool and add a new enabled tool in the draft.
-    await db
-      .update(schema.mcpTool)
-      .set({ description: "Fetch one contact (v2 draft)." })
-      .where(eq(schema.mcpTool.id, `${serverId}_tool`));
-    await db.insert(schema.mcpTool).values({
-      id: `${serverId}_tool_added`,
-      serverId,
-      name: "list_contacts",
-      title: "List contacts",
-      description: "List contacts (draft).",
-      method: "GET",
-      requestDefinition: {
-        ...readDefinition,
-        pathSegments: [
-          {
-            id: "path_1",
-            value: { kind: "literal", value: "/contacts/list" },
-          },
-        ],
-      },
-      allowMutation: false,
-      enabled: true,
-      source: "manual",
-    });
-
-    const stillPublished = await loadExecutionSnapshot(asDb, {
-      serverId,
-      credentialSecret: CREDENTIAL_SECRET,
-    });
-    expect(stillPublished?.revisionNumber).toBe(1);
-    expect(stillPublished?.tools.map((entry) => entry.tool.name)).toEqual([
-      "get_contact",
-    ]);
-    expect(stillPublished?.tools[0]?.tool.description).toBe(
-      "Fetch one contact.",
-    );
-
-    await expect(
-      executeMappedTool(asDb, {
+      const published = await loadExecutionSnapshot(asDb, {
         serverId,
-        toolId: `${serverId}_tool_added`,
-        source: "agent",
         credentialSecret: CREDENTIAL_SECRET,
-      }),
-    ).rejects.toMatchObject({ appCode: APP_ERROR_CODES.MCP_TOOL_NOT_FOUND });
+      });
+      expect(published?.revisionNumber).toBe(1);
+      expect(published?.tools.map((entry) => entry.tool.name)).toEqual([
+        "get_contact",
+      ]);
+      expect(published?.tools[0]?.tool.description).toBe("Fetch one contact.");
 
-    // Publication switches the whole aggregate in one revision.
-    await publishOnce(serverId, "req_boundary_atomic_2");
-    const afterSecond = await loadExecutionSnapshot(asDb, {
-      serverId,
-      credentialSecret: CREDENTIAL_SECRET,
-    });
-    expect(afterSecond?.revisionNumber).toBe(2);
-    expect(afterSecond?.tools.map((entry) => entry.tool.name).sort()).toEqual([
-      "get_contact",
-      "list_contacts",
-    ]);
-    expect(
-      afterSecond?.tools.find((entry) => entry.tool.id === `${serverId}_tool`)
-        ?.tool.description,
-    ).toBe("Fetch one contact (v2 draft).");
-  });
+      // Unpublished edit: change the tool and add a new enabled tool in the draft.
+      await db
+        .update(schema.mcpTool)
+        .set({ description: "Fetch one contact (v2 draft)." })
+        .where(eq(schema.mcpTool.id, `${serverId}_tool`));
+      await db.insert(schema.mcpTool).values({
+        id: `${serverId}_tool_added`,
+        serverId,
+        name: "list_contacts",
+        title: "List contacts",
+        description: "List contacts (draft).",
+        method: "GET",
+        requestDefinition: {
+          ...readDefinition,
+          pathSegments: [
+            {
+              id: "path_1",
+              value: { kind: "literal", value: "/contacts/list" },
+            },
+          ],
+        },
+        allowMutation: false,
+        enabled: true,
+        source: "manual",
+      });
+
+      const stillPublished = await loadExecutionSnapshot(asDb, {
+        serverId,
+        credentialSecret: CREDENTIAL_SECRET,
+      });
+      expect(stillPublished?.revisionNumber).toBe(1);
+      expect(stillPublished?.tools.map((entry) => entry.tool.name)).toEqual([
+        "get_contact",
+      ]);
+      expect(stillPublished?.tools[0]?.tool.description).toBe(
+        "Fetch one contact.",
+      );
+
+      await expect(
+        executeMappedTool(asDb, {
+          serverId,
+          toolId: `${serverId}_tool_added`,
+          source: "agent",
+          credentialSecret: CREDENTIAL_SECRET,
+        }),
+      ).rejects.toMatchObject({ appCode: APP_ERROR_CODES.MCP_TOOL_NOT_FOUND });
+
+      // Publication switches the whole aggregate in one revision.
+      await publishOnce(serverId, "req_boundary_atomic_2");
+      const afterSecond = await loadExecutionSnapshot(asDb, {
+        serverId,
+        credentialSecret: CREDENTIAL_SECRET,
+      });
+      expect(afterSecond?.revisionNumber).toBe(2);
+      expect(afterSecond?.tools.map((entry) => entry.tool.name).sort()).toEqual(
+        ["get_contact", "list_contacts"],
+      );
+      expect(
+        afterSecond?.tools.find((entry) => entry.tool.id === `${serverId}_tool`)
+          ?.tool.description,
+      ).toBe("Fetch one contact (v2 draft).");
+    },
+  );
 
   it("keeps pause, resume, token revocation, and secret rotation immediate and draft-clean", async () => {
     lookupMock.mockResolvedValue([{ address: "93.184.216.34" }]);

@@ -8,7 +8,6 @@ const LOG_SUMMARY_LIMIT = 64 * 1024;
 export const MCP_RESPONSE_LIMIT = MCP_RESPONSE_BYTE_LIMIT;
 /** Kept as an alias so existing callers do not need to migrate imports. */
 export const MCP_UPSTREAM_TIMEOUT_MS = MCP_UPSTREAM_DEADLINE_MS;
-export const MCP_MAX_TOOLS_PER_SERVER = 50;
 
 const SECRET_PATTERNS = [
   /Bearer\s+[A-Za-z0-9._~+/=-]+/gi,

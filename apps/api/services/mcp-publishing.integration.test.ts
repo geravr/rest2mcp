@@ -1,4 +1,12 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { and, count, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
@@ -98,6 +106,10 @@ describeIntegration("mcp publishing service", () => {
     await db.delete(user).where(eq(user.id, userId));
     await db.delete(user).where(eq(user.id, otherUserId));
     await client.end();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   async function seedServer(serverId: string): Promise<{ toolId: string }> {
@@ -227,6 +239,37 @@ describeIntegration("mcp publishing service", () => {
 
       await expect(publishServer(asDb, input)).rejects.toMatchObject({
         appCode: APP_ERROR_CODES.MCP_PUBLISH_CANDIDATE_CHANGED,
+      });
+      const server = await readServer(serverId);
+      expect(server?.publishedRevisionId).toBeNull();
+      expect(await revisionCount(serverId)).toBe(0);
+    });
+
+    it("rejects a publish whose enabled tools exceed the configured cap", async () => {
+      vi.stubEnv("MCP_MAX_TOOLS_PER_SERVER", "1");
+      const serverId = "mcs_pub_tool_cap";
+      await seedServer(serverId);
+      await db.insert(schema.mcpTool).values({
+        id: `${serverId}_tool_2`,
+        serverId,
+        name: "list_contacts_again",
+        title: "List contacts again",
+        description: "List contacts again.",
+        method: "GET",
+        requestDefinition: secretDefinition(
+          `${serverId}_secret`,
+          `${serverId}_config`,
+        ),
+        allowMutation: false,
+        enabled: true,
+        source: "manual",
+      });
+      const { input } = await publishInput(serverId, "req_tool_cap");
+
+      await expect(publishServer(asDb, input)).rejects.toMatchObject({
+        appCode: APP_ERROR_CODES.MCP_TOOL_LIMIT_REACHED,
+        status: 400,
+        details: { serverId, limit: 1, observed: 2 },
       });
       const server = await readServer(serverId);
       expect(server?.publishedRevisionId).toBeNull();

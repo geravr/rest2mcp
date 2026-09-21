@@ -6,9 +6,13 @@ import {
   MCP_TOOL_GROUP_LIMITS,
 } from "@repo/core";
 import { AppError } from "../lib/app-error.js";
+import { getMcpMaxToolsPerServer } from "../lib/mcp-limits.js";
 import { mcpOpenApiSourceProvenanceSchema } from "../lib/openapi-import-contracts.js";
 import { parseOpenApiDocument } from "../lib/openapi-document.js";
 import { sanitizeOpenApiSourceLabel } from "../lib/openapi-fetch.js";
+
+/** The deployment's effective cap, so fixtures track configuration. */
+const toolLimit = getMcpMaxToolsPerServer();
 
 const tables = vi.hoisted(() => ({
   generateId: vi.fn((prefix: string) => `${prefix}_test`),
@@ -330,6 +334,7 @@ function telemetryCallFor(event: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
   fetchOpenApiDocument.mockReset();
 });
 
@@ -354,7 +359,7 @@ describe("previewOpenApiImport", () => {
       selectableCount: 3,
     });
     expect(result.capacity).toEqual({
-      toolLimit: 50,
+      toolLimit,
       currentTools: 1,
       groupLimit: MCP_TOOL_GROUP_LIMITS.maxGroupsPerServer,
       currentGroups: 1,
@@ -679,56 +684,65 @@ describe("confirmOpenApiImport", () => {
     expect(result.tools.map((tool) => tool.name)).toEqual(["customers_list"]);
   });
 
-  it("creates one shared first-tag group for operations with the same tag", async () => {
-    const db = makeDb([
-      [serverRow],
-      [],
-      [],
-      [],
-      [serverRow],
-      [{ count: 0 }],
-      [],
-      [{ id: "mtg_new", name: "customers" }],
-      [],
-      [{ id: "mct_1", name: "listcustomers" }],
-      [{ id: "mct_2", name: "createcustomer" }],
-    ]);
+  // Imports two operations, so it needs room for two tool slots.
+  it.skipIf(toolLimit < 2)(
+    "creates one shared first-tag group for operations with the same tag",
+    async () => {
+      const db = makeDb([
+        [serverRow],
+        [],
+        [],
+        [],
+        [serverRow],
+        [{ count: 0 }],
+        [],
+        [{ id: "mtg_new", name: "customers" }],
+        [],
+        [{ id: "mct_1", name: "listcustomers" }],
+        [{ id: "mct_2", name: "createcustomer" }],
+      ]);
 
-    const result = await confirmOpenApiImport(db as never, USER_ID, SERVER_ID, {
-      expectedRevision: 1,
-      source: contentSource(),
-      fingerprint: fingerprintOf(OPERATIONS_DOC),
-      selection: [
-        { operationKey: "listCustomers" },
-        { operationKey: "createCustomer" },
-      ],
-      groupStrategy: firstTag,
-    });
-
-    const groupInserts = db.committed.inserted.filter(
-      (record) => record.table === mcpToolGroup,
-    );
-    expect(groupInserts).toEqual([
-      {
-        table: mcpToolGroup,
-        values: {
-          serverId: SERVER_ID,
-          name: "customers",
-          normalizedName: "customers",
+      const result = await confirmOpenApiImport(
+        db as never,
+        USER_ID,
+        SERVER_ID,
+        {
+          expectedRevision: 1,
+          source: contentSource(),
+          fingerprint: fingerprintOf(OPERATIONS_DOC),
+          selection: [
+            { operationKey: "listCustomers" },
+            { operationKey: "createCustomer" },
+          ],
+          groupStrategy: firstTag,
         },
-      },
-    ]);
-    expect(result.groups).toEqual([
-      { id: "mtg_new", name: "customers", created: true },
-    ]);
-    for (const record of db.committed.inserted.filter(
-      (item) => item.table === mcpTool,
-    )) {
-      expect((record.values as Record<string, unknown>).groupId).toBe(
-        "mtg_new",
       );
-    }
-  });
+
+      const groupInserts = db.committed.inserted.filter(
+        (record) => record.table === mcpToolGroup,
+      );
+      expect(groupInserts).toEqual([
+        {
+          table: mcpToolGroup,
+          values: {
+            serverId: SERVER_ID,
+            name: "customers",
+            normalizedName: "customers",
+          },
+        },
+      ]);
+      expect(result.groups).toEqual([
+        { id: "mtg_new", name: "customers", created: true },
+      ]);
+      for (const record of db.committed.inserted.filter(
+        (item) => item.table === mcpTool,
+      )) {
+        expect((record.values as Record<string, unknown>).groupId).toBe(
+          "mtg_new",
+        );
+      }
+    },
+  );
 
   it("reuses an existing group by normalized first tag without creating one", async () => {
     const db = makeDb([
@@ -766,53 +780,62 @@ describe("confirmOpenApiImport", () => {
     expect(toolValues.allowMutation).toBe(false);
   });
 
-  it("lets a new common group override tags and create exactly one group", async () => {
-    const db = makeDb([
-      [serverRow],
-      [],
-      [],
-      [],
-      [serverRow],
-      [{ count: 0 }],
-      [],
-      [{ id: "mtg_imp", name: "Imported" }],
-      [],
-      [{ id: "mct_1", name: "listcustomers" }],
-      [{ id: "mct_2", name: "listinvoices" }],
-    ]);
+  // Imports two operations, so it needs room for two tool slots.
+  it.skipIf(toolLimit < 2)(
+    "lets a new common group override tags and create exactly one group",
+    async () => {
+      const db = makeDb([
+        [serverRow],
+        [],
+        [],
+        [],
+        [serverRow],
+        [{ count: 0 }],
+        [],
+        [{ id: "mtg_imp", name: "Imported" }],
+        [],
+        [{ id: "mct_1", name: "listcustomers" }],
+        [{ id: "mct_2", name: "listinvoices" }],
+      ]);
 
-    const result = await confirmOpenApiImport(db as never, USER_ID, SERVER_ID, {
-      expectedRevision: 1,
-      source: contentSource(),
-      fingerprint: fingerprintOf(OPERATIONS_DOC),
-      selection: [
-        { operationKey: "listCustomers" },
-        { operationKey: "listInvoices" },
-      ],
-      groupStrategy: { kind: "new", name: "Imported" },
-    });
-
-    const groupInserts = db.committed.inserted.filter(
-      (record) => record.table === mcpToolGroup,
-    );
-    expect(groupInserts).toEqual([
-      {
-        table: mcpToolGroup,
-        values: {
-          serverId: SERVER_ID,
-          name: "Imported",
-          normalizedName: "imported",
+      const result = await confirmOpenApiImport(
+        db as never,
+        USER_ID,
+        SERVER_ID,
+        {
+          expectedRevision: 1,
+          source: contentSource(),
+          fingerprint: fingerprintOf(OPERATIONS_DOC),
+          selection: [
+            { operationKey: "listCustomers" },
+            { operationKey: "listInvoices" },
+          ],
+          groupStrategy: { kind: "new", name: "Imported" },
         },
-      },
-    ]);
-    expect(result.groups).toEqual([
-      { id: "mtg_imp", name: "Imported", created: true },
-    ]);
-    const toolGroupIds = db.committed.inserted
-      .filter((record) => record.table === mcpTool)
-      .map((record) => (record.values as Record<string, unknown>).groupId);
-    expect(toolGroupIds).toEqual(["mtg_imp", "mtg_imp"]);
-  });
+      );
+
+      const groupInserts = db.committed.inserted.filter(
+        (record) => record.table === mcpToolGroup,
+      );
+      expect(groupInserts).toEqual([
+        {
+          table: mcpToolGroup,
+          values: {
+            serverId: SERVER_ID,
+            name: "Imported",
+            normalizedName: "imported",
+          },
+        },
+      ]);
+      expect(result.groups).toEqual([
+        { id: "mtg_imp", name: "Imported", created: true },
+      ]);
+      const toolGroupIds = db.committed.inserted
+        .filter((record) => record.table === mcpTool)
+        .map((record) => (record.values as Record<string, unknown>).groupId);
+      expect(toolGroupIds).toEqual(["mtg_imp", "mtg_imp"]);
+    },
+  );
 
   it("uses the final sanitized label for URL provenance", async () => {
     fetchOpenApiDocument.mockResolvedValue({
@@ -1034,11 +1057,11 @@ describe("confirmOpenApiImport", () => {
   it("rejects the tool cap under the lock with the observed count", async () => {
     const db = makeDb([
       [serverRow],
-      toolNameRows(50),
+      toolNameRows(toolLimit),
       [],
       [],
       [serverRow],
-      [{ count: 50 }],
+      [{ count: toolLimit }],
     ]);
 
     await expect(
@@ -1051,7 +1074,33 @@ describe("confirmOpenApiImport", () => {
       }),
     ).rejects.toMatchObject({
       appCode: APP_ERROR_CODES.MCP_TOOL_LIMIT_REACHED,
-      details: { serverId: SERVER_ID, limit: 50, observed: 50 },
+      details: { serverId: SERVER_ID, limit: toolLimit, observed: toolLimit },
+    });
+    expect(db.committed.inserted).toEqual([]);
+  });
+
+  it("reads the tool cap from configuration under the lock", async () => {
+    vi.stubEnv("MCP_MAX_TOOLS_PER_SERVER", "3");
+    const db = makeDb([
+      [serverRow],
+      toolNameRows(3),
+      [],
+      [],
+      [serverRow],
+      [{ count: 3 }],
+    ]);
+
+    await expect(
+      confirmOpenApiImport(db as never, USER_ID, SERVER_ID, {
+        expectedRevision: 1,
+        source: contentSource(),
+        fingerprint: fingerprintOf(OPERATIONS_DOC),
+        selection: [{ operationKey: "listCustomers" }],
+        groupStrategy: ungrouped,
+      }),
+    ).rejects.toMatchObject({
+      appCode: APP_ERROR_CODES.MCP_TOOL_LIMIT_REACHED,
+      details: { serverId: SERVER_ID, limit: 3, observed: 3 },
     });
     expect(db.committed.inserted).toEqual([]);
   });

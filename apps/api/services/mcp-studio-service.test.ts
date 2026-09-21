@@ -2,6 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { APP_ERROR_CODES } from "@repo/core";
 import { AppError } from "../lib/app-error.js";
 import { decryptCredential, encryptCredential } from "../lib/mcp-crypto.js";
+import { getMcpMaxToolsPerServer } from "../lib/mcp-limits.js";
+
+/** The deployment's effective cap, so boundary fixtures track configuration. */
+const toolLimit = getMcpMaxToolsPerServer();
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 const tables = vi.hoisted(() => ({
   mcpServer: {
@@ -1191,40 +1199,46 @@ describe("mcp-studio typed tools", () => {
     expect(db.updatedValues).toHaveLength(0);
   });
 
-  it("duplicates a typed tool with regenerated local ids", async () => {
-    const db = makeDb([
-      [serverRow],
-      [
-        {
-          id: "mct_1",
-          name: "get_contact",
-          title: "Get contact",
-          description: "Fetch one contact.",
-          method: "GET",
-          requestDefinition: typedDefinition,
-          allowMutation: false,
-          enabled: true,
-          source: "manual",
-        },
-      ],
-      [{ count: 1 }],
-      [], // server values
-      [{ id: "mct_2", name: "get_contact_copy" }],
-    ]);
+  // Duplicating adds a second tool, so it needs room for two tool slots.
+  it.skipIf(toolLimit < 2)(
+    "duplicates a typed tool with regenerated local ids",
+    async () => {
+      const db = makeDb([
+        [serverRow],
+        [
+          {
+            id: "mct_1",
+            name: "get_contact",
+            title: "Get contact",
+            description: "Fetch one contact.",
+            method: "GET",
+            requestDefinition: typedDefinition,
+            allowMutation: false,
+            enabled: true,
+            source: "manual",
+          },
+        ],
+        [{ count: 1 }],
+        [], // server values
+        [{ id: "mct_2", name: "get_contact_copy" }],
+      ]);
 
-    await duplicateTool(db as never, "user-a", "mcs_1", "mct_1", {
-      expectedRevision: 1,
-    });
+      await duplicateTool(db as never, "user-a", "mcs_1", "mct_1", {
+        expectedRevision: 1,
+      });
 
-    const inserted = db.insertedValues[0] as {
-      requestDefinition?: {
-        pathSegments: Array<{ id: string }>;
-        agentInputs: Array<{ id: string }>;
+      const inserted = db.insertedValues[0] as {
+        requestDefinition?: {
+          pathSegments: Array<{ id: string }>;
+          agentInputs: Array<{ id: string }>;
+        };
       };
-    };
-    expect(inserted.requestDefinition?.pathSegments[0]?.id).not.toBe("path_1");
-    expect(inserted.requestDefinition?.agentInputs[0]?.id).not.toBe("ain_1");
-  });
+      expect(inserted.requestDefinition?.pathSegments[0]?.id).not.toBe(
+        "path_1",
+      );
+      expect(inserted.requestDefinition?.agentInputs[0]?.id).not.toBe("ain_1");
+    },
+  );
 
   it("writes typed common entries with stable server-value ids", async () => {
     const db = makeDb([
@@ -1304,7 +1318,7 @@ describe("mcp-studio typed tools", () => {
   });
 
   it("enforces the enabled-tool bound for common updates", async () => {
-    const manyTools = Array.from({ length: 51 }, (_, index) => ({
+    const manyTools = Array.from({ length: toolLimit + 1 }, (_, index) => ({
       id: `mct_${index}`,
       name: `tool_${index}`,
       method: "GET",
@@ -1323,6 +1337,32 @@ describe("mcp-studio typed tools", () => {
       (error: unknown) =>
         error instanceof AppError &&
         error.appCode === APP_ERROR_CODES.INVALID_INPUT,
+    );
+    expect(db.updatedValues).toHaveLength(0);
+  });
+
+  it("reads the enabled-tool bound from the configured cap", async () => {
+    vi.stubEnv("MCP_MAX_TOOLS_PER_SERVER", "3");
+    const overCap = Array.from({ length: 4 }, (_, index) => ({
+      id: `mct_${index}`,
+      name: `tool_${index}`,
+      method: "GET",
+      requestDefinition: typedDefinition,
+      allowMutation: false,
+      enabled: true,
+    }));
+    const db = makeDb([[serverRow], [], overCap]);
+
+    await expect(
+      updateServerCommon(db as never, "user-a", "mcs_1", {
+        expectedRevision: 1,
+        common: { headers: [], query: [] },
+      }),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.appCode === APP_ERROR_CODES.INVALID_INPUT &&
+        error.message.includes("more than 3 enabled tools"),
     );
     expect(db.updatedValues).toHaveLength(0);
   });
@@ -1475,33 +1515,37 @@ describe("mcp-studio tool group placement", () => {
     expect(db.updatedValues).toHaveLength(0);
   });
 
-  it("copies the source group onto a duplicate only while it still exists", async () => {
-    const withGroup = makeDb([
-      [serverRow],
-      [storedTool],
-      [{ count: 1 }],
-      [{ id: "mtg_old" }],
-      [], // server values
-      [{ id: "mct_2", name: "get_contact_copy" }],
-    ]);
-    await duplicateTool(withGroup as never, "user-a", "mcs_1", "mct_1", {
-      expectedRevision: 1,
-    });
-    expect(withGroup.insertedValues[0]).toMatchObject({ groupId: "mtg_old" });
+  // Duplicating adds a second tool, so it needs room for two tool slots.
+  it.skipIf(toolLimit < 2)(
+    "copies the source group onto a duplicate only while it still exists",
+    async () => {
+      const withGroup = makeDb([
+        [serverRow],
+        [storedTool],
+        [{ count: 1 }],
+        [{ id: "mtg_old" }],
+        [], // server values
+        [{ id: "mct_2", name: "get_contact_copy" }],
+      ]);
+      await duplicateTool(withGroup as never, "user-a", "mcs_1", "mct_1", {
+        expectedRevision: 1,
+      });
+      expect(withGroup.insertedValues[0]).toMatchObject({ groupId: "mtg_old" });
 
-    const withoutGroup = makeDb([
-      [serverRow],
-      [storedTool],
-      [{ count: 1 }],
-      [], // the source group no longer exists
-      [], // server values
-      [{ id: "mct_3", name: "get_contact_copy" }],
-    ]);
-    await duplicateTool(withoutGroup as never, "user-a", "mcs_1", "mct_1", {
-      expectedRevision: 1,
-    });
-    expect(withoutGroup.insertedValues[0]).toMatchObject({ groupId: null });
-  });
+      const withoutGroup = makeDb([
+        [serverRow],
+        [storedTool],
+        [{ count: 1 }],
+        [], // the source group no longer exists
+        [], // server values
+        [{ id: "mct_3", name: "get_contact_copy" }],
+      ]);
+      await duplicateTool(withoutGroup as never, "user-a", "mcs_1", "mct_1", {
+        expectedRevision: 1,
+      });
+      expect(withoutGroup.insertedValues[0]).toMatchObject({ groupId: null });
+    },
+  );
 
   it("changes only the assignment for a group-only edit", async () => {
     const untouched = makeDb([
@@ -1595,6 +1639,28 @@ describe("mcp-studio safe curl import", () => {
     expect(db.delete).not.toHaveBeenCalled();
     expect(JSON.stringify(db.insertedValues)).not.toContain("super-secret");
     expect(JSON.stringify(db.insertedValues)).not.toContain("Authorization");
+  });
+
+  it("reads the tool capacity bound from the configured cap", async () => {
+    vi.stubEnv("MCP_MAX_TOOLS_PER_SERVER", "3");
+    const db = makeDb([
+      [server], // requireOwnedServer
+      [], // loadCompileServerValueRefs: no existing variables
+      [{ count: 3 }], // assertToolCapacity: the server sits at the configured cap
+    ]);
+
+    await expect(
+      confirmCurlImport(db as never, "user-a", "mcs_1", {
+        expectedRevision: 1,
+        curl: `curl https://api.example.com/contacts`,
+      }),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.appCode === APP_ERROR_CODES.INVALID_INPUT &&
+        error.message.includes("more than 3 tools"),
+    );
+    expect(db.insert).not.toHaveBeenCalled();
   });
 
   it("leaves existing authentication byte-for-byte unchanged when curl carries a different credential", async () => {

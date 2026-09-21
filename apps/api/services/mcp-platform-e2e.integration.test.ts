@@ -16,6 +16,7 @@ import postgres from "postgres";
 import { APP_ERROR_CODES } from "@repo/core";
 import { generateAuthId, schema, user } from "@repo/db";
 import type { AppContext } from "../lib/context.js";
+import { getMcpMaxToolsPerServer } from "../lib/mcp-limits.js";
 import { createPlatformMcpRoutes } from "../lib/mcp-platform.js";
 import { validatePlatformGrantRequest } from "../lib/mcp-platform-principal.js";
 import { resetRateLimitState } from "../lib/mcp-rate-limit.js";
@@ -399,69 +400,80 @@ describeIntegration("Platform MCP end-to-end journey", () => {
     expect(structuredData<{ enabled: boolean }>(published).enabled).toBe(true);
   });
 
-  it("requires allowMutation to publish a POST tool", async () => {
-    const publisherClient = await connectClient(publisher.token);
-    const created = await publisherClient.callTool({
-      name: "create_tool",
-      arguments: {
-        serverId,
-        expectedRevision: await currentRevision(),
-        name: "create_widget_no_mutation",
-        title: "Create widget (no mutation)",
-        description: "Attempts to enable a mutating tool without permission.",
-        method: "POST",
-        requestDefinition: postToolDefinition,
-        allowMutation: false,
-        enabled: true,
-      },
-    });
-    expect(created.isError).toBeFalsy();
-    const tool = structuredData<{ enabled: boolean; allowMutation: boolean }>(
-      created,
-    );
-    expect(tool.allowMutation).toBe(false);
-    expect(tool.enabled).toBe(false);
-  });
+  // Authors a second tool, so it needs room for two tool slots.
+  it.skipIf(getMcpMaxToolsPerServer() < 2)(
+    "requires allowMutation to publish a POST tool",
+    async () => {
+      const publisherClient = await connectClient(publisher.token);
+      const created = await publisherClient.callTool({
+        name: "create_tool",
+        arguments: {
+          serverId,
+          expectedRevision: await currentRevision(),
+          name: "create_widget_no_mutation",
+          title: "Create widget (no mutation)",
+          description: "Attempts to enable a mutating tool without permission.",
+          method: "POST",
+          requestDefinition: postToolDefinition,
+          allowMutation: false,
+          enabled: true,
+        },
+      });
+      expect(created.isError).toBeFalsy();
+      const tool = structuredData<{ enabled: boolean; allowMutation: boolean }>(
+        created,
+      );
+      expect(tool.allowMutation).toBe(false);
+      expect(tool.enabled).toBe(false);
+    },
+  );
 
-  it("authors and publishes a mutating POST tool", async () => {
-    const authorClient = await connectClient(author.token);
-    const created = await authorClient.callTool({
-      name: "create_tool",
-      arguments: {
-        serverId,
-        expectedRevision: await currentRevision(),
-        name: "create_widget",
-        title: "Create widget",
-        description: "Create a widget upstream.",
-        method: "POST",
-        requestDefinition: postToolDefinition,
-        allowMutation: true,
-        enabled: true,
-      },
-    });
-    expect(created.isError).toBeFalsy();
-    const tool = structuredData<{
-      id: string;
-      enabled: boolean;
-      allowMutation: boolean;
-    }>(created);
-    expect(tool.allowMutation).toBe(true);
-    expect(tool.enabled).toBe(false);
-    postToolId = tool.id;
+  // The journey has already authored tools by this step, so a third slot is
+  // required; a cap below 3 cannot express it.
+  it.skipIf(getMcpMaxToolsPerServer() < 3)(
+    "authors and publishes a mutating POST tool",
+    async () => {
+      const authorClient = await connectClient(author.token);
+      const created = await authorClient.callTool({
+        name: "create_tool",
+        arguments: {
+          serverId,
+          expectedRevision: await currentRevision(),
+          name: "create_widget",
+          title: "Create widget",
+          description: "Create a widget upstream.",
+          method: "POST",
+          requestDefinition: postToolDefinition,
+          allowMutation: true,
+          enabled: true,
+        },
+      });
+      expect(created.isError).toBeFalsy();
+      const tool = structuredData<{
+        id: string;
+        enabled: boolean;
+        allowMutation: boolean;
+      }>(created);
+      expect(tool.allowMutation).toBe(true);
+      expect(tool.enabled).toBe(false);
+      postToolId = tool.id;
 
-    const publisherClient = await connectClient(publisher.token);
-    const published = await publisherClient.callTool({
-      name: "update_tool",
-      arguments: {
-        serverId,
-        expectedRevision: await currentRevision(),
-        toolId: postToolId,
-        enabled: true,
-      },
-    });
-    expect(published.isError).toBeFalsy();
-    expect(structuredData<{ enabled: boolean }>(published).enabled).toBe(true);
-  });
+      const publisherClient = await connectClient(publisher.token);
+      const published = await publisherClient.callTool({
+        name: "update_tool",
+        arguments: {
+          serverId,
+          expectedRevision: await currentRevision(),
+          toolId: postToolId,
+          enabled: true,
+        },
+      });
+      expect(published.isError).toBeFalsy();
+      expect(structuredData<{ enabled: boolean }>(published).enabled).toBe(
+        true,
+      );
+    },
+  );
 
   it("invokes an enabled GET tool with a read-only invoke token", async () => {
     Object.assign(
@@ -492,33 +504,40 @@ describeIntegration("Platform MCP end-to-end journey", () => {
     ).toBe(true);
   });
 
-  it("denies a mutating invoke without invoke_mutation and allows it with it", async () => {
-    const operatorClient = await connectClient(operator.token);
-    const denied = await operatorClient.callTool({
-      name: "test_tool",
-      arguments: { serverId, toolId: postToolId },
-    });
-    expect(denied.isError).toBe(true);
-    expect(structuredError(denied).code).toBe(APP_ERROR_CODES.MCP_SCOPE_DENIED);
-    expect(upstreamRequests).toHaveLength(0);
+  // Depends on the POST tool authored above, so it needs the same third slot.
+  // Invokes the POST tool authored by the previous step, so it skips with it.
+  it.skipIf(getMcpMaxToolsPerServer() < 3)(
+    "denies a mutating invoke without invoke_mutation and allows it with it",
+    async () => {
+      const operatorClient = await connectClient(operator.token);
+      const denied = await operatorClient.callTool({
+        name: "test_tool",
+        arguments: { serverId, toolId: postToolId },
+      });
+      expect(denied.isError).toBe(true);
+      expect(structuredError(denied).code).toBe(
+        APP_ERROR_CODES.MCP_SCOPE_DENIED,
+      );
+      expect(upstreamRequests).toHaveLength(0);
 
-    Object.assign(
-      mutator,
-      await createPat("E2E Mutator", ["read", "invoke", "invoke_mutation"]),
-    );
-    const mutatorClient = await connectClient(mutator.token);
-    const allowed = await mutatorClient.callTool({
-      name: "test_tool",
-      arguments: { serverId, toolId: postToolId },
-    });
-    expect(allowed.isError).toBeFalsy();
-    expect(structuredData<{ httpStatus: number }>(allowed).httpStatus).toBe(
-      200,
-    );
-    expect(upstreamRequests.some((request) => request.method === "POST")).toBe(
-      true,
-    );
-  });
+      Object.assign(
+        mutator,
+        await createPat("E2E Mutator", ["read", "invoke", "invoke_mutation"]),
+      );
+      const mutatorClient = await connectClient(mutator.token);
+      const allowed = await mutatorClient.callTool({
+        name: "test_tool",
+        arguments: { serverId, toolId: postToolId },
+      });
+      expect(allowed.isError).toBeFalsy();
+      expect(structuredData<{ httpStatus: number }>(allowed).httpStatus).toBe(
+        200,
+      );
+      expect(
+        upstreamRequests.some((request) => request.method === "POST"),
+      ).toBe(true);
+    },
+  );
 
   it("returns structured denials for missing scope and ungranted resources", async () => {
     const deniedScope = await rawRequest(inspector.token, {

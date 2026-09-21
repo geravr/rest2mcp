@@ -11,7 +11,7 @@ import postgres, { type TransactionSql } from "postgres";
 import { APP_ERROR_CODES } from "@repo/core";
 import { generateAuthId, generateId, schema, user } from "@repo/db";
 import { AppError } from "../lib/app-error.js";
-import { MCP_MAX_TOOLS_PER_SERVER } from "../lib/mcp-redact.js";
+import { getMcpMaxToolsPerServer } from "../lib/mcp-limits.js";
 import { parseOpenApiDocument } from "../lib/openapi-document.js";
 import { parseOpenApiSourceProvenance } from "../lib/openapi-import-contracts.js";
 import { loadExecutionSnapshot } from "./mcp-executor-service.js";
@@ -23,6 +23,8 @@ import { previewPublish, publishServer } from "./mcp-publishing-service.js";
 import { createToolGroup } from "./mcp-tool-group-service.js";
 
 const connectionString = process.env.DATABASE_URL;
+/** The deployment's effective cap, so boundary seeding tracks configuration. */
+const toolLimit = getMcpMaxToolsPerServer();
 
 /**
  * `waitFor` polls catalog queries, so its budget is wall-clock bounded and
@@ -371,142 +373,154 @@ describeIntegration("OpenAPI import confirmation against PostgreSQL", () => {
     };
   }
 
-  it("commits two imported tools and their first-tag group in exactly one revision", async () => {
-    const serverId = await seedServer("atomic");
-    const preview = await previewOpenApiImport(importDb(), userId, serverId, {
-      source: contentSource(),
-    });
-    expect(preview.configRevision).toBe(1);
-    expect(preview.document.fingerprint).toBe(fingerprintOf(OPERATIONS_DOC));
+  // Imports two operations, so it needs room for two tool slots.
+  it.skipIf(toolLimit < 2)(
+    "commits two imported tools and their first-tag group in exactly one revision",
+    async () => {
+      const serverId = await seedServer("atomic");
+      const preview = await previewOpenApiImport(importDb(), userId, serverId, {
+        source: contentSource(),
+      });
+      expect(preview.configRevision).toBe(1);
+      expect(preview.document.fingerprint).toBe(fingerprintOf(OPERATIONS_DOC));
 
-    const result = await confirmOpenApiImport(importDb(), userId, serverId, {
-      expectedRevision: preview.configRevision,
-      source: contentSource(),
-      fingerprint: preview.document.fingerprint,
-      selection: [
-        { operationKey: "listCustomers" },
-        { operationKey: "createCustomer" },
-      ],
-      groupStrategy: { kind: "firstTag" },
-    });
+      const result = await confirmOpenApiImport(importDb(), userId, serverId, {
+        expectedRevision: preview.configRevision,
+        source: contentSource(),
+        fingerprint: preview.document.fingerprint,
+        selection: [
+          { operationKey: "listCustomers" },
+          { operationKey: "createCustomer" },
+        ],
+        groupStrategy: { kind: "firstTag" },
+      });
 
-    expect(result.revision).toBe(2);
-    expect(result.draftRevision).toBe(2);
-    expect(result.tools.map((tool) => tool.name).sort()).toEqual([
-      "createcustomer",
-      "listcustomers",
-    ]);
-    expect(result.groups).toEqual([
-      { id: expect.any(String), name: "customers", created: true },
-    ]);
-    const groupId = result.groups[0]?.id as string;
+      expect(result.revision).toBe(2);
+      expect(result.draftRevision).toBe(2);
+      expect(result.tools.map((tool) => tool.name).sort()).toEqual([
+        "createcustomer",
+        "listcustomers",
+      ]);
+      expect(result.groups).toEqual([
+        { id: expect.any(String), name: "customers", created: true },
+      ]);
+      const groupId = result.groups[0]?.id as string;
 
-    const storedGroups = await db
-      .select()
-      .from(schema.mcpToolGroup)
-      .where(eq(schema.mcpToolGroup.serverId, serverId));
-    expect(storedGroups).toEqual([
-      expect.objectContaining({
-        id: groupId,
+      const storedGroups = await db
+        .select()
+        .from(schema.mcpToolGroup)
+        .where(eq(schema.mcpToolGroup.serverId, serverId));
+      expect(storedGroups).toEqual([
+        expect.objectContaining({
+          id: groupId,
+          serverId,
+          name: "customers",
+          normalizedName: "customers",
+        }),
+      ]);
+
+      const storedTools = await db
+        .select()
+        .from(schema.mcpTool)
+        .where(eq(schema.mcpTool.serverId, serverId))
+        .orderBy(asc(schema.mcpTool.name));
+      expect(storedTools).toHaveLength(2);
+      const expectedByKey = new Map([
+        ["listcustomers", "listCustomers"],
+        ["createcustomer", "createCustomer"],
+      ]);
+      for (const tool of storedTools) {
+        expect(tool).toMatchObject({
+          source: "openapi",
+          enabled: false,
+          allowMutation: false,
+          groupId,
+        });
+        const provenance = parseOpenApiSourceProvenance(tool.sourceProvenance);
+        expect(provenance).toEqual({
+          version: 1,
+          batchId: result.batchId,
+          openApiVersion: "3.1",
+          operationKey: expectedByKey.get(tool.name),
+          documentFingerprint: preview.document.fingerprint,
+          definitionHash: expect.any(String),
+          tags: ["customers"],
+          sourceLabel: "pasted JSON",
+        });
+        expect(tool.compiledPlan).not.toBeNull();
+        expect(tool.compileStatus).toBe("valid");
+      }
+
+      const serverAfter = await readServer(serverId);
+      expect(serverAfter.configRevision).toBe(2);
+      expect(serverAfter.draftRevision).toBe(2);
+    },
+  );
+
+  // Imports two operations, so it needs room for two tool slots.
+  it.skipIf(toolLimit < 2)(
+    "rolls back every staged write when a selected operation fails to compile against the locked aggregate",
+    async () => {
+      const serverId = await seedServer("rollback");
+      const preview = await previewOpenApiImport(importDb(), userId, serverId, {
+        source: contentSource(),
+      });
+
+      const outcome = await confirmWhileAggregateHeld({
         serverId,
-        name: "customers",
-        normalizedName: "customers",
-      }),
-    ]);
-
-    const storedTools = await db
-      .select()
-      .from(schema.mcpTool)
-      .where(eq(schema.mcpTool.serverId, serverId))
-      .orderBy(asc(schema.mcpTool.name));
-    expect(storedTools).toHaveLength(2);
-    const expectedByKey = new Map([
-      ["listcustomers", "listCustomers"],
-      ["createcustomer", "createCustomer"],
-    ]);
-    for (const tool of storedTools) {
-      expect(tool).toMatchObject({
-        source: "openapi",
-        enabled: false,
-        allowMutation: false,
-        groupId,
-      });
-      const provenance = parseOpenApiSourceProvenance(tool.sourceProvenance);
-      expect(provenance).toEqual({
-        version: 1,
-        batchId: result.batchId,
-        openApiVersion: "3.1",
-        operationKey: expectedByKey.get(tool.name),
-        documentFingerprint: preview.document.fingerprint,
-        definitionHash: expect.any(String),
-        tags: ["customers"],
-        sourceLabel: "pasted JSON",
-      });
-      expect(tool.compiledPlan).not.toBeNull();
-      expect(tool.compileStatus).toBe("valid");
-    }
-
-    const serverAfter = await readServer(serverId);
-    expect(serverAfter.configRevision).toBe(2);
-    expect(serverAfter.draftRevision).toBe(2);
-  });
-
-  it("rolls back every staged write when a selected operation fails to compile against the locked aggregate", async () => {
-    const serverId = await seedServer("rollback");
-    const preview = await previewOpenApiImport(importDb(), userId, serverId, {
-      source: contentSource(),
-    });
-
-    const outcome = await confirmWhileAggregateHeld({
-      serverId,
-      hold: async (tx) => {
-        await tx`
+        hold: async (tx) => {
+          await tx`
           update mcp_server
           set common_entries = ${tx.json(FORBIDDEN_COMMON_ENTRIES)}
           where id = ${serverId}
         `;
-      },
-      confirm: () =>
-        confirmOpenApiImport(importDb(), userId, serverId, {
-          expectedRevision: preview.configRevision,
-          source: contentSource(),
-          fingerprint: preview.document.fingerprint,
-          selection: [
-            { operationKey: "listCustomers" },
-            { operationKey: "createCustomer" },
-          ],
-          groupStrategy: { kind: "firstTag" },
-        }),
-    });
+        },
+        confirm: () =>
+          confirmOpenApiImport(importDb(), userId, serverId, {
+            expectedRevision: preview.configRevision,
+            source: contentSource(),
+            fingerprint: preview.document.fingerprint,
+            selection: [
+              { operationKey: "listCustomers" },
+              { operationKey: "createCustomer" },
+            ],
+            groupStrategy: { kind: "firstTag" },
+          }),
+      });
 
-    const error = appErrorWith(
-      rejectionOf(outcome),
-      APP_ERROR_CODES.MCP_COMPILE_INVALID,
-    );
-    expect(error.status).toBe(409);
-    expect(error.details).toMatchObject({
-      issueCode: APP_ERROR_CODES.MCP_COMPILE_INVALID,
-      nodeId: "common_host",
-    });
+      const error = appErrorWith(
+        rejectionOf(outcome),
+        APP_ERROR_CODES.MCP_COMPILE_INVALID,
+      );
+      expect(error.status).toBe(409);
+      expect(error.details).toMatchObject({
+        issueCode: APP_ERROR_CODES.MCP_COMPILE_INVALID,
+        nodeId: "common_host",
+      });
 
-    expect(await countTools(serverId)).toBe(0);
-    expect(await countGroups(serverId)).toBe(0);
-    const serverAfter = await readServer(serverId);
-    expect(serverAfter.configRevision).toBe(1);
-    expect(serverAfter.draftRevision).toBe(1);
-  });
+      expect(await countTools(serverId)).toBe(0);
+      expect(await countGroups(serverId)).toBe(0);
+      const serverAfter = await readServer(serverId);
+      expect(serverAfter.configRevision).toBe(1);
+      expect(serverAfter.draftRevision).toBe(1);
+    },
+  );
 
-  it("rejects a tool name claimed after the preview with MCP_TOOL_NAME_CONFLICT and persists nothing", async () => {
-    const serverId = await seedServer("tool_conflict");
-    const preview = await previewOpenApiImport(importDb(), userId, serverId, {
-      source: contentSource(),
-    });
-    const conflictToolId = generateId("mct");
+  // Seeding one tool and then confirming a two-operation selection needs room
+  // for three tools, so this scenario requires a cap of at least 3.
+  it.skipIf(toolLimit < 3)(
+    "rejects a tool name claimed after the preview with MCP_TOOL_NAME_CONFLICT and persists nothing",
+    async () => {
+      const serverId = await seedServer("tool_conflict");
+      const preview = await previewOpenApiImport(importDb(), userId, serverId, {
+        source: contentSource(),
+      });
+      const conflictToolId = generateId("mct");
 
-    const outcome = await confirmWhileAggregateHeld({
-      serverId,
-      hold: async (tx) => {
-        await tx`
+      const outcome = await confirmWhileAggregateHeld({
+        serverId,
+        hold: async (tx) => {
+          await tx`
           insert into mcp_tool
             (id, server_id, name, method, request_definition, allow_mutation, enabled, source)
           values
@@ -514,90 +528,95 @@ describeIntegration("OpenAPI import confirmation against PostgreSQL", () => {
              ${tx.json(definitionFor("/contacts", "conflict"))}, ${false}, ${false},
              ${"manual"})
         `;
-      },
-      confirm: () =>
-        confirmOpenApiImport(importDb(), userId, serverId, {
-          expectedRevision: preview.configRevision,
-          source: contentSource(),
-          fingerprint: preview.document.fingerprint,
-          selection: [
-            { operationKey: "listInvoices" },
-            { operationKey: "listCustomers" },
-          ],
-          groupStrategy: { kind: "firstTag" },
-        }),
-    });
+        },
+        confirm: () =>
+          confirmOpenApiImport(importDb(), userId, serverId, {
+            expectedRevision: preview.configRevision,
+            source: contentSource(),
+            fingerprint: preview.document.fingerprint,
+            selection: [
+              { operationKey: "listInvoices" },
+              { operationKey: "listCustomers" },
+            ],
+            groupStrategy: { kind: "firstTag" },
+          }),
+      });
 
-    const error = appErrorWith(
-      rejectionOf(outcome),
-      APP_ERROR_CODES.MCP_TOOL_NAME_CONFLICT,
-    );
-    expect(error.status).toBe(409);
-    expect(error.details).toMatchObject({
-      serverId,
-      toolNames: ["listcustomers"],
-    });
+      const error = appErrorWith(
+        rejectionOf(outcome),
+        APP_ERROR_CODES.MCP_TOOL_NAME_CONFLICT,
+      );
+      expect(error.status).toBe(409);
+      expect(error.details).toMatchObject({
+        serverId,
+        toolNames: ["listcustomers"],
+      });
 
-    // The first selected tool and both planned groups were already written when
-    // the unique index rejected the second one, so the rollback removed them.
-    const storedTools = await db
-      .select({ id: schema.mcpTool.id, name: schema.mcpTool.name })
-      .from(schema.mcpTool)
-      .where(eq(schema.mcpTool.serverId, serverId));
-    expect(storedTools).toEqual([
-      { id: conflictToolId, name: "listcustomers" },
-    ]);
-    expect(await countGroups(serverId)).toBe(0);
-    const serverAfter = await readServer(serverId);
-    expect(serverAfter.configRevision).toBe(1);
-    expect(serverAfter.draftRevision).toBe(1);
-  });
+      // The first selected tool and both planned groups were already written when
+      // the unique index rejected the second one, so the rollback removed them.
+      const storedTools = await db
+        .select({ id: schema.mcpTool.id, name: schema.mcpTool.name })
+        .from(schema.mcpTool)
+        .where(eq(schema.mcpTool.serverId, serverId));
+      expect(storedTools).toEqual([
+        { id: conflictToolId, name: "listcustomers" },
+      ]);
+      expect(await countGroups(serverId)).toBe(0);
+      const serverAfter = await readServer(serverId);
+      expect(serverAfter.configRevision).toBe(1);
+      expect(serverAfter.draftRevision).toBe(1);
+    },
+  );
 
-  it("rejects a group name claimed after the preview with MCP_TOOL_GROUP_NAME_CONFLICT and persists nothing", async () => {
-    const serverId = await seedServer("group_conflict");
-    const preview = await previewOpenApiImport(importDb(), userId, serverId, {
-      source: contentSource(),
-    });
-    const conflictGroupId = generateId("mtg");
+  // Imports two operations, so it needs room for two tool slots.
+  it.skipIf(toolLimit < 2)(
+    "rejects a group name claimed after the preview with MCP_TOOL_GROUP_NAME_CONFLICT and persists nothing",
+    async () => {
+      const serverId = await seedServer("group_conflict");
+      const preview = await previewOpenApiImport(importDb(), userId, serverId, {
+        source: contentSource(),
+      });
+      const conflictGroupId = generateId("mtg");
 
-    const outcome = await confirmWhileAggregateHeld({
-      serverId,
-      hold: async (tx) => {
-        await tx`
+      const outcome = await confirmWhileAggregateHeld({
+        serverId,
+        hold: async (tx) => {
+          await tx`
           insert into mcp_tool_group (id, server_id, name, normalized_name)
           values (${conflictGroupId}, ${serverId}, ${"Customers"}, ${"customers"})
         `;
-      },
-      confirm: () =>
-        confirmOpenApiImport(importDb(), userId, serverId, {
-          expectedRevision: preview.configRevision,
-          source: contentSource(),
-          fingerprint: preview.document.fingerprint,
-          selection: [
-            { operationKey: "listCustomers" },
-            { operationKey: "createCustomer" },
-          ],
-          groupStrategy: { kind: "firstTag" },
-        }),
-    });
+        },
+        confirm: () =>
+          confirmOpenApiImport(importDb(), userId, serverId, {
+            expectedRevision: preview.configRevision,
+            source: contentSource(),
+            fingerprint: preview.document.fingerprint,
+            selection: [
+              { operationKey: "listCustomers" },
+              { operationKey: "createCustomer" },
+            ],
+            groupStrategy: { kind: "firstTag" },
+          }),
+      });
 
-    const error = appErrorWith(
-      rejectionOf(outcome),
-      APP_ERROR_CODES.MCP_TOOL_GROUP_NAME_CONFLICT,
-    );
-    expect(error.status).toBe(409);
-    expect(error.details).toMatchObject({ serverId, groupName: "customers" });
+      const error = appErrorWith(
+        rejectionOf(outcome),
+        APP_ERROR_CODES.MCP_TOOL_GROUP_NAME_CONFLICT,
+      );
+      expect(error.status).toBe(409);
+      expect(error.details).toMatchObject({ serverId, groupName: "customers" });
 
-    expect(await countTools(serverId)).toBe(0);
-    const storedGroups = await db
-      .select({ id: schema.mcpToolGroup.id })
-      .from(schema.mcpToolGroup)
-      .where(eq(schema.mcpToolGroup.serverId, serverId));
-    expect(storedGroups).toEqual([{ id: conflictGroupId }]);
-    const serverAfter = await readServer(serverId);
-    expect(serverAfter.configRevision).toBe(1);
-    expect(serverAfter.draftRevision).toBe(1);
-  });
+      expect(await countTools(serverId)).toBe(0);
+      const storedGroups = await db
+        .select({ id: schema.mcpToolGroup.id })
+        .from(schema.mcpToolGroup)
+        .where(eq(schema.mcpToolGroup.serverId, serverId));
+      expect(storedGroups).toEqual([{ id: conflictGroupId }]);
+      const serverAfter = await readServer(serverId);
+      expect(serverAfter.configRevision).toBe(1);
+      expect(serverAfter.draftRevision).toBe(1);
+    },
+  );
 
   it("rejects a stale expected revision with the current revision in details", async () => {
     const serverId = await seedServer("stale");
@@ -638,88 +657,93 @@ describeIntegration("OpenAPI import confirmation against PostgreSQL", () => {
     expect(serverAfter.draftRevision).toBe(1);
   });
 
-  it("leaves the active published revision, its rows, and the execution snapshot untouched", async () => {
-    const serverId = await seedServer("isolation");
-    const toolId = generateId("mct");
-    await db.insert(schema.mcpTool).values({
-      id: toolId,
-      serverId,
-      name: "list_contacts",
-      title: "List contacts",
-      description: "List contacts.",
-      method: "GET",
-      requestDefinition: definitionFor("/contacts", "contacts"),
-      allowMutation: false,
-      enabled: true,
-      source: "manual",
-    });
+  // The confirmation below adds two tools to a server that already holds one, so
+  // this scenario requires a cap of at least 3.
+  it.skipIf(toolLimit < 3)(
+    "leaves the active published revision, its rows, and the execution snapshot untouched",
+    async () => {
+      const serverId = await seedServer("isolation");
+      const toolId = generateId("mct");
+      await db.insert(schema.mcpTool).values({
+        id: toolId,
+        serverId,
+        name: "list_contacts",
+        title: "List contacts",
+        description: "List contacts.",
+        method: "GET",
+        requestDefinition: definitionFor("/contacts", "contacts"),
+        allowMutation: false,
+        enabled: true,
+        source: "manual",
+      });
 
-    const preview = await previewPublish(publishDb(), userId, serverId);
-    expect(preview.ready).toBe(true);
-    const publication = await publishServer(publishDb(), {
-      userId,
-      serverId,
-      expectedDraftRevision: preview.draftRevision,
-      expectedPublishedRevisionId: preview.publishedRevisionId,
-      publishRequestId: `${serverId}_req_1`,
-      candidateFingerprint: preview.candidateFingerprint,
-      acknowledgedWarningCodes: preview.warningCodes,
-      actorSource: "studio",
-      note: null,
-    });
+      const preview = await previewPublish(publishDb(), userId, serverId);
+      expect(preview.ready).toBe(true);
+      const publication = await publishServer(publishDb(), {
+        userId,
+        serverId,
+        expectedDraftRevision: preview.draftRevision,
+        expectedPublishedRevisionId: preview.publishedRevisionId,
+        publishRequestId: `${serverId}_req_1`,
+        candidateFingerprint: preview.candidateFingerprint,
+        acknowledgedWarningCodes: preview.warningCodes,
+        actorSource: "studio",
+        note: null,
+      });
 
-    const serverBefore = await readServer(serverId);
-    const revisionsBefore = await readRevisionRows(serverId);
-    const snapshotBefore = await snapshotToolList(serverId);
-    expect(serverBefore.publishedRevisionId).toBe(publication.revisionId);
-    expect(revisionsBefore.revisions).toHaveLength(1);
-    expect(snapshotBefore.tools).toHaveLength(1);
+      const serverBefore = await readServer(serverId);
+      const revisionsBefore = await readRevisionRows(serverId);
+      const snapshotBefore = await snapshotToolList(serverId);
+      expect(serverBefore.publishedRevisionId).toBe(publication.revisionId);
+      expect(revisionsBefore.revisions).toHaveLength(1);
+      expect(snapshotBefore.tools).toHaveLength(1);
 
-    const importPreview = await previewOpenApiImport(
-      importDb(),
-      userId,
-      serverId,
-      { source: contentSource() },
-    );
-    const result = await confirmOpenApiImport(importDb(), userId, serverId, {
-      expectedRevision: importPreview.configRevision,
-      source: contentSource(),
-      fingerprint: importPreview.document.fingerprint,
-      selection: [
-        { operationKey: "listCustomers" },
-        { operationKey: "listInvoices" },
-      ],
-      groupStrategy: { kind: "ungrouped" },
-    });
-    expect(result.tools).toHaveLength(2);
+      const importPreview = await previewOpenApiImport(
+        importDb(),
+        userId,
+        serverId,
+        { source: contentSource() },
+      );
+      const result = await confirmOpenApiImport(importDb(), userId, serverId, {
+        expectedRevision: importPreview.configRevision,
+        source: contentSource(),
+        fingerprint: importPreview.document.fingerprint,
+        selection: [
+          { operationKey: "listCustomers" },
+          { operationKey: "listInvoices" },
+        ],
+        groupStrategy: { kind: "ungrouped" },
+      });
+      expect(result.tools).toHaveLength(2);
 
-    const serverAfter = await readServer(serverId);
-    expect(serverAfter.publishedRevisionId).toBe(publication.revisionId);
-    expect(serverAfter.status).toBe("live");
-    expect(serverAfter.configRevision).toBe(serverBefore.configRevision + 1);
-    expect(serverAfter.draftRevision).toBe(serverBefore.draftRevision + 1);
-    expect(await readRevisionRows(serverId)).toEqual(revisionsBefore);
-    expect(await snapshotToolList(serverId)).toEqual(snapshotBefore);
+      const serverAfter = await readServer(serverId);
+      expect(serverAfter.publishedRevisionId).toBe(publication.revisionId);
+      expect(serverAfter.status).toBe("live");
+      expect(serverAfter.configRevision).toBe(serverBefore.configRevision + 1);
+      expect(serverAfter.draftRevision).toBe(serverBefore.draftRevision + 1);
+      expect(await readRevisionRows(serverId)).toEqual(revisionsBefore);
+      expect(await snapshotToolList(serverId)).toEqual(snapshotBefore);
 
-    const draftTools = await db
-      .select({
-        id: schema.mcpTool.id,
-        source: schema.mcpTool.source,
-        enabled: schema.mcpTool.enabled,
-      })
-      .from(schema.mcpTool)
-      .where(eq(schema.mcpTool.serverId, serverId))
-      .orderBy(asc(schema.mcpTool.id));
-    expect(draftTools).toHaveLength(3);
-    expect(draftTools.filter((tool) => tool.source === "openapi")).toHaveLength(
-      2,
-    );
-    for (const tool of draftTools.filter(
-      (entry) => entry.source === "openapi",
-    )) {
-      expect(tool.enabled).toBe(false);
-    }
-  });
+      const draftTools = await db
+        .select({
+          id: schema.mcpTool.id,
+          source: schema.mcpTool.source,
+          enabled: schema.mcpTool.enabled,
+        })
+        .from(schema.mcpTool)
+        .where(eq(schema.mcpTool.serverId, serverId))
+        .orderBy(asc(schema.mcpTool.id));
+      expect(draftTools).toHaveLength(3);
+      expect(
+        draftTools.filter((tool) => tool.source === "openapi"),
+      ).toHaveLength(2);
+      for (const tool of draftTools.filter(
+        (entry) => entry.source === "openapi",
+      )) {
+        expect(tool.enabled).toBe(false);
+      }
+    },
+  );
 
   it("preserves authentication, common entries, and server values byte-for-byte", async () => {
     const secretId = generateId("msv");
@@ -815,45 +839,50 @@ describeIntegration("OpenAPI import confirmation against PostgreSQL", () => {
     );
   });
 
-  it("rejects a selection that overflows the tool cap when the overflowing tools are only visible under the lock", async () => {
-    const serverId = await seedServer("capacity");
-    // Held rows raise the server to the boundary (`MCP_MAX_TOOLS_PER_SERVER - 1`)
-    // only once they are visible, and the stale pre-holder count plus the
-    // selection still fits the cap, so no pre-lock read can reject this confirm.
-    const heldToolCount = 2;
-    const seededToolCount = MCP_MAX_TOOLS_PER_SERVER - 1 - heldToolCount;
-    const selection = [
-      { operationKey: "listCustomers" },
-      { operationKey: "createCustomer" },
-      { operationKey: "listInvoices" },
-    ];
-    const seeded = Array.from({ length: seededToolCount }, (_, index) => ({
-      serverId,
-      name: `seed_tool_${index}`,
-      method: "GET",
-      requestDefinition: definitionFor(`/seed/${index}`, `seed_${index}`),
-      allowMutation: false,
-      enabled: false,
-      source: "manual",
-    }));
-    await db.insert(schema.mcpTool).values(seeded);
+  // The scenario needs the pre-lock read to fit under the cap while the
+  // post-holder count overflows it, so a cap of 1 cannot express it.
+  it.skipIf(toolLimit < 2)(
+    "rejects a selection that overflows the tool cap when the overflowing tools are only visible under the lock",
+    async () => {
+      const serverId = await seedServer("capacity");
+      // Held rows raise the server to the boundary (`toolLimit - 1`)
+      // only once they are visible, and the stale pre-holder count plus the
+      // selection still fits the cap, so no pre-lock read can reject this confirm.
+      const heldToolCount = Math.min(2, toolLimit - 1);
+      const seededToolCount = toolLimit - 1 - heldToolCount;
+      const selection = [
+        { operationKey: "listCustomers" },
+        { operationKey: "createCustomer" },
+      ];
+      const seeded = Array.from({ length: seededToolCount }, (_, index) => ({
+        serverId,
+        name: `seed_tool_${index}`,
+        method: "GET",
+        requestDefinition: definitionFor(`/seed/${index}`, `seed_${index}`),
+        allowMutation: false,
+        enabled: false,
+        source: "manual",
+      }));
+      if (seeded.length > 0) {
+        await db.insert(schema.mcpTool).values(seeded);
+      }
 
-    const preview = await previewOpenApiImport(importDb(), userId, serverId, {
-      source: contentSource(),
-    });
-    expect(preview.capacity.currentTools).toBe(seededToolCount);
-    expect(
-      preview.capacity.currentTools + selection.length,
-    ).toBeLessThanOrEqual(MCP_MAX_TOOLS_PER_SERVER);
+      const preview = await previewOpenApiImport(importDb(), userId, serverId, {
+        source: contentSource(),
+      });
+      expect(preview.capacity.currentTools).toBe(seededToolCount);
+      expect(
+        preview.capacity.currentTools + selection.length,
+      ).toBeLessThanOrEqual(toolLimit);
 
-    const heldToolIds = Array.from({ length: heldToolCount }, () =>
-      generateId("mct"),
-    );
-    const outcome = await confirmWhileAggregateHeld({
-      serverId,
-      hold: async (tx) => {
-        for (const [index, toolId] of heldToolIds.entries()) {
-          await tx`
+      const heldToolIds = Array.from({ length: heldToolCount }, () =>
+        generateId("mct"),
+      );
+      const outcome = await confirmWhileAggregateHeld({
+        serverId,
+        hold: async (tx) => {
+          for (const [index, toolId] of heldToolIds.entries()) {
+            await tx`
             insert into mcp_tool
               (id, server_id, name, method, request_definition, allow_mutation, enabled, source)
             values
@@ -861,36 +890,37 @@ describeIntegration("OpenAPI import confirmation against PostgreSQL", () => {
                ${tx.json(definitionFor(`/held/${index}`, `held_${index}`))},
                ${false}, ${false}, ${"manual"})
           `;
-        }
-      },
-      confirm: () =>
-        confirmOpenApiImport(importDb(), userId, serverId, {
-          expectedRevision: preview.configRevision,
-          source: contentSource(),
-          fingerprint: preview.document.fingerprint,
-          selection,
-          groupStrategy: { kind: "ungrouped" },
-        }),
-    });
+          }
+        },
+        confirm: () =>
+          confirmOpenApiImport(importDb(), userId, serverId, {
+            expectedRevision: preview.configRevision,
+            source: contentSource(),
+            fingerprint: preview.document.fingerprint,
+            selection,
+            groupStrategy: { kind: "ungrouped" },
+          }),
+      });
 
-    const error = appErrorWith(
-      rejectionOf(outcome),
-      APP_ERROR_CODES.MCP_TOOL_LIMIT_REACHED,
-    );
-    expect(error.status).toBe(400);
-    // `observed` is the locked re-read's count, which the pre-lock reads that
-    // ran before the holder released could not see.
-    expect(error.details).toMatchObject({
-      serverId,
-      limit: MCP_MAX_TOOLS_PER_SERVER,
-      observed: MCP_MAX_TOOLS_PER_SERVER - 1,
-    });
+      const error = appErrorWith(
+        rejectionOf(outcome),
+        APP_ERROR_CODES.MCP_TOOL_LIMIT_REACHED,
+      );
+      expect(error.status).toBe(400);
+      // `observed` is the locked re-read's count, which the pre-lock reads that
+      // ran before the holder released could not see.
+      expect(error.details).toMatchObject({
+        serverId,
+        limit: toolLimit,
+        observed: toolLimit - 1,
+      });
 
-    // The rejected confirmation left only the holder's now-committed rows.
-    expect(await countTools(serverId)).toBe(MCP_MAX_TOOLS_PER_SERVER - 1);
-    expect(await countGroups(serverId)).toBe(0);
-    const serverAfter = await readServer(serverId);
-    expect(serverAfter.configRevision).toBe(1);
-    expect(serverAfter.draftRevision).toBe(1);
-  });
+      // The rejected confirmation left only the holder's now-committed rows.
+      expect(await countTools(serverId)).toBe(toolLimit - 1);
+      expect(await countGroups(serverId)).toBe(0);
+      const serverAfter = await readServer(serverId);
+      expect(serverAfter.configRevision).toBe(1);
+      expect(serverAfter.draftRevision).toBe(1);
+    },
+  );
 });

@@ -12,6 +12,7 @@ import {
   type McpServer,
   type NewMcpTool,
 } from "@repo/db";
+import { getMcpMaxToolsPerServer } from "../lib/mcp-limits.js";
 import {
   parseOpenApiSourceProvenance,
   type McpOpenApiSourceProvenance,
@@ -419,79 +420,83 @@ describeIntegration("mcp publishing group and provenance isolation", () => {
     expect(await snapshotToolList(serverId)).toEqual(snapshotBefore);
   });
 
-  it("preserves current grouping on restore and never writes group rows", async () => {
-    const serverId = serverIdFor("restore");
-    const toolAId = `${serverId}_tool_a`;
-    const toolBId = `${serverId}_tool_b`;
-    await seedServer(serverId);
-    await insertTool(serverId, { id: toolAId, name: "list_a" });
-    await insertTool(serverId, {
-      id: toolBId,
-      name: "list_b",
-      requestDefinition: definitionFor("/companies", "companies"),
-    });
-    const { result } = await publishOnce(serverId, `${serverId}_req_1`);
+  // Seeds two tools, so it needs room for two tool slots.
+  it.skipIf(getMcpMaxToolsPerServer() < 2)(
+    "preserves current grouping on restore and never writes group rows",
+    async () => {
+      const serverId = serverIdFor("restore");
+      const toolAId = `${serverId}_tool_a`;
+      const toolBId = `${serverId}_tool_b`;
+      await seedServer(serverId);
+      await insertTool(serverId, { id: toolAId, name: "list_a" });
+      await insertTool(serverId, {
+        id: toolBId,
+        name: "list_b",
+        requestDefinition: definitionFor("/companies", "companies"),
+      });
+      const { result } = await publishOnce(serverId, `${serverId}_req_1`);
 
-    // Only the revision still knows about tool B.
-    await db.delete(mcpTool).where(eq(mcpTool.id, toolBId));
+      // Only the revision still knows about tool B.
+      await db.delete(mcpTool).where(eq(mcpTool.id, toolBId));
 
-    const beforeGrouping = await readServer(serverId);
-    const created = await createToolGroup(asDb, userId, serverId, {
-      expectedRevision: beforeGrouping.configRevision,
-      name: "Keep",
-    });
-    const assigned = await assignToolsToGroup(asDb, userId, serverId, {
-      expectedRevision: created.revision,
-      toolIds: [toolAId],
-      groupId: created.group.id,
-    });
+      const beforeGrouping = await readServer(serverId);
+      const created = await createToolGroup(asDb, userId, serverId, {
+        expectedRevision: beforeGrouping.configRevision,
+        name: "Keep",
+      });
+      const assigned = await assignToolsToGroup(asDb, userId, serverId, {
+        expectedRevision: created.revision,
+        toolIds: [toolAId],
+        groupId: created.group.id,
+      });
 
-    const groupsBefore = await db
-      .select()
-      .from(mcpToolGroup)
-      .where(eq(mcpToolGroup.serverId, serverId))
-      .orderBy(asc(mcpToolGroup.id));
-    const serverBeforeRestore = await readServer(serverId);
-    expect(serverBeforeRestore.configRevision).toBe(assigned.revision);
+      const groupsBefore = await db
+        .select()
+        .from(mcpToolGroup)
+        .where(eq(mcpToolGroup.serverId, serverId))
+        .orderBy(asc(mcpToolGroup.id));
+      const serverBeforeRestore = await readServer(serverId);
+      expect(serverBeforeRestore.configRevision).toBe(assigned.revision);
 
-    const writes: TxWrites = [];
-    const trackedDb = trackTransactionWrites(asDb, writes);
-    const restored = await restoreRevisionToDraft(trackedDb, {
-      userId,
-      serverId,
-      revisionId: result.revisionId,
-      expectedRevision: serverBeforeRestore.configRevision,
-      expectedDraftRevision: serverBeforeRestore.draftRevision,
-    });
-    expect(restored.toolCount).toBe(2);
+      const writes: TxWrites = [];
+      const trackedDb = trackTransactionWrites(asDb, writes);
+      const restored = await restoreRevisionToDraft(trackedDb, {
+        userId,
+        serverId,
+        revisionId: result.revisionId,
+        expectedRevision: serverBeforeRestore.configRevision,
+        expectedDraftRevision: serverBeforeRestore.draftRevision,
+      });
+      expect(restored.toolCount).toBe(2);
 
-    const rows = await db
-      .select({ id: mcpTool.id, groupId: mcpTool.groupId })
-      .from(mcpTool)
-      .where(eq(mcpTool.serverId, serverId));
-    expect(rows.find((row) => row.id === toolAId)?.groupId).toBe(
-      created.group.id,
-    );
-    expect(rows.find((row) => row.id === toolBId)?.groupId).toBeNull();
+      const rows = await db
+        .select({ id: mcpTool.id, groupId: mcpTool.groupId })
+        .from(mcpTool)
+        .where(eq(mcpTool.serverId, serverId));
+      expect(rows.find((row) => row.id === toolAId)?.groupId).toBe(
+        created.group.id,
+      );
+      expect(rows.find((row) => row.id === toolBId)?.groupId).toBeNull();
 
-    const groupsAfter = await db
-      .select()
-      .from(mcpToolGroup)
-      .where(eq(mcpToolGroup.serverId, serverId))
-      .orderBy(asc(mcpToolGroup.id));
-    expect(groupsAfter).toEqual(groupsBefore);
-    expect(writes.some((write) => write.table === mcpToolGroup)).toBe(false);
-    expect(writes.some((write) => write.table === mcpTool)).toBe(true);
+      const groupsAfter = await db
+        .select()
+        .from(mcpToolGroup)
+        .where(eq(mcpToolGroup.serverId, serverId))
+        .orderBy(asc(mcpToolGroup.id));
+      expect(groupsAfter).toEqual(groupsBefore);
+      expect(writes.some((write) => write.table === mcpToolGroup)).toBe(false);
+      expect(writes.some((write) => write.table === mcpTool)).toBe(true);
 
-    const serverAfterRestore = await readServer(serverId);
-    expect(serverAfterRestore.draftRevision).toBe(
-      serverBeforeRestore.draftRevision + 1,
-    );
-    expect(serverAfterRestore.configRevision).toBe(
-      serverBeforeRestore.configRevision + 1,
-    );
-    expect(serverAfterRestore.publishedRevisionId).toBe(result.revisionId);
-  });
+      const serverAfterRestore = await readServer(serverId);
+      expect(serverAfterRestore.draftRevision).toBe(
+        serverBeforeRestore.draftRevision + 1,
+      );
+      expect(serverAfterRestore.configRevision).toBe(
+        serverBeforeRestore.configRevision + 1,
+      );
+      expect(serverAfterRestore.publishedRevisionId).toBe(result.revisionId);
+    },
+  );
 
   it("round-trips provenance through publish and restore", async () => {
     const serverId = serverIdFor("roundtrip");

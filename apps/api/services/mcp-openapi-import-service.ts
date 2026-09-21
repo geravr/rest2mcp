@@ -38,7 +38,7 @@ import {
   type McpCompileIssue,
   type McpRequestDefinition,
 } from "../lib/mcp-request-definition.js";
-import { MCP_MAX_TOOLS_PER_SERVER } from "../lib/mcp-redact.js";
+import { getMcpMaxToolsPerServer } from "../lib/mcp-limits.js";
 import {
   captureMcpTelemetry,
   MCP_TELEMETRY_EVENTS,
@@ -424,7 +424,7 @@ export async function previewOpenApiImport(
   };
 
   const capacity: McpOpenApiCapacityProjection = {
-    toolLimit: MCP_MAX_TOOLS_PER_SERVER,
+    toolLimit: getMcpMaxToolsPerServer(),
     currentTools: existingToolNames.length,
     groupLimit: MCP_TOOL_GROUP_LIMITS.maxGroupsPerServer,
     currentGroups: groups.length,
@@ -773,14 +773,15 @@ export async function confirmOpenApiImport(
         .from(mcpTool)
         .where(eq(mcpTool.serverId, locked.id));
       const currentToolCount = toolCountRow?.count ?? 0;
-      if (currentToolCount + selected.length > MCP_MAX_TOOLS_PER_SERVER) {
+      const toolLimit = getMcpMaxToolsPerServer();
+      if (currentToolCount + selected.length > toolLimit) {
         throw appError({
           appCode: APP_ERROR_CODES.MCP_TOOL_LIMIT_REACHED,
-          message: `A server cannot have more than ${MCP_MAX_TOOLS_PER_SERVER} tools.`,
+          message: `A server cannot have more than ${toolLimit} tools.`,
           status: 400,
           details: {
             serverId: locked.id,
-            limit: MCP_MAX_TOOLS_PER_SERVER,
+            limit: toolLimit,
             observed: currentToolCount,
           },
         });
