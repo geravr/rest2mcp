@@ -52,7 +52,8 @@ export const esServers = {
     pathPlaceholder: "/contacts/",
     allowMutation: "Permitir mutación",
     enabled: "Activa",
-    toolCap: "Este servidor ya tiene 50 herramientas, el límite actual.",
+    toolCap:
+      "Este servidor ya tiene {count} herramientas; el límite es {limit}.",
     curlLabel: "Comando curl",
     curlPlaceholder: "curl https://api.example.com/v1/items",
     saveTool: "Guardar herramienta",

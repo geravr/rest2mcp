@@ -161,6 +161,7 @@ function ServerDetailPage() {
                   serverId={serverId}
                   configRevision={data.configRevision}
                   toolCount={data.tools.length}
+                  toolLimit={data.limits.maxToolsPerServer}
                   page={page}
                   pageSize={pageSize}
                   group={search.group}

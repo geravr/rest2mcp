@@ -25,7 +25,6 @@ import {
 } from "@/hooks/use-mcp";
 import { useTranslations } from "@/i18n/use-translations";
 import { resolveErrorMessage } from "@/lib/errors";
-import { MCP_MAX_TOOLS } from "@/lib/mcp-limits";
 import {
   isClientRequestDefinition,
   summarizeDefinitionPath,
@@ -93,6 +92,7 @@ export function ServerToolsTab({
   serverId,
   configRevision,
   toolCount,
+  toolLimit,
   page,
   pageSize,
   group,
@@ -106,6 +106,8 @@ export function ServerToolsTab({
   configRevision: number;
   /** Server-wide tool total; the filtered page total cannot stand in for it. */
   toolCount: number;
+  /** Per-server cap for this deployment, reported by the API. */
+  toolLimit: number;
   page: number;
   pageSize: PageSize;
   /** `undefined` and `"all"` are unfiltered, `"ungrouped"` is ungrouped, otherwise a group id. */
@@ -213,7 +215,7 @@ export function ServerToolsTab({
       ? selection.ids.filter((id) => data.items.some((tool) => tool.id === id))
       : [];
 
-  const atCap = toolCount >= MCP_MAX_TOOLS;
+  const atCap = toolCount >= toolLimit;
   const atGroupLimit =
     groups.length >= MCP_TOOL_GROUP_LIMITS.maxGroupsPerServer;
   const filterActive = group !== undefined && group !== ALL_FILTER;
@@ -297,7 +299,11 @@ export function ServerToolsTab({
     <div className="space-y-6">
       {atCap ? (
         <Alert>
-          <AlertDescription>{t.servers.toolCap}</AlertDescription>
+          <AlertDescription>
+            {t.servers.toolCap
+              .replace("{count}", String(toolCount))
+              .replace("{limit}", String(toolLimit))}
+          </AlertDescription>
         </Alert>
       ) : null}
 
@@ -569,6 +575,7 @@ export function ServerToolsTab({
                             {t.servers.editTool}
                           </DropdownMenuItem>
                           <DropdownMenuItem
+                            disabled={atCap}
                             onSelect={() =>
                               setFormState({ kind: "duplicate", tool })
                             }

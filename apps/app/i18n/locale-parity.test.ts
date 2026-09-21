@@ -40,6 +40,23 @@ describe("locale parity", () => {
     }
   });
 
+  it("interpolates the same placeholders in en and es", () => {
+    const placeholders = (value: unknown): string[] =>
+      typeof value === "string"
+        ? [...value.matchAll(/\{(\w+)\}/g)].map((match) => match[1]!).sort()
+        : [];
+
+    const mismatches = [...enKeys.keys()]
+      .filter((key) => esKeys.has(key))
+      .filter(
+        (key) =>
+          placeholders(enKeys.get(key)).join(",") !==
+          placeholders(esKeys.get(key)).join(","),
+      );
+
+    expect(mismatches).toEqual([]);
+  });
+
   it("covers every platform token event and scope label in both locales", () => {
     const requiredSuffixes = [
       "scopes.read",

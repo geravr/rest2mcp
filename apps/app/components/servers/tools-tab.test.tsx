@@ -212,6 +212,7 @@ function renderTab(
     initialQ?: string;
     initialPage?: number;
     toolCount?: number;
+    toolLimit?: number;
     onGroupChange?: (next: string | undefined) => void;
     onSearchChange?: (next: string | undefined) => void;
   } = {},
@@ -221,6 +222,7 @@ function renderTab(
     initialQ,
     initialPage = 1,
     toolCount = 5,
+    toolLimit = 50,
     onGroupChange,
     onSearchChange,
   } = options;
@@ -234,6 +236,7 @@ function renderTab(
         serverId="mcs_1"
         configRevision={9}
         toolCount={toolCount}
+        toolLimit={toolLimit}
         page={page}
         pageSize={10}
         group={group}
@@ -817,17 +820,21 @@ describe("ServerToolsTab existing behavior", () => {
     expect(curlDialogProps.at(-1)?.groups).toEqual(groups);
   });
 
-  it("disables every creation action at the tool cap", () => {
+  it("disables every creation action at the tool cap", async () => {
+    const user = userEvent.setup();
     renderTab({ toolCount: 50 });
 
-    expect(
-      screen.getByText(/50 tools, the current limit/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/50 tools; the limit is 50/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /add tool/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Import curl" })).toBeDisabled();
     expect(
       screen.getByRole("button", { name: "Import OpenAPI" }),
     ).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "get_contact" }));
+    expect(
+      await screen.findByRole("menuitem", { name: "Duplicate" }),
+    ).toHaveAttribute("aria-disabled", "true");
   });
 
   it("keeps creation disabled at the cap while a filter hides most tools", () => {
@@ -837,5 +844,32 @@ describe("ServerToolsTab existing behavior", () => {
     expect(
       screen.getByRole("button", { name: "Import OpenAPI" }),
     ).toBeDisabled();
+  });
+
+  it("reports the configured cap in the alert", () => {
+    renderTab({ toolCount: 12, toolLimit: 12 });
+
+    expect(screen.getByText(/12 tools; the limit is 12/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /add tool/i })).toBeDisabled();
+  });
+
+  it("reports the surplus when the cap is below the tool count", () => {
+    renderTab({ toolCount: 20, toolLimit: 6 });
+
+    expect(screen.getByText(/20 tools; the limit is 6/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /add tool/i })).toBeDisabled();
+  });
+
+  it("keeps creation enabled when the configured cap is higher", async () => {
+    const user = userEvent.setup();
+    renderTab({ toolCount: 50, toolLimit: 80 });
+
+    expect(screen.queryByText(/the limit is/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /add tool/i })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "get_contact" }));
+    expect(
+      await screen.findByRole("menuitem", { name: "Duplicate" }),
+    ).not.toHaveAttribute("aria-disabled", "true");
   });
 });

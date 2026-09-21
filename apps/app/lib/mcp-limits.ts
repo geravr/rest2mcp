@@ -16,5 +16,3 @@ export type {
   McpPlatformResourceMode,
   McpPlatformScope,
 } from "@repo/core";
-
-export const MCP_MAX_TOOLS = 50;

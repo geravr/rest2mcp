@@ -52,7 +52,7 @@ export const enServers = {
     pathPlaceholder: "/contacts/",
     allowMutation: "Allow mutation",
     enabled: "Enabled",
-    toolCap: "This server already has 50 tools, the current limit.",
+    toolCap: "This server already has {count} tools; the limit is {limit}.",
     curlLabel: "curl command",
     curlPlaceholder: "curl https://api.example.com/v1/items",
     saveTool: "Save tool",
