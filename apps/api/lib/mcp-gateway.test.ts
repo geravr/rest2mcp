@@ -352,7 +352,7 @@ describe("MCP round-trip", () => {
         openWorldHint: true,
       });
       expect(tool._meta).toMatchObject({
-        "io.rest2mcp/contract": { version: 1 },
+        "io.rest2mcp/contract": { version: 2 },
       });
     } finally {
       await client.close();
@@ -624,5 +624,109 @@ describe("buildAgentInputZodObject", () => {
     expect(json.properties.query.description).toBe("Search text");
     expect(json.required).toEqual(expect.arrayContaining(["query", "payload"]));
     expect(json.required).not.toContain("limit");
+  });
+});
+
+describe("product MCP gateway: published revision only", () => {
+  it("lists array contracts from the immutable compiled revision", async () => {
+    const compiled = compileToolDefinition({
+      method: "GET",
+      definition: {
+        version: MCP_REQUEST_DEFINITION_VERSION,
+        pathSegments: [
+          { id: "path_0", value: { kind: "literal", value: "/campaigns" } },
+        ],
+        query: [
+          {
+            id: "query_0",
+            name: "tags",
+            value: { kind: "agentInput", agentInputId: "tags" },
+            serialization: { style: "form", explode: true },
+          },
+        ],
+        headers: [],
+        body: { bodyType: "none" },
+        agentInputs: [
+          {
+            id: "tags",
+            name: "tags",
+            description: "Campaign tags",
+            required: true,
+            sensitive: false,
+            type: "array",
+            items: { type: "string" },
+            minItems: 1,
+            maxItems: 8,
+          },
+        ],
+      },
+      common: { headers: [], query: [] },
+      auth: null,
+      serverValues: [],
+      basePath: "/",
+      allowMutation: false,
+    });
+    if (!compiled.ok || !compiled.plan) {
+      throw new Error("array gateway fixture failed to compile");
+    }
+
+    authenticateServerToken.mockResolvedValue({
+      id: "mtk_1",
+      kind: "server",
+      serverId: "mcs_1",
+      userId: "usr_1",
+    });
+    const app = createApp(SERVER_ROW, [
+      {
+        ...REVISION_TOOL_ROWS[0]!,
+        name: "list_campaigns",
+        requestDefinition: null,
+        compiledPlan: compiled.plan,
+      },
+    ]);
+    const transport = new StreamableHTTPClientTransport(
+      new URL("http://test.local/mcp/mcs_1"),
+      {
+        fetch: (input, init) =>
+          app.request(input as string | URL, init) as Promise<Response>,
+        requestInit: {
+          headers: { Authorization: "Bearer server-token" },
+        },
+      },
+    );
+    const client = new Client({ name: "test-client", version: "0.0.1" });
+    await client.connect(transport);
+    try {
+      const { tools } = await client.listTools();
+      expect(tools).toHaveLength(1);
+      expect(tools[0]?.name).toBe("list_campaigns");
+      expect(tools[0]?.inputSchema).toMatchObject({
+        type: "object",
+        properties: {
+          tags: {
+            type: "array",
+            minItems: 1,
+            maxItems: 8,
+            items: { type: "string" },
+          },
+        },
+      });
+      expect(tools[0]?._meta).toMatchObject({
+        "io.rest2mcp/contract": { version: 2 },
+      });
+
+      const rejected = await client.callTool({
+        name: "list_campaigns",
+        arguments: { tags: "not-an-array" },
+      });
+      expect(rejected.isError).toBe(true);
+      expect(rejected.structuredContent).toMatchObject({
+        ok: false,
+        error: { category: "invalid_arguments", retryable: false },
+      });
+      expect(executeMappedTool).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+    }
   });
 });

@@ -21,7 +21,7 @@ const GROUP_LIMIT = MCP_TOOL_GROUP_LIMITS.maxGroupsPerServer;
 const PAGE_SIZE = 10;
 
 const definition = {
-  version: 1 as const,
+  version: 2 as const,
   pathSegments: [
     { id: "seg0", value: { kind: "literal" as const, value: "/contacts" } },
   ],

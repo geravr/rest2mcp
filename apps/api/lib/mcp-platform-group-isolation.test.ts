@@ -87,7 +87,7 @@ const GROUP_ID = "mtg_1";
 const GROUP_NAME = "Contacts import batch";
 
 const REQUEST_DEFINITION = {
-  version: 1,
+  version: 2,
   pathSegments: [
     { id: "path_1", value: { kind: "literal", value: "/contacts" } },
   ],
@@ -98,7 +98,7 @@ const REQUEST_DEFINITION = {
 };
 
 const SOURCE_PROVENANCE = {
-  version: 1,
+  version: 2,
   batchId: "oab_1",
   operationKey: "listContacts",
   sourceKind: "url",
@@ -161,7 +161,7 @@ function revisionDetail(input: {
     isActive: true,
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
     schemaVersion: 1,
-    compilerVersion: "1",
+    compilerVersion: "2",
     server: {
       name: "CRM",
       description: null,

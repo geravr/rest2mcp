@@ -167,7 +167,7 @@ const SCOPE_SETS: Array<{ id: string; scopes: McpPlatformScope[] }> = [
 ];
 
 const REQUEST_DEFINITION = {
-  version: 1,
+  version: 2,
   pathSegments: [],
   query: [],
   headers: [],

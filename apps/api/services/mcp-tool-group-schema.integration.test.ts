@@ -69,7 +69,7 @@ const provenance: McpOpenApiSourceProvenance = {
 };
 
 const plainDefinition = {
-  version: 1 as const,
+  version: 2 as const,
   pathSegments: [
     { id: "path_1", value: { kind: "literal" as const, value: "/contacts" } },
   ],
@@ -333,7 +333,7 @@ describeIntegration("mcp tool group schema", () => {
           id: wrongVersionToolId,
           source: "openapi",
           enabled: false,
-          sourceProvenance: { ...provenance, version: 2 },
+          sourceProvenance: { ...provenance, version: 2 as never },
         }),
       );
       const withoutTags = { ...provenance };
@@ -379,7 +379,7 @@ describeIntegration("mcp tool group schema", () => {
         candidateFingerprint: "cand_revision_provenance",
         contractFingerprint: "contract_revision_provenance",
         schemaVersion: 1,
-        compilerVersion: "1",
+        compilerVersion: "2",
         name: "Revision provenance",
         baseUrl: "https://api.example.com",
         allowedHosts: ["api.example.com"],

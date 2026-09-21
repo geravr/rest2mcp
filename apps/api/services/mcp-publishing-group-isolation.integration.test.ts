@@ -41,7 +41,7 @@ const CREDENTIAL_SECRET = "s".repeat(32);
 
 function definitionFor(path: string, name: string): Record<string, unknown> {
   return {
-    version: 1,
+    version: 2,
     pathSegments: [
       { id: `path_${name}`, value: { kind: "literal", value: path } },
     ],
@@ -546,7 +546,7 @@ describeIntegration("mcp publishing group and provenance isolation", () => {
       source: "openapi",
       sourceProvenance: {
         ...provenanceFixture,
-        version: 2,
+        version: 2 as never,
       },
     });
 

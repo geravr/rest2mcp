@@ -300,7 +300,7 @@ describe("platform MCP", () => {
             description: null,
             method: "GET",
             requestDefinition: {
-              version: 1,
+              version: 2,
               headers: [
                 {
                   id: "hdr_1",
@@ -491,7 +491,7 @@ describe("platform MCP", () => {
         name: "get_contact",
         method: "GET",
         requestDefinition: {
-          version: 1,
+          version: 2,
           pathSegments: [],
           query: [],
           headers: [],
@@ -516,7 +516,7 @@ describe("platform MCP", () => {
             name: "get_contact",
             method: "GET",
             requestDefinition: {
-              version: 1,
+              version: 2,
               pathSegments: [
                 {
                   id: "path_1",
@@ -571,7 +571,7 @@ describe("platform MCP", () => {
             name: "get_contact",
             method: "GET",
             requestDefinition: {
-              version: 1,
+              version: 2,
               pathSegments: [],
               query: [],
               headers: [],
@@ -618,7 +618,7 @@ describe("platform MCP", () => {
             name: "get_contact",
             method: "GET",
             requestDefinition: {
-              version: 1,
+              version: 2,
               pathSegments: [],
               query: [],
               headers: [],
@@ -647,7 +647,7 @@ describe("platform MCP", () => {
         title: "Get contact",
         description: "Fetch one contact.",
         method: "GET",
-        requestDefinition: { version: 1 },
+        requestDefinition: { version: 2 },
         compileStatus: "valid",
         compileIssues: [],
         annotations: null,
@@ -666,7 +666,7 @@ describe("platform MCP", () => {
             name: "get_contact",
             method: "GET",
             requestDefinition: {
-              version: 1,
+              version: 2,
               pathSegments: [],
               query: [],
               headers: [],
@@ -697,7 +697,7 @@ describe("platform MCP", () => {
             method: "GET",
             pathTemplate: "/contacts/{{id}}",
             requestDefinition: {
-              version: 1,
+              version: 2,
               pathSegments: [],
               query: [],
               headers: [],
@@ -727,7 +727,7 @@ describe("platform MCP", () => {
             name: "secure_get",
             method: "GET",
             requestDefinition: {
-              version: 1,
+              version: 2,
               pathSegments: [
                 { id: "path_1", value: { kind: "literal", value: "/x" } },
               ],
@@ -763,7 +763,7 @@ describe("platform MCP", () => {
         id: "mct_1",
         name: "secure_get",
         method: "GET",
-        requestDefinition: { version: 1 },
+        requestDefinition: { version: 2 },
         compileStatus: "valid",
         compileIssues: [],
         annotations: null,
@@ -784,7 +784,7 @@ describe("platform MCP", () => {
             name: "secure_get",
             method: "GET",
             requestDefinition: {
-              version: 1,
+              version: 2,
               pathSegments: [
                 { id: "path_1", value: { kind: "literal", value: "/x" } },
               ],
@@ -820,7 +820,7 @@ describe("platform MCP", () => {
         id: "mct_1",
         name: "get_contact",
         method: "GET",
-        requestDefinition: { version: 1 },
+        requestDefinition: { version: 2 },
         compileStatus: "valid",
         compileIssues: [],
         annotations: null,
@@ -840,7 +840,7 @@ describe("platform MCP", () => {
             method: "GET",
             enabled: true,
             requestDefinition: {
-              version: 1,
+              version: 2,
               pathSegments: [],
               query: [],
               headers: [],
@@ -875,7 +875,7 @@ describe("platform MCP", () => {
             name: "get_contact",
             method: "GET",
             requestDefinition: {
-              version: 1,
+              version: 2,
               pathSegments: [],
               query: [],
               headers: [],
@@ -927,7 +927,7 @@ describe("platform MCP", () => {
       getToolEditorState.mockResolvedValue({
         toolId: "mct_1",
         definition: {
-          version: 1,
+          version: 2,
           pathSegments: [],
           query: [],
           headers: [
@@ -971,7 +971,7 @@ describe("platform MCP", () => {
       getToolEditorState.mockResolvedValue({
         toolId: "mct_1",
         definition: {
-          version: 1,
+          version: 2,
           pathSegments: [],
           query: [],
           headers: [
@@ -1026,7 +1026,7 @@ describe("platform MCP", () => {
         id: "mct_2",
         name: "get_contact_copy",
         method: "GET",
-        requestDefinition: { version: 1 },
+        requestDefinition: { version: 2 },
         compileStatus: "valid",
         compileIssues: [],
         annotations: null,
@@ -1037,7 +1037,7 @@ describe("platform MCP", () => {
       getToolEditorState.mockResolvedValue({
         toolId: "mct_1",
         definition: {
-          version: 1,
+          version: 2,
           pathSegments: [],
           query: [],
           headers: [],
@@ -1055,7 +1055,7 @@ describe("platform MCP", () => {
             serverId: "mcs_1",
             method: "GET",
             requestDefinition: {
-              version: 1,
+              version: 2,
               pathSegments: [],
               query: [],
               headers: [],
@@ -1121,7 +1121,7 @@ describe("platform MCP", () => {
             serverId: "mcs_1",
             method: "GET",
             requestDefinition: {
-              version: 1,
+              version: 2,
               pathSegments: [],
               query: [],
               headers: [],
@@ -1147,7 +1147,7 @@ describe("platform MCP", () => {
         name: "secure_get_copy",
         method: "GET",
         requestDefinition: {
-          version: 1,
+          version: 2,
           pathSegments: [],
           query: [],
           headers: [],
@@ -1173,7 +1173,7 @@ describe("platform MCP", () => {
       getToolEditorState.mockResolvedValue({
         toolId: "mct_1",
         definition: {
-          version: 1,
+          version: 2,
           pathSegments: [],
           query: [],
           headers: [],
@@ -2079,7 +2079,7 @@ describe("platform MCP", () => {
         isActive: false,
         createdAt: new Date("2026-01-01T00:00:00Z"),
         schemaVersion: 1,
-        compilerVersion: "1",
+        compilerVersion: "2",
         server: {
           name: "CRM",
           description: null,

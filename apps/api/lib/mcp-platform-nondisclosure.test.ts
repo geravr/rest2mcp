@@ -245,7 +245,7 @@ function assertIndistinguishableDenials(
 
 function definitionWithServerValue(id: string) {
   return {
-    version: 1,
+    version: 2,
     pathSegments: [{ id: "path_1", value: { kind: "literal", value: "/x" } }],
     query: [],
     headers: [

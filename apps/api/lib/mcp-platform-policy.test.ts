@@ -157,7 +157,7 @@ async function connectClient(
 
 function definition() {
   return {
-    version: 1,
+    version: 2,
     pathSegments: [],
     query: [],
     headers: [],
@@ -173,7 +173,7 @@ function toolRow(overrides: Record<string, unknown> = {}) {
     title: null,
     description: null,
     method: "GET",
-    requestDefinition: { version: 1 },
+    requestDefinition: { version: 2 },
     compileStatus: "valid",
     compileIssues: [],
     annotations: null,

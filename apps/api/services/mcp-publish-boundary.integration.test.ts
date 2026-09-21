@@ -50,7 +50,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 const readDefinition = {
-  version: 1 as const,
+  version: 2 as const,
   pathSegments: [
     { id: "path_1", value: { kind: "literal" as const, value: "/contacts" } },
   ],
@@ -62,7 +62,7 @@ const readDefinition = {
 
 function secureDefinition(secretId: string) {
   return {
-    version: 1 as const,
+    version: 2 as const,
     pathSegments: [
       { id: "path_1", value: { kind: "literal" as const, value: "/contacts" } },
     ],

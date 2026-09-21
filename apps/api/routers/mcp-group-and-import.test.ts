@@ -27,7 +27,7 @@ const SERVER_ID = "mcs_router_test";
 const GROUP_ID = "mtg_router_test";
 
 const requestDefinition = {
-  version: 1,
+  version: 2,
   pathSegments: [
     { id: "seg0", value: { kind: "literal", value: "/contacts" } },
   ],

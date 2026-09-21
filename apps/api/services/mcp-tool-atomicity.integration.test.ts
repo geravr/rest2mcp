@@ -14,7 +14,7 @@ const describeIntegration = connectionString ? describe : describe.skip;
 /** The deployment's effective cap, so seeded rows reach the real boundary. */
 const MAX_TOOLS = getMcpMaxToolsPerServer();
 const definition = {
-  version: 1 as const,
+  version: 2 as const,
   pathSegments: [
     { id: "seg0", value: { kind: "literal" as const, value: "/x" } },
   ],

@@ -12,7 +12,7 @@ const connectionString = process.env.DATABASE_URL;
 const describeIntegration = connectionString ? describe : describe.skip;
 
 const definition = {
-  version: 1 as const,
+  version: 2 as const,
   pathSegments: [
     { id: "seg0", value: { kind: "literal" as const, value: "/contacts" } },
   ],

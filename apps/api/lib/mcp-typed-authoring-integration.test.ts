@@ -21,7 +21,7 @@ const serverValues = [
 ];
 
 const authoredDefinition = {
-  version: 1 as const,
+  version: 2 as const,
   pathSegments: [
     {
       id: "path_1",

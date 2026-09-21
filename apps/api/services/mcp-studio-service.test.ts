@@ -185,7 +185,7 @@ function makeDb(results: unknown[]) {
 }
 
 const simpleTypedDefinition = {
-  version: 1 as const,
+  version: 2 as const,
   pathSegments: [
     { id: "path_1", value: { kind: "literal" as const, value: "/contacts" } },
   ],
@@ -930,7 +930,7 @@ describe("mcp-studio tools", () => {
       allowMutation: false,
       enabled: true,
       compileStatus: "valid",
-      requestDefinition: expect.objectContaining({ version: 1 }),
+      requestDefinition: expect.objectContaining({ version: 2 }),
     });
   });
 
@@ -995,7 +995,7 @@ describe("mcp-studio typed tools", () => {
   };
 
   const typedDefinition = {
-    version: 1 as const,
+    version: 2 as const,
     pathSegments: [
       { id: "path_1", value: { kind: "literal" as const, value: "/contacts" } },
       {
@@ -1039,7 +1039,7 @@ describe("mcp-studio typed tools", () => {
       method: "GET",
       compileStatus: "valid",
       enabled: true,
-      requestDefinition: expect.objectContaining({ version: 1 }),
+      requestDefinition: expect.objectContaining({ version: 2 }),
     });
     expect(
       (db.insertedValues[0] as { compiledPlan?: unknown }).compiledPlan,
@@ -2103,7 +2103,7 @@ describe("mcp-studio variables", () => {
           id: "mct_1",
           name: "get_contact",
           requestDefinition: {
-            version: 1,
+            version: 2,
             pathSegments: [],
             query: [],
             headers: [

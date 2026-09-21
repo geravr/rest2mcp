@@ -38,7 +38,7 @@ const CREDENTIAL_SECRET = "s".repeat(32);
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const plainDefinition = {
-  version: 1 as const,
+  version: 2 as const,
   pathSegments: [
     { id: "path_1", value: { kind: "literal" as const, value: "/contacts" } },
   ],
@@ -756,7 +756,7 @@ describeIntegration("mcp publishing service", () => {
           candidateFingerprint: `cand_${index}`,
           contractFingerprint: `contract_${index}`,
           schemaVersion: 1,
-          compilerVersion: "1",
+          compilerVersion: "2",
           name: "Retention",
           baseUrl: "https://api.example.com",
           allowedHosts: ["api.example.com"],
@@ -848,7 +848,7 @@ describeIntegration("mcp publishing service", () => {
         candidateFingerprint: `cand_${revisionNumber}`,
         contractFingerprint: `contract_${revisionNumber}`,
         schemaVersion: 1,
-        compilerVersion: "1",
+        compilerVersion: "2",
         name: "Constraints",
         baseUrl: "https://api.example.com",
         allowedHosts: ["api.example.com"],

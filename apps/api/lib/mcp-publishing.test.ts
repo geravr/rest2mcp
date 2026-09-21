@@ -15,7 +15,7 @@ const CREATED = new Date("2024-01-01T00:00:00.000Z");
 
 function definitionFor(path: string): Record<string, unknown> {
   return {
-    version: 1,
+    version: 2,
     pathSegments: [{ id: "path_1", value: { kind: "literal", value: path } }],
     query: [
       {
@@ -165,7 +165,7 @@ describe("canonical publication candidate", () => {
       pathSegments: [
         { value: { value: "/contacts", kind: "literal" }, id: "path_1" },
       ],
-      version: 1,
+      version: 2,
     };
     const canonical = fingerprintOf(makeAggregate());
     const shuffled = fingerprintOf(
@@ -299,7 +299,7 @@ describe("canonical publication candidate", () => {
       id: "mct_c",
       name: "list_disabled",
       requestDefinition: {
-        version: 1,
+        version: 2,
         pathSegments: [
           { id: "path_1", value: { kind: "literal", value: "/disabled" } },
         ],
@@ -348,7 +348,7 @@ describe("canonical publication candidate", () => {
 
 describe("authoring metadata isolation", () => {
   const provenanceFixture = {
-    version: 1,
+    version: 2,
     batchId: "provenance-batch-sentinel",
     openApiVersion: "3.1",
     operationKey: "listContacts",

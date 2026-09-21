@@ -16,7 +16,7 @@ const TOOL_ID = "mct_snapshot_integration";
 const REVISION_2_ID = "msr_snapshot_integration_2";
 
 const getContactDefinition = {
-  version: 1 as const,
+  version: 2 as const,
   pathSegments: [
     {
       id: "path_base",

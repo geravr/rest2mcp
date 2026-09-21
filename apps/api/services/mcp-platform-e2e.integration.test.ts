@@ -71,7 +71,7 @@ describeIntegration("Platform MCP end-to-end journey", () => {
   const openClients: Client[] = [];
 
   const getToolDefinition = {
-    version: 1 as const,
+    version: 2 as const,
     pathSegments: [
       { id: "path_1", value: { kind: "literal" as const, value: "/widgets" } },
     ],
@@ -98,7 +98,7 @@ describeIntegration("Platform MCP end-to-end journey", () => {
   };
 
   const postToolDefinition = {
-    version: 1 as const,
+    version: 2 as const,
     pathSegments: [
       { id: "path_2", value: { kind: "literal" as const, value: "/widgets" } },
     ],
