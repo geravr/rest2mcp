@@ -2,6 +2,7 @@ import {
   AiOptimizeDialog,
   type AiOptimizationSelectionState,
 } from "@/components/servers/ai-optimize-dialog";
+import { MethodBadge } from "@/components/servers/method-badge";
 import {
   AiSettingsCta,
   useAiFeatureReadiness,
@@ -483,9 +484,7 @@ export function OpenApiImportDialog({
                     key={tool.id}
                     className="flex flex-wrap items-center gap-2 text-xs"
                   >
-                    <Badge variant="secondary" className="font-mono text-xs">
-                      {tool.method}
-                    </Badge>
+                    <MethodBadge method={tool.method} className="font-mono" />
                     <code className="break-all font-mono text-xs">
                       {tool.path}
                     </code>
@@ -801,12 +800,10 @@ export function OpenApiImportDialog({
                                     )
                                   }
                                 />
-                                <Badge
-                                  variant="secondary"
-                                  className="font-mono text-xs"
-                                >
-                                  {operation.method}
-                                </Badge>
+                                <MethodBadge
+                                  method={operation.method}
+                                  className="font-mono"
+                                />
                                 <code className="break-all font-mono text-xs">
                                   {operation.path}
                                 </code>

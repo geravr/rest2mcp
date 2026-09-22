@@ -1,3 +1,4 @@
+import { MethodBadge } from "@/components/servers/method-badge";
 import {
   useCreateMcpToolFromCurl,
   useParseCurlPreview,
@@ -285,7 +286,7 @@ export function CurlImportDialog({
         ) : (
           <div className="space-y-4">
             <div className="flex items-center gap-2">
-              <Badge variant="outline">{preview.method}</Badge>
+              <MethodBadge method={preview.method} />
               <code className="break-all font-mono text-xs">
                 {preview.relativePath}
               </code>
