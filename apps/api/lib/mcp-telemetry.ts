@@ -43,6 +43,10 @@ export const MCP_TELEMETRY_EVENTS = {
   openapiImportPreviewed: "mcp_openapi_import_previewed",
   /** One committed OpenAPI import batch (counts, duration, and source kind only). */
   openapiImportConfirmed: "mcp_openapi_import_confirmed",
+  /** One finished AI optimizer run (counts, versions, model identity, usage; no content). */
+  optimizerRunCompleted: "mcp_ai_optimizer_run_completed",
+  /** One committed optimizer application (class counts and revisions; no content). */
+  optimizerApplied: "mcp_ai_optimizer_applied",
 } as const;
 
 export type McpTelemetryEvent =

@@ -24,6 +24,7 @@ import { updateAiConnection } from "../../services/ai-provider-repository.js";
 import {
   generateStructured,
   runStructuredOutputSmokeTest,
+  schemaConformanceError,
   type AiRuntimeDeps,
 } from "./ai-runtime.js";
 import type { AiProviderAdapter, AiResolvedRoute } from "./provider-adapter.js";
@@ -179,6 +180,44 @@ async function expectAppError(promise: Promise<unknown>): Promise<AppError> {
   }
   throw new Error("Expected the promise to reject with an AppError.");
 }
+
+describe("schemaConformanceError", () => {
+  it("keeps the raw model value out of a Mastra schema failure", () => {
+    const marker = "UNIT-LEAK-MARKER";
+    const mapped = schemaConformanceError(
+      Object.assign(
+        new Error(`Structured output validation failed: ${marker}`),
+        {
+          id: "STRUCTURED_OUTPUT_SCHEMA_VALIDATION_FAILED",
+          details: { value: JSON.stringify({ confirmation: marker }) },
+          cause: {
+            issues: [
+              {
+                path: ["confirmation"],
+                message: 'Invalid input: expected "ok"',
+              },
+            ],
+          },
+        },
+      ),
+    );
+
+    expect(mapped?.appCode).toBe(APP_ERROR_CODES.AI_MODEL_VERIFICATION_FAILED);
+    expect(mapped?.status).toBe(422);
+    expect(mapped?.message).toContain(
+      'confirmation: Invalid input: expected "ok"',
+    );
+    expect(mapped?.message).not.toContain(marker);
+  });
+
+  it("ignores provider failures that are not schema mismatches", () => {
+    expect(
+      schemaConformanceError(
+        Object.assign(new Error("rate limited"), { statusCode: 429 }),
+      ),
+    ).toBeNull();
+  });
+});
 
 describe("runStructuredOutputSmokeTest", () => {
   it("resolves token usage when the model returns schema-conforming output", async () => {

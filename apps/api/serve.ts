@@ -26,6 +26,11 @@ import {
   shutdownPostHogClient,
 } from "./lib/posthog.js";
 import { ensureSuperAdmin } from "./services/admin-service.js";
+import { getAiProviderAdapter } from "./lib/ai/provider-registry.js";
+import {
+  startOptimizerReconciler,
+  startOptimizerWorker,
+} from "./services/ai-optimizer-worker.js";
 
 // Single connection pool for both reads and writes in VPS mode
 const db = createDb(env.DATABASE_URL);
@@ -96,7 +101,16 @@ ensureSuperAdmin(db, env).catch((err) => {
   console.error("[admin] Failed to seed super-admin:", err);
 });
 
+const optimizerLifecycleDeps = {
+  db,
+  getAdapter: getAiProviderAdapter,
+  aiCredentialSecret: env.AI_CREDENTIAL_SECRET,
+};
+const optimizerWorker = startOptimizerWorker(optimizerLifecycleDeps);
+const optimizerReconciler = startOptimizerReconciler(optimizerLifecycleDeps);
+
 async function shutdown() {
+  await Promise.all([optimizerWorker.stop(), optimizerReconciler.stop()]);
   await drainAuditQueue(db);
   await shutdownPostHogClient(env);
   process.exit(0);

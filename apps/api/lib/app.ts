@@ -15,6 +15,7 @@ import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { Hono } from "hono";
 import { adminRouter } from "../routers/admin.js";
 import { aiRouter } from "../routers/ai.js";
+import { aiOptimizerRouter } from "../routers/ai-optimizer.js";
 import { mcpRouter } from "../routers/mcp.js";
 import { publicAuthRoutes } from "../routers/public-auth.js";
 import { userRouter } from "../routers/user.js";
@@ -85,6 +86,7 @@ function shouldCaptureTrpcError(error: TRPCError): boolean {
 const appRouter = router({
   admin: adminRouter,
   ai: aiRouter,
+  aiOptimizer: aiOptimizerRouter,
   mcp: mcpRouter,
   user: userRouter,
 });

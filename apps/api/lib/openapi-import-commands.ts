@@ -41,6 +41,23 @@ export const openApiImportConfirmCommandSchema = z.strictObject({
   groupStrategy: mcpOpenApiGroupStrategySchema.describe(
     "Single group strategy applied to every selected operation.",
   ),
+  optimization: z
+    .strictObject({
+      runId: z.string().min(1),
+      operations: z
+        .array(
+          z.strictObject({
+            operationKey: z.string().min(1).max(512),
+            operationIds: z.array(z.string().min(1).max(64)).min(1).max(12),
+          }),
+        )
+        .min(1)
+        .max(50),
+    })
+    .optional()
+    .describe(
+      "Optional completed optimization run with selected recommendation operation ids per candidate.",
+    ),
 });
 
 export type OpenApiImportPreviewCommand = z.infer<

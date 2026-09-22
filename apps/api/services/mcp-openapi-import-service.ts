@@ -49,6 +49,21 @@ import {
 } from "../lib/openapi-document.js";
 import { fetchOpenApiDocument } from "../lib/openapi-fetch.js";
 import {
+  AI_TOOL_OPTIMIZATION_POLICY_VERSION,
+  optimizerToolSnapshotSchema,
+  type OptimizerOperation,
+  type OptimizerToolSnapshotV1,
+} from "../lib/mcp-optimizer-contracts.js";
+import { applySelectedOperations } from "../lib/mcp-optimizer-policy.js";
+import { sanitizeOpenApiCandidate } from "../lib/mcp-optimizer-sanitize.js";
+import { aiToolOptimizationRun } from "@repo/db";
+import {
+  commitOptimizerApplyMarker,
+  findOptimizerItemByRef,
+  getOptimizerRunForOwner,
+  markOptimizerItemsApplied,
+} from "./ai-optimizer-repository.js";
+import {
   MCP_OPENAPI_PROVENANCE_VERSION,
   mcpOpenApiSourceProvenanceSchema,
   type McpOpenApiCapacityProjection,
@@ -751,6 +766,156 @@ export async function confirmOpenApiImport(
     );
   }
 
+  // Optional AI optimization: verify the completed run's ownership, source,
+  // policy, and per-candidate fingerprints before any write. Blocked
+  // candidates can never carry optimization (they are rejected above).
+  const optimization = input.optimization;
+  const optimizationByOperationKey = new Map<
+    string,
+    {
+      itemId: string;
+      runId: string;
+      snapshot: OptimizerToolSnapshotV1;
+      operations: OptimizerOperation[];
+    }
+  >();
+  if (optimization) {
+    const run = await getOptimizerRunForOwner(db, {
+      userId,
+      runId: optimization.runId,
+    });
+    if (
+      !run ||
+      run.serverId !== server.id ||
+      run.source !== "openapi" ||
+      (run.state !== "completed" && run.state !== "completed_with_errors")
+    ) {
+      throw appError({
+        appCode: APP_ERROR_CODES.AI_OPTIMIZATION_STATE_INVALID,
+        message: "The optimization run cannot be applied to this import.",
+        status: 409,
+        details: { serverId },
+      });
+    }
+    if (run.policyVersion !== AI_TOOL_OPTIMIZATION_POLICY_VERSION) {
+      throw appError({
+        appCode: APP_ERROR_CODES.AI_OPTIMIZATION_POLICY_UNSUPPORTED,
+        message: "The run uses a policy version this build cannot apply.",
+        status: 409,
+      });
+    }
+    if (run.documentFingerprint !== documentFingerprint) {
+      throw appError({
+        appCode: APP_ERROR_CODES.AI_OPTIMIZATION_SOURCE_STALE,
+        message: "The source no longer matches the optimization run.",
+        status: 409,
+        details: { serverId },
+      });
+    }
+    if (run.applyKey) {
+      throw appError({
+        appCode: APP_ERROR_CODES.AI_OPTIMIZATION_STATE_INVALID,
+        message: "This optimization run was already applied.",
+        status: 409,
+        details: { serverId },
+      });
+    }
+    const selectedOperationKeys = new Set(
+      input.selection.map((entry) => entry.operationKey),
+    );
+    for (const entry of optimization.operations) {
+      if (!selectedOperationKeys.has(entry.operationKey)) {
+        // Deselected candidates cannot silently absorb their recommendations.
+        throw appError({
+          appCode: APP_ERROR_CODES.AI_OPTIMIZATION_APPLY_INVALID,
+          message:
+            "An optimized candidate was removed from the import selection.",
+          status: 422,
+          details: { serverId, operationKeys: [entry.operationKey] },
+        });
+      }
+      const candidate = candidateByKey.get(entry.operationKey);
+      if (!candidate || !candidate.selectable || !candidate.requestDefinition) {
+        throw appError({
+          appCode: APP_ERROR_CODES.AI_OPTIMIZATION_STATE_INVALID,
+          message: "An optimized candidate is not selectable.",
+          status: 409,
+          details: { serverId },
+        });
+      }
+      const item = await findOptimizerItemByRef(db, {
+        runId: run.id,
+        operationKey: entry.operationKey,
+      });
+      if (!item || item.state !== "recommended") {
+        throw appError({
+          appCode: APP_ERROR_CODES.AI_OPTIMIZATION_STATE_INVALID,
+          message: "The optimized candidate is no longer reviewable.",
+          status: 409,
+          details: { serverId },
+        });
+      }
+      const snapshotParsed = optimizerToolSnapshotSchema.safeParse(
+        item.snapshot,
+      );
+      if (!snapshotParsed.success) {
+        throw appError({
+          appCode: APP_ERROR_CODES.AI_OPTIMIZATION_STATE_INVALID,
+          message: "The stored candidate snapshot is invalid.",
+          status: 409,
+          details: { serverId },
+        });
+      }
+      const fresh = sanitizeOpenApiCandidate({
+        kind: "openapi",
+        operationKey: candidate.operationKey,
+        // The stored item name is the pre-override deterministic name, so the
+        // fingerprint stays stable when the owner supplies a final name.
+        name: item.name,
+        ...(candidate.title ? { title: candidate.title } : {}),
+        ...(candidate.description
+          ? { description: candidate.description }
+          : {}),
+        method: candidate.method,
+        requestDefinition: candidate.requestDefinition,
+        compileIssues: candidate.compileIssues,
+      });
+      if (!fresh.ok || fresh.fingerprint !== item.fingerprint) {
+        throw appError({
+          appCode: APP_ERROR_CODES.AI_OPTIMIZATION_SOURCE_STALE,
+          message: "The candidate changed after the optimization run.",
+          status: 409,
+          details: { serverId },
+        });
+      }
+      const sourceOperations =
+        (item.review as { sourceOperations?: OptimizerOperation[] } | null)
+          ?.sourceOperations ?? [];
+      const byOperationId = new Map(
+        sourceOperations.map((op) => [op.operationId, op]),
+      );
+      const operations: OptimizerOperation[] = [];
+      for (const operationId of entry.operationIds) {
+        const op = byOperationId.get(operationId);
+        if (!op) {
+          throw appError({
+            appCode: APP_ERROR_CODES.AI_OPTIMIZATION_APPLY_INVALID,
+            message: "A selected recommendation is no longer known.",
+            status: 422,
+            details: { serverId },
+          });
+        }
+        operations.push(op);
+      }
+      optimizationByOperationKey.set(entry.operationKey, {
+        itemId: item.id,
+        runId: run.id,
+        snapshot: snapshotParsed.data,
+        operations,
+      });
+    }
+  }
+
   const plan = planGroupAssignments({
     strategy: input.groupStrategy,
     selected,
@@ -762,6 +927,7 @@ export async function confirmOpenApiImport(
   const sourceKind = resolved.sourceKind;
   const sourceLabel = resolved.sourceLabel;
 
+  let optimizedCount = 0;
   const { result, revision, draftRevision } = await withOwnedServerWrite(
     db,
     { userId, serverId, expectedRevision: input.expectedRevision },
@@ -854,11 +1020,56 @@ export async function confirmOpenApiImport(
       const lockedBasePath = serverBasePath(locked.baseUrl);
       const usedGroupIds = new Set<string>();
       const tools: McpOpenApiConfirmResult["tools"] = [];
+      const optimizedAppliedItems: Array<{
+        itemId: string;
+        appliedToolId: string;
+        appliedToolName: string;
+      }> = [];
 
       for (const candidate of selected) {
+        // Apply accepted optimization operations in memory, before the
+        // existing compile/security pipeline sees the definition.
+        const optimizationEntry = optimizationByOperationKey.get(
+          candidate.operationKey,
+        );
+        let requestDefinition = candidate.requestDefinition;
+        let finalName = candidate.suggestedName;
+        let finalTitle = candidate.title;
+        let finalDescription = candidate.description;
+        if (optimizationEntry) {
+          const applied = applySelectedOperations({
+            snapshot: optimizationEntry.snapshot,
+            definition: candidate.requestDefinition,
+            startName: candidate.suggestedName,
+            operations: optimizationEntry.operations,
+            compile: {
+              common: lockedCommon,
+              auth: lockedAuth,
+              serverValues: lockedServers,
+              basePath: lockedBasePath,
+              allowMutation: false,
+            },
+            existingToolNames: [],
+          });
+          if (!applied.ok) {
+            throw appError({
+              appCode: APP_ERROR_CODES.AI_OPTIMIZATION_APPLY_INVALID,
+              message: "A selected recommendation failed current validation.",
+              status: 422,
+              details: { serverId: locked.id },
+            });
+          }
+          requestDefinition = applied.state.definition;
+          // The explicit owner-entered name always wins over an AI name change.
+          if (!nameOverrides.has(candidate.operationKey)) {
+            finalName = applied.state.toolName;
+          }
+          finalTitle = applied.state.toolTitle ?? finalTitle;
+          finalDescription = applied.state.toolDescription ?? finalDescription;
+        }
         const compiled = compileToolDefinition({
           method: candidate.method,
-          definition: candidate.requestDefinition,
+          definition: requestDefinition,
           common: lockedCommon,
           auth: lockedAuth,
           serverValues: lockedServers,
@@ -910,21 +1121,20 @@ export async function confirmOpenApiImport(
             .insert(mcpTool)
             .values({
               serverId: locked.id,
-              name: candidate.suggestedName,
+              name: finalName,
               title: boundedOptionalText(
-                candidate.title,
+                finalTitle,
                 MCP_FIELD_LIMITS.toolTitle,
               ),
               description: boundedOptionalText(
-                candidate.description,
+                finalDescription,
                 MCP_FIELD_LIMITS.description,
               ),
               method: candidate.method,
-              requestDefinition:
-                candidate.requestDefinition as unknown as Record<
-                  string,
-                  unknown
-                >,
+              requestDefinition: requestDefinition as unknown as Record<
+                string,
+                unknown
+              >,
               compiledPlan: compiled.plan as unknown as Record<string, unknown>,
               compileStatus: "valid",
               compileIssues: compiled.issues,
@@ -949,6 +1159,13 @@ export async function confirmOpenApiImport(
             method: candidate.method,
             path: candidate.path,
           });
+          if (optimizationEntry) {
+            optimizedAppliedItems.push({
+              itemId: optimizationEntry.itemId,
+              appliedToolId: created.id,
+              appliedToolName: created.name,
+            });
+          }
         } catch (error) {
           if (isUniqueViolation(error)) {
             throw appError({
@@ -957,13 +1174,50 @@ export async function confirmOpenApiImport(
               status: 409,
               details: {
                 serverId: locked.id,
-                toolNames: [candidate.suggestedName],
+                toolNames: [finalName],
               },
             });
           }
           throw error;
         }
       }
+
+      // Commit optimizer application markers in the same transaction as the
+      // tool/group writes: optimized import stays all-or-nothing.
+      if (optimization) {
+        const [runRow] = await ctx.tx
+          .select()
+          .from(aiToolOptimizationRun)
+          .where(eq(aiToolOptimizationRun.id, optimization.runId))
+          .for("update");
+        if (!runRow || runRow.applyKey) {
+          throw appError({
+            appCode: APP_ERROR_CODES.AI_OPTIMIZATION_STATE_INVALID,
+            message: "This optimization run was already applied.",
+            status: 409,
+            details: { serverId: locked.id },
+          });
+        }
+        await markOptimizerItemsApplied(ctx.tx, {
+          runId: optimization.runId,
+          now: new Date(),
+          draftRevision: locked.draftRevision + 1,
+          items: optimizedAppliedItems,
+        });
+        await commitOptimizerApplyMarker(ctx.tx, {
+          runId: optimization.runId,
+          applyKey: `oib:${batchId}`,
+          applyResult: {
+            batchId,
+            applied: optimizedAppliedItems,
+          } as unknown as Record<string, unknown>,
+          configRevision: input.expectedRevision + 1,
+          draftRevision: locked.draftRevision + 1,
+          now: new Date(),
+        });
+      }
+
+      optimizedCount = optimizedAppliedItems.length;
 
       const usedGroupResults: McpOpenApiConfirmResult["groups"] = [];
       for (const group of lockedGroups) {
@@ -996,6 +1250,20 @@ export async function confirmOpenApiImport(
     // New draft tools are publishable structure; the helper owns both revisions.
     { draftMutation: true },
   );
+
+  if (optimization) {
+    captureMcpTelemetry(MCP_TELEMETRY_EVENTS.optimizerApplied, {
+      db,
+      userId,
+      properties: {
+        sourceKind: "openapi",
+        runId: optimization.runId,
+        appliedCount: optimizedCount,
+        configRevision: revision,
+        draftRevision,
+      },
+    });
+  }
 
   return {
     revision,

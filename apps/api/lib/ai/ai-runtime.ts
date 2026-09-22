@@ -208,8 +208,11 @@ export async function generateStructured<T>(input: {
   maxOutputTokens?: number;
   deadlineMs?: number;
   signal?: AbortSignal;
+  /** Bounded override for multi-item batch prompts. */
+  maxPromptLength?: number;
 }): Promise<{ object: T; tokenUsage: number | null }> {
-  if (input.prompt.length === 0 || input.prompt.length > MAX_PROMPT_LENGTH) {
+  const maxPromptLength = input.maxPromptLength ?? MAX_PROMPT_LENGTH;
+  if (input.prompt.length === 0 || input.prompt.length > maxPromptLength) {
     throw appError({
       appCode: APP_ERROR_CODES.INVALID_INPUT,
       message: "The generation prompt is empty or exceeds the bounded length.",
@@ -276,9 +279,16 @@ export async function generateStructured<T>(input: {
     });
     const parsed = input.schema.safeParse(result.object);
     if (!parsed.success) {
+      const issue = parsed.error.issues
+        .slice(0, 8)
+        .map((entry) => `${entry.path.join(".") || "root"}: ${entry.message}`)
+        .join("; ")
+        .slice(0, 500);
       throw appError({
         appCode: APP_ERROR_CODES.AI_MODEL_VERIFICATION_FAILED,
-        message: "The model did not return schema-conforming output.",
+        message: issue
+          ? `The model did not return schema-conforming output. ${issue}`
+          : "The model did not return schema-conforming output.",
         status: 422,
       });
     }
@@ -288,6 +298,8 @@ export async function generateStructured<T>(input: {
     };
   } catch (error) {
     if (error instanceof AppError) throw error;
+    const conformance = schemaConformanceError(error);
+    if (conformance) throw conformance;
     throw await mapRuntimeProviderError({
       deps: input.deps,
       connectionId: selection.connectionId,
@@ -296,6 +308,60 @@ export async function generateStructured<T>(input: {
       error,
     });
   }
+}
+
+const STRUCTURED_OUTPUT_SCHEMA_ERROR_ID =
+  "STRUCTURED_OUTPUT_SCHEMA_VALIDATION_FAILED";
+
+/**
+ * Mastra throws this before `generateStructured` can read the object. The
+ * raw model value stays out of the message; only bounded Zod paths do.
+ */
+export function schemaConformanceError(error: unknown): AppError | null {
+  if (!isStructuredOutputSchemaError(error)) return null;
+  return appError({
+    appCode: APP_ERROR_CODES.AI_MODEL_VERIFICATION_FAILED,
+    message: boundedSchemaIssue(error),
+    status: 422,
+  });
+}
+
+function isStructuredOutputSchemaError(
+  error: unknown,
+): error is { cause?: unknown } {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "id" in error &&
+    (error as { id?: unknown }).id === STRUCTURED_OUTPUT_SCHEMA_ERROR_ID
+  );
+}
+
+function boundedSchemaIssue(error: { cause?: unknown }): string {
+  const cause = error.cause;
+  const issues =
+    typeof cause === "object" &&
+    cause !== null &&
+    "issues" in cause &&
+    Array.isArray((cause as { issues?: unknown }).issues)
+      ? (cause as { issues: Array<{ path?: unknown; message?: unknown }> })
+          .issues
+      : [];
+  const summary = issues
+    .slice(0, 8)
+    .map((entry) => {
+      const path = Array.isArray(entry.path)
+        ? entry.path.filter((part) => typeof part !== "symbol").join(".")
+        : "";
+      const message =
+        typeof entry.message === "string" ? entry.message : "invalid";
+      return `${path || "root"}: ${message}`;
+    })
+    .join("; ")
+    .slice(0, 500);
+  return summary
+    ? `The model did not return schema-conforming output. ${summary}`
+    : "The model did not return schema-conforming output.";
 }
 
 /**

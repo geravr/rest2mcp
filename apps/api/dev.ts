@@ -23,6 +23,11 @@ import {
   shutdownPostHogClient,
 } from "./lib/posthog.js";
 import { ensureSuperAdmin } from "./services/admin-service.js";
+import { getAiProviderAdapter } from "./lib/ai/provider-registry.js";
+import {
+  startOptimizerReconciler,
+  startOptimizerWorker,
+} from "./services/ai-optimizer-worker.js";
 
 const app = new Hono<AppContext>();
 
@@ -89,7 +94,16 @@ ensureSuperAdmin(dbDirect, env).catch((err) => {
   console.error("[admin] Failed to seed super-admin:", err);
 });
 
+const optimizerLifecycleDeps = {
+  db: dbDirect,
+  getAdapter: getAiProviderAdapter,
+  aiCredentialSecret: env.AI_CREDENTIAL_SECRET,
+};
+const optimizerWorker = startOptimizerWorker(optimizerLifecycleDeps);
+const optimizerReconciler = startOptimizerReconciler(optimizerLifecycleDeps);
+
 async function shutdown() {
+  await Promise.all([optimizerWorker.stop(), optimizerReconciler.stop()]);
   await drainAuditQueue(dbDirect);
   await shutdownPostHogClient(env);
   process.exit(0);

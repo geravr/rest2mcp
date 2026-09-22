@@ -202,12 +202,28 @@ export type McpOpenApiSelectionEntry = z.infer<
  * Fingerprint-bound confirmation. The source is resubmitted (content) or
  * refetched (URL) and must reproduce `fingerprint` before anything is written.
  */
+/**
+ * Optional AI optimization bundle for one confirmation: a completed run plus
+ * the selected recommendation operation ids per candidate. The run stays
+ * fingerprint-bound: confirmation recomputes the document and candidate
+ * fingerprints and rejects stale state before any write.
+ */
+export type McpOpenApiConfirmOptimization = {
+  runId: string;
+  /** Selected recommendation operation ids per candidate operation key. */
+  operations: Array<{
+    operationKey: string;
+    operationIds: string[];
+  }>;
+};
+
 export type McpOpenApiConfirmInput = {
   expectedRevision: number;
   source: McpOpenApiSource;
   fingerprint: string;
   selection: McpOpenApiSelectionEntry[];
   groupStrategy: McpOpenApiGroupStrategy;
+  optimization?: McpOpenApiConfirmOptimization;
 };
 
 /** Result of one committed import batch. */
