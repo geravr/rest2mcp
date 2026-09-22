@@ -121,3 +121,14 @@ Agent contracts for backend and frontend layering live in workspace `AGENTS.md` 
 - Backend (`Router → Service → lib`): [apps/api/AGENTS.md](apps/api/AGENTS.md)
 - Frontend (`Route → Component → Hook`): [apps/app/AGENTS.md](apps/app/AGENTS.md)
 - Monorepo-wide invariants: [AGENTS.md](AGENTS.md)
+
+## AI Tool Optimization
+
+Studio can ask your configured AI provider to suggest improvements for draft MCP tools (or for selected OpenAPI import candidates). How it behaves:
+
+- **Authorization first.** Nothing is sent to the model until you review a write-free preflight plan that shows the provider/model, the exact scope, the data categories that will leave your account (tool names, descriptions, path shape, query/body structure, input metadata, serialization, and compile issue codes — never credentials, secrets, literal values, base/source URLs, or raw documents), the fields the model may change, the fields it may not, token estimates, and a cost estimate that is labeled _unavailable_ when the provider publishes no pricing.
+- **Recommendation classes.** Suggestions come back as **safe** metadata edits (tool name/title/description, input names/descriptions), **guarded** request-shaping edits (existing query keys, serialization, optional omission, and input rebinding — each with a redacted effective-request diff), or **advisory-only** findings for anything structural. Invalid suggestions are shown as rejected diagnostics, never hidden.
+- **Immutable fields.** Paths, HTTP methods, base URLs, hosts, headers, authentication, secrets, literal values, input types/requiredness, mutation permission, enablement, groups, and publication can never be changed by the AI.
+- **Draft-only application.** Selected recommendations are applied atomically to the mutable draft through one owner-scoped command with revision checks; agents keep using the last published revision until you run the normal publication review.
+- **Progress and cancellation.** Runs are durable: you can leave the page, come back, cancel a run, and review partial results with per-item failure codes.
+- **Retention and cost.** Recommendation history is retained for 30 days and then removed automatically; analysis batches may incur provider usage charges, shown as estimates before you authorize.
