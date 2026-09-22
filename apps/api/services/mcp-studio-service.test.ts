@@ -105,7 +105,7 @@ import {
   confirmCurlImport,
   createVariable,
   deleteServer,
-  deleteTool,
+  deleteTools,
   deleteVariable,
   deriveTrafficLight,
   duplicateTool,
@@ -2515,29 +2515,60 @@ describe("mcp-studio deleteServer", () => {
   });
 });
 
-describe("mcp-studio deleteTool", () => {
+describe("mcp-studio deleteTools", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("deletes only the tool row so call logs survive", async () => {
+  it("deletes only the tool rows so call logs survive", async () => {
     const db = makeDb([
       [{ configRevision: 1, id: "mcs_1" }],
       [{ id: "mct_1" }],
     ]);
 
-    const result = await deleteTool(db as never, "user-a", "mcs_1", "mct_1", 1);
+    const result = await deleteTools(
+      db as never,
+      "user-a",
+      "mcs_1",
+      ["mct_1"],
+      1,
+    );
 
-    expect(result).toEqual({ id: "mct_1", deleted: true, revision: 2 });
+    expect(result).toEqual({ ids: ["mct_1"], deleted: true, revision: 2 });
     expect(db.delete).toHaveBeenCalledTimes(1);
     expect(db.delete.mock.calls[0][0]).toBe(mcpTool);
   });
 
-  it("returns not found for a missing tool", async () => {
-    const db = makeDb([[{ configRevision: 1, id: "mcs_1" }], []]);
+  it("removes every requested tool in one revision-checked command", async () => {
+    const db = makeDb([
+      [{ configRevision: 1, id: "mcs_1" }],
+      [{ id: "mct_1" }, { id: "mct_2" }],
+    ]);
+
+    const result = await deleteTools(
+      db as never,
+      "user-a",
+      "mcs_1",
+      ["mct_1", "mct_2"],
+      1,
+    );
+
+    expect(result).toEqual({
+      ids: ["mct_1", "mct_2"],
+      deleted: true,
+      revision: 2,
+    });
+    expect(db.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns not found when any requested tool is missing", async () => {
+    const db = makeDb([
+      [{ configRevision: 1, id: "mcs_1" }],
+      [{ id: "mct_1" }],
+    ]);
 
     await expect(
-      deleteTool(db as never, "user-a", "mcs_1", "mct_missing", 1),
+      deleteTools(db as never, "user-a", "mcs_1", ["mct_1", "mct_missing"], 1),
     ).rejects.toSatisfy(
       (error: unknown) =>
         error instanceof AppError &&
@@ -2545,11 +2576,11 @@ describe("mcp-studio deleteTool", () => {
     );
   });
 
-  it("rejects deleting a tool on another user's server", async () => {
+  it("rejects deleting tools on another user's server", async () => {
     const db = makeDb([[]]);
 
     await expect(
-      deleteTool(db as never, "user-b", "mcs_a", "mct_1", 1),
+      deleteTools(db as never, "user-b", "mcs_a", ["mct_1"], 1),
     ).rejects.toSatisfy(
       (error: unknown) =>
         error instanceof AppError &&

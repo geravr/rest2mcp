@@ -83,7 +83,7 @@ import {
   createServer,
   createTool,
   deleteServer,
-  deleteTool,
+  deleteTools,
   deleteVariable,
   duplicateTool,
   getConnectionSnippet,
@@ -886,7 +886,15 @@ function deleteToolForPlatform(
   expectedRevision: number,
 ) {
   assertPlatformResourceAllowed(principal, serverId);
-  return deleteTool(db, principal.userId, serverId, toolId, expectedRevision);
+  // The platform tool keeps its single-id contract; only the shared command
+  // underneath became an array.
+  return deleteTools(
+    db,
+    principal.userId,
+    serverId,
+    [toolId],
+    expectedRevision,
+  ).then(({ deleted, revision }) => ({ id: toolId, deleted, revision }));
 }
 
 function deleteVariableForPlatform(

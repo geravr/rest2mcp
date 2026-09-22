@@ -44,7 +44,7 @@ import {
   createTool,
   createVariable,
   deleteServer,
-  deleteTool,
+  deleteTools,
   deleteVariable,
   duplicateTool,
   getConnectionSnippet,
@@ -312,19 +312,19 @@ export const mcpRouter = router({
       }),
     ),
 
-  deleteTool: protectedProcedure
+  deleteTools: protectedProcedure
     .input(
       serverIdInput.extend({
-        toolId: z.string().min(1),
+        toolIds: z.array(z.string().min(1)).min(1).max(500),
         expectedRevision: expectedRevisionSchema,
       }),
     )
     .mutation(({ ctx, input }) =>
-      deleteTool(
+      deleteTools(
         ctx.dbDirect,
         ctx.user.id,
         input.serverId,
-        input.toolId,
+        input.toolIds,
         input.expectedRevision,
       ),
     ),

@@ -20,7 +20,7 @@ const serviceMocks = vi.hoisted(() => ({
   createTool: vi.fn(),
   createToolFromCurl: vi.fn(),
   deleteServer: vi.fn(),
-  deleteTool: vi.fn(),
+  deleteTools: vi.fn(),
   deleteVariable: vi.fn(),
   duplicateTool: vi.fn(),
   getConnectionSnippet: vi.fn(),

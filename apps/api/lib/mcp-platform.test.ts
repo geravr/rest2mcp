@@ -27,7 +27,7 @@ const isServerValueRuntimeEffective = vi.hoisted(() => vi.fn());
 const listVariables = vi.hoisted(() => vi.fn());
 const deleteVariable = vi.hoisted(() => vi.fn());
 const deleteServer = vi.hoisted(() => vi.fn());
-const deleteTool = vi.hoisted(() => vi.fn());
+const deleteTools = vi.hoisted(() => vi.fn());
 const getServerName = vi.hoisted(() => vi.fn());
 const getToolName = vi.hoisted(() => vi.fn());
 const getToolMethod = vi.hoisted(() => vi.fn());
@@ -61,7 +61,7 @@ vi.mock("../services/mcp-studio-service.js", async () => {
     listVariables,
     deleteVariable,
     deleteServer,
-    deleteTool,
+    deleteTools,
     getServerName,
     getToolName,
     getToolMethod,
@@ -1436,7 +1436,7 @@ describe("platform MCP", () => {
           },
         });
         expect(result.isError).toBe(true);
-        expect(deleteTool).not.toHaveBeenCalled();
+        expect(deleteTools).not.toHaveBeenCalled();
       } finally {
         await client.close();
       }

@@ -6,7 +6,7 @@ describe("mcp router lifecycle procedures", () => {
 
   it("exposes server and tool delete procedures", () => {
     expect(source).toContain("deleteServer: protectedProcedure");
-    expect(source).toContain("deleteTool: protectedProcedure");
+    expect(source).toContain("deleteTools: protectedProcedure");
   });
 
   it("exposes the curl dry-run preview and the connectivity probe", () => {

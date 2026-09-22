@@ -2597,31 +2597,34 @@ export async function testConnection(
   }
 }
 
-/** Historical call logs survive the tool with a null `toolId` (FK set null). */
-export async function deleteTool(
+/** Historical call logs survive the tools with a null `toolId` (FK set null). */
+export async function deleteTools(
   db: DB,
   userId: string,
   serverId: string,
-  toolId: string,
+  toolIds: string[],
   expectedRevision: number,
 ) {
   const { result, revision } = await withOwnedServerWrite(
     db,
     { userId, serverId, expectedRevision },
     async (ctx) => {
-      const [deleted] = await ctx.tx
+      const deleted = await ctx.tx
         .delete(mcpTool)
-        .where(and(eq(mcpTool.id, toolId), eq(mcpTool.serverId, serverId)))
+        .where(
+          and(inArray(mcpTool.id, toolIds), eq(mcpTool.serverId, serverId)),
+        )
         .returning({ id: mcpTool.id });
-      if (!deleted) {
+      // One command deletes all requested tools or none: a partially deleted
+      // selection would silently desync the caller's expected scope.
+      if (deleted.length !== new Set(toolIds).size) {
         throw appError({
           appCode: APP_ERROR_CODES.MCP_TOOL_NOT_FOUND,
           message: "MCP tool not found.",
           status: 404,
         });
       }
-      // No automatic live-to-draft demotion when the last tool is removed.
-      return { id: deleted.id, deleted: true as const };
+      return { ids: deleted.map((tool) => tool.id), deleted: true as const };
     },
     { draftMutation: true },
   );
