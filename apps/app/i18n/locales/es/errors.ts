@@ -220,6 +220,30 @@ export const esErrors = {
         "La IA aún no está configurada. Conecta un proveedor y verifica un modelo en Ajustes de IA.",
       [APP_ERROR_CODES.AI_CREDENTIAL_UNAVAILABLE]:
         "Las credenciales de IA no están disponibles temporalmente. Contacta a soporte si persiste.",
+      [APP_ERROR_CODES.AI_OPTIMIZATION_RUN_NOT_FOUND]:
+        "Esta ejecución de optimización ya no existe o expiró.",
+      [APP_ERROR_CODES.AI_OPTIMIZATION_ITEM_NOT_FOUND]:
+        "Este elemento de optimización ya no existe o expiró.",
+      [APP_ERROR_CODES.AI_OPTIMIZATION_PLAN_EXPIRED]:
+        "Este plan de optimización expiró. Solicita uno nuevo para continuar.",
+      [APP_ERROR_CODES.AI_OPTIMIZATION_PLAN_STALE]:
+        "Algo cambió en este servidor, herramienta, fuente o modelo. Solicita un nuevo plan de optimización.",
+      [APP_ERROR_CODES.AI_OPTIMIZATION_STATE_INVALID]:
+        "Esta acción no aplica al estado actual de la ejecución de optimización.",
+      [APP_ERROR_CODES.AI_OPTIMIZATION_POLICY_UNSUPPORTED]:
+        "Esta ejecución de optimización usa una versión de política que esta app ya no puede leer.",
+      [APP_ERROR_CODES.AI_OPTIMIZATION_INELIGIBLE]:
+        "Esta herramienta no puede analizarse de forma segura para optimización.",
+      [APP_ERROR_CODES.AI_OPTIMIZATION_SOURCE_STALE]:
+        "La fuente OpenAPI cambió desde que se creó el plan. Solicita una nueva optimización.",
+      [APP_ERROR_CODES.AI_OPTIMIZATION_MODEL_DRIFT]:
+        "El modelo de IA verificado cambió antes de iniciar el análisis. Solicita una nueva optimización.",
+      [APP_ERROR_CODES.AI_OPTIMIZATION_APPLY_STALE]:
+        "El borrador cambió desde la revisión. Inicia una nueva optimización antes de aplicar.",
+      [APP_ERROR_CODES.AI_OPTIMIZATION_APPLY_INVALID]:
+        "Algunas recomendaciones seleccionadas ya no pasan la validación. No se aplicó nada.",
+      [APP_ERROR_CODES.AI_OPTIMIZATION_IDEMPOTENCY_CONFLICT]:
+        "Esta solicitud de aplicación ya se usó con recomendaciones distintas.",
 
       [APP_ERROR_CODES.ROUTE_NOT_FOUND]: "Esta ruta de API no existe.",
       [APP_ERROR_CODES.INTERNAL_ERROR]:

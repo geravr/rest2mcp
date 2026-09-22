@@ -206,6 +206,30 @@ export const enErrors = {
         "AI is not configured yet. Connect a provider and verify a model in AI Settings.",
       [APP_ERROR_CODES.AI_CREDENTIAL_UNAVAILABLE]:
         "AI credentials are temporarily unavailable. Contact support if this persists.",
+      [APP_ERROR_CODES.AI_OPTIMIZATION_RUN_NOT_FOUND]:
+        "This optimization run no longer exists or has expired.",
+      [APP_ERROR_CODES.AI_OPTIMIZATION_ITEM_NOT_FOUND]:
+        "This optimization item no longer exists or has expired.",
+      [APP_ERROR_CODES.AI_OPTIMIZATION_PLAN_EXPIRED]:
+        "This optimization plan expired. Request a new one to continue.",
+      [APP_ERROR_CODES.AI_OPTIMIZATION_PLAN_STALE]:
+        "Something in this server, tool, source, or model changed. Request a new optimization plan.",
+      [APP_ERROR_CODES.AI_OPTIMIZATION_STATE_INVALID]:
+        "This action does not apply to the current state of the optimization run.",
+      [APP_ERROR_CODES.AI_OPTIMIZATION_POLICY_UNSUPPORTED]:
+        "This optimization run used a policy version this app can no longer read.",
+      [APP_ERROR_CODES.AI_OPTIMIZATION_INELIGIBLE]:
+        "This tool cannot be analyzed safely for optimization.",
+      [APP_ERROR_CODES.AI_OPTIMIZATION_SOURCE_STALE]:
+        "The OpenAPI source changed since the plan was created. Request a new optimization.",
+      [APP_ERROR_CODES.AI_OPTIMIZATION_MODEL_DRIFT]:
+        "The verified AI model changed before analysis started. Request a new optimization.",
+      [APP_ERROR_CODES.AI_OPTIMIZATION_APPLY_STALE]:
+        "The draft changed since the review. Start a new optimization before applying.",
+      [APP_ERROR_CODES.AI_OPTIMIZATION_APPLY_INVALID]:
+        "Some selected recommendations no longer pass validation. Nothing was applied.",
+      [APP_ERROR_CODES.AI_OPTIMIZATION_IDEMPOTENCY_CONFLICT]:
+        "This apply request was already used with different recommendations.",
 
       [APP_ERROR_CODES.ROUTE_NOT_FOUND]: "This API route does not exist.",
       [APP_ERROR_CODES.INTERNAL_ERROR]:

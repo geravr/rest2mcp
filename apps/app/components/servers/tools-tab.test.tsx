@@ -146,6 +146,27 @@ vi.mock("@/components/servers/openapi-import-dialog", () => ({
   },
 }));
 
+const optimizeMocks = vi.hoisted(() => ({
+  aiReady: true,
+  dialogProps: [] as Array<Record<string, unknown>>,
+}));
+
+vi.mock("@/components/servers/ai-optimize-dialog", () => ({
+  AiOptimizeDialog: (props: Record<string, unknown>) => {
+    if (props.scope !== null) optimizeMocks.dialogProps.push(props);
+    return null;
+  },
+}));
+
+vi.mock("@/hooks/use-ai-readiness-guard", () => ({
+  useAiFeatureReadiness: () => ({
+    ready: optimizeMocks.aiReady,
+    reason: optimizeMocks.aiReady ? null : "no_selection",
+    isLoading: false,
+  }),
+  AiSettingsCta: () => <div role="note">settings-cta</div>,
+}));
+
 vi.mock("@/hooks/use-mcp", () => ({
   useMcpTools: (
     _serverId: string,
@@ -285,6 +306,8 @@ function makeDataTransfer() {
 }
 
 beforeEach(() => {
+  optimizeMocks.aiReady = true;
+  optimizeMocks.dialogProps = [];
   groupsFixture = [group("mtg_1", "Invoices", 2), group("mtg_2", "Bills", 2)];
   toolsInputs.length = 0;
   curlDialogProps.length = 0;
@@ -871,5 +894,55 @@ describe("ServerToolsTab existing behavior", () => {
     expect(
       await screen.findByRole("menuitem", { name: "Duplicate" }),
     ).not.toHaveAttribute("aria-disabled", "true");
+  });
+});
+
+describe("ServerToolsTab AI optimization entry points", () => {
+  it("disables optimization controls and shows the settings CTA when AI is not ready", async () => {
+    optimizeMocks.aiReady = false;
+    const user = userEvent.setup();
+    renderTab();
+    await user.click(screen.getByRole("checkbox", { name: "get_contact" }));
+    expect(
+      screen.getByRole("button", { name: /optimize selected with ai/i }),
+    ).toBeDisabled();
+    expect(screen.getByRole("note")).toHaveTextContent("settings-cta");
+    optimizeMocks.aiReady = true;
+  });
+
+  it("opens the optimize dialog with the exact single-tool scope from the row menu", async () => {
+    optimizeMocks.aiReady = true;
+    optimizeMocks.dialogProps.length = 0;
+    const user = userEvent.setup();
+    renderTab();
+    const firstRowMenu = await screen.findAllByRole("button", {
+      name: "get_contact",
+    });
+    await user.click(firstRowMenu[0]!);
+    await user.click(
+      await screen.findByRole("menuitem", { name: /optimize with ai/i }),
+    );
+    expect(optimizeMocks.dialogProps.length).toBe(1);
+    expect(optimizeMocks.dialogProps[0]!.scope).toEqual({
+      kind: "single",
+      toolIds: ["mct_1"],
+    });
+  });
+
+  it("opens the optimize dialog with the explicitly selected rows", async () => {
+    optimizeMocks.aiReady = true;
+    optimizeMocks.dialogProps.length = 0;
+    const user = userEvent.setup();
+    renderTab();
+    const checkboxes = await screen.findAllByRole("checkbox");
+    await user.click(checkboxes[0]!);
+    await user.click(checkboxes[1]!);
+    await user.click(
+      screen.getByRole("button", { name: /optimize selected with ai/i }),
+    );
+    expect(optimizeMocks.dialogProps[0]!.scope).toEqual({
+      kind: "selected",
+      toolIds: ["mct_1", "mct_2"],
+    });
   });
 });

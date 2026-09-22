@@ -1,3 +1,11 @@
+import {
+  AiOptimizeDialog,
+  type AiOptimizationSelectionState,
+} from "@/components/servers/ai-optimize-dialog";
+import {
+  AiSettingsCta,
+  useAiFeatureReadiness,
+} from "@/hooks/use-ai-readiness-guard";
 import { useTranslations } from "@/i18n/use-translations";
 import { getAppCode, resolveErrorMessage } from "@/lib/errors";
 import { APP_ERROR_CODES } from "@repo/core";
@@ -50,7 +58,12 @@ import {
   Textarea,
 } from "@repo/ui";
 import type { inferInput, inferOutput } from "@trpc/tanstack-react-query";
-import { ChevronDown, ChevronRight, LoaderCircle } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  LoaderCircle,
+  Sparkles,
+} from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -183,6 +196,10 @@ export function OpenApiImportDialog({
   const [groupId, setGroupId] = useState(initialGroupId ?? "");
   const [newGroupName, setNewGroupName] = useState("");
   const [result, setResult] = useState<OpenApiConfirmResult | null>(null);
+  const [optimizeOpen, setOptimizeOpen] = useState(false);
+  const [optimization, setOptimization] =
+    useState<AiOptimizationSelectionState | null>(null);
+  const aiReadiness = useAiFeatureReadiness("structured-text-v1");
 
   const preview = previewMutation.data ?? null;
   const operations = preview?.operations ?? [];
@@ -312,7 +329,23 @@ export function OpenApiImportDialog({
   const runPreview = (source: OpenApiSource) => {
     setPreviewSource(source);
     confirmMutation.reset();
-    previewMutation.mutate({ serverId, source });
+    setOptimization(null);
+    setOptimizeOpen(false);
+    previewMutation.mutate(
+      { serverId, source },
+      {
+        onSuccess: (data) => {
+          const selectableKeys = new Set(
+            data.operations
+              .filter((operation) => operation.selectable)
+              .map((operation) => operation.operationKey),
+          );
+          setSelectedKeys((prev) =>
+            prev.filter((key) => selectableKeys.has(key)),
+          );
+        },
+      },
+    );
   };
 
   const submitPreview = () => {
@@ -346,6 +379,7 @@ export function OpenApiImportDialog({
   };
 
   const toggleSelection = (operationKey: string, selected: boolean) => {
+    setOptimization(null);
     setSelectedKeys((keys) =>
       nextOpenApiSelection(keys, operationKey, selected, remainingSlots),
     );
@@ -360,6 +394,7 @@ export function OpenApiImportDialog({
   };
 
   const selectAll = () => {
+    setOptimization(null);
     setSelectedKeys(
       selectOpenApiKeysUpToCapacity(
         operations
@@ -383,6 +418,7 @@ export function OpenApiImportDialog({
       fingerprint: preview.document.fingerprint,
       selection,
       groupStrategy,
+      ...(optimization ? { optimization } : {}),
     };
     confirmMutation.mutate(input, {
       onSuccess: (data) => {
@@ -663,9 +699,22 @@ export function OpenApiImportDialog({
                   variant="outline"
                   size="sm"
                   disabled={selectionDrafts.length === 0}
-                  onClick={() => setSelectedKeys([])}
+                  onClick={() => {
+                    setOptimization(null);
+                    setSelectedKeys([]);
+                  }}
                 >
                   {copy.clearSelection}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={selectionDrafts.length === 0 || !aiReadiness.ready}
+                  onClick={() => setOptimizeOpen(true)}
+                >
+                  <Sparkles className="h-4 w-4" />
+                  {t.servers.aiOptimizer.action}
                 </Button>
                 <span className="text-xs text-muted-foreground">
                   {copy.selectedCount.replace(
@@ -674,6 +723,9 @@ export function OpenApiImportDialog({
                   )}
                 </span>
               </div>
+              {aiReadiness.ready || aiReadiness.isLoading ? null : (
+                <AiSettingsCta capabilityProfile="structured-text-v1" />
+              )}
 
               <Field>
                 <Label htmlFor="openapi-import-search">
@@ -1157,6 +1209,26 @@ export function OpenApiImportDialog({
             </>
           )}
         </DialogFooter>
+        {optimizeOpen && preview !== null && previewSource !== null ? (
+          <AiOptimizeDialog
+            serverId={serverId}
+            serverState={{ configRevision }}
+            scope={{
+              kind: "openapi",
+              operationKeys: selectedOperations
+                .filter((operation) => operation.selectable)
+                .map((operation) => operation.operationKey),
+            }}
+            openapi={{
+              source: previewSource,
+              fingerprint: preview.document.fingerprint,
+            }}
+            onOptimizationChange={setOptimization}
+            onOpenChange={(next) => {
+              if (!next) setOptimizeOpen(false);
+            }}
+          />
+        ) : null}
       </DialogContent>
     </Dialog>
   );

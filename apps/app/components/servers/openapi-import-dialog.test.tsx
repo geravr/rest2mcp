@@ -19,7 +19,13 @@ import {
 } from "@/lib/openapi-import";
 import { MCP_OPENAPI_ISSUE_CODES } from "@repo/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps, ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -92,6 +98,9 @@ const mocks = vi.hoisted(() => ({
   previewError: null as unknown,
   confirm: (async () => ({})) as (input: unknown) => Promise<unknown>,
   locale: "en" as "en" | "es",
+  aiReady: true,
+  optimizeDialogProps: [] as Array<Record<string, unknown>>,
+  optimizationReport: null as unknown,
 }));
 
 const en = getTranslations("en");
@@ -112,6 +121,40 @@ vi.mock("@/i18n/use-translations", async () => {
 
 vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
+}));
+
+vi.mock("@/hooks/use-ai-readiness-guard", () => ({
+  useAiFeatureReadiness: () => ({
+    ready: mocks.aiReady,
+    reason: mocks.aiReady ? null : "no_selection",
+    isLoading: false,
+  }),
+  AiSettingsCta: () => <div role="note">settings-cta</div>,
+}));
+
+vi.mock("@/components/servers/ai-optimize-dialog", () => ({
+  AiOptimizeDialog: (props: {
+    scope: { kind: string; operationKeys?: string[] } | null;
+    openapi?: { fingerprint: string };
+    onOptimizationChange?: (state: unknown) => void;
+    onOpenChange?: (open: boolean) => void;
+  }) => {
+    if (props.scope === null) return null;
+    mocks.optimizeDialogProps.push(props as unknown as Record<string, unknown>);
+    return (
+      <div role="dialog" aria-label="AI optimization">
+        <button
+          type="button"
+          onClick={() => props.onOptimizationChange?.(mocks.optimizationReport)}
+        >
+          Report recommendations
+        </button>
+        <button type="button" onClick={() => props.onOpenChange?.(false)}>
+          Close optimize
+        </button>
+      </div>
+    );
+  },
 }));
 
 vi.mock("@/lib/trpc", () => ({
@@ -289,6 +332,9 @@ beforeEach(() => {
   mocks.preview = null;
   mocks.previewError = null;
   mocks.locale = "en";
+  mocks.aiReady = true;
+  mocks.optimizeDialogProps = [];
+  mocks.optimizationReport = null;
   mocks.confirm = async () => ({
     revision: 5,
     draftRevision: 5,
@@ -1428,5 +1474,184 @@ describe("openapi-import helpers", () => {
         text: async () => "{}",
       }),
     ).resolves.toEqual({ ok: true, name: "api.json", content: "{}" });
+  });
+});
+
+describe("OpenApiImportDialog AI optimization", () => {
+  const aiCopy = en.servers.aiOptimizer;
+
+  it("disables optimization when AI readiness is unavailable", async () => {
+    mocks.aiReady = false;
+    mocks.preview = preview([contactsOperation]);
+    const user = userEvent.setup();
+    renderDialog();
+    await previewPaste(user);
+    await selectOperation(user, "GET /contacts");
+    expect(screen.getByRole("button", { name: aiCopy.action })).toBeDisabled();
+    // The settings CTA link is reachable next to the disabled control.
+    expect(screen.getByRole("note")).toHaveTextContent("settings-cta");
+    // Deterministic preview/import stays available without AI.
+    expect(screen.getByRole("button", { name: /Import 1 tool/ })).toBeEnabled();
+  });
+
+  it("optimizes exactly the selected selectable candidates", async () => {
+    const blockedOperation = operation({
+      operationKey: "postReports",
+      method: "POST",
+      path: "/reports",
+      suggestedName: "post_reports",
+      selectable: false,
+      issues: [
+        {
+          code: "MCP_OPENAPI_UNSUPPORTED",
+          severity: "error",
+          message: "Unsupported.",
+        },
+      ],
+    });
+    mocks.preview = preview([
+      contactsOperation,
+      invoicesOperation,
+      blockedOperation,
+    ]);
+    const user = userEvent.setup();
+    renderDialog();
+    await previewPaste(user);
+    // Blocked candidates cannot enter the optimization scope.
+    expect(
+      screen.getByRole("checkbox", { name: "POST /reports" }),
+    ).toBeDisabled();
+    await selectOperation(user, "GET /contacts");
+    await user.click(screen.getByRole("button", { name: aiCopy.action }));
+    expect(mocks.optimizeDialogProps).toHaveLength(1);
+    const props = mocks.optimizeDialogProps[0]!;
+    expect(props.scope).toEqual({
+      kind: "openapi",
+      operationKeys: ["listContacts"],
+    });
+    expect(props.openapi).toEqual({
+      source: {
+        kind: "content",
+        content: '{"openapi":"3.1.0"}',
+        label: "paste",
+      },
+      fingerprint: "fp_document_1",
+    });
+  });
+
+  it("includes the completed run bundle only in the confirmation request", async () => {
+    mocks.preview = preview([contactsOperation]);
+    mocks.optimizationReport = {
+      runId: "aor_1",
+      operations: [{ operationKey: "listContacts", operationIds: ["op_a"] }],
+    };
+    const user = userEvent.setup();
+    renderDialog();
+    await previewPaste(user);
+    await selectOperation(user, "GET /contacts");
+    await user.click(screen.getByRole("button", { name: aiCopy.action }));
+    await waitFor(() => expect(mocks.optimizeDialogProps).toHaveLength(1));
+    await user.click(
+      screen.getByRole("button", { name: "Report recommendations" }),
+    );
+    await user.click(screen.getByRole("button", { name: /Import \d+ tools?/ }));
+    await waitFor(() => expect(mocks.confirmCalls.length).toBeGreaterThan(0));
+    const input = mocks.confirmCalls[0] as {
+      optimization?: { runId: string; operations: unknown[] };
+    };
+    expect(input.optimization).toEqual({
+      runId: "aor_1",
+      operations: [{ operationKey: "listContacts", operationIds: ["op_a"] }],
+    });
+  });
+
+  it("drops the optimization bundle when the document fingerprint changes", async () => {
+    mocks.preview = preview([contactsOperation]);
+    mocks.optimizationReport = {
+      runId: "aor_1",
+      operations: [{ operationKey: "listContacts", operationIds: ["op_a"] }],
+    };
+    let staleOnce = true;
+    mocks.confirm = async () => {
+      if (staleOnce) {
+        staleOnce = false;
+        throw apiError("MCP_OPENAPI_STALE_PREVIEW");
+      }
+      return {
+        revision: 5,
+        draftRevision: 5,
+        batchId: "oab_2",
+        tools: [],
+        groups: [],
+      };
+    };
+    const user = userEvent.setup();
+    renderDialog();
+    await previewPaste(user);
+    await selectOperation(user, "GET /contacts");
+    await user.click(screen.getByRole("button", { name: aiCopy.action }));
+    await waitFor(() => expect(mocks.optimizeDialogProps).toHaveLength(1));
+    await user.click(
+      screen.getByRole("button", { name: "Report recommendations" }),
+    );
+    // First confirm carries the bundle and fails as stale.
+    await user.click(screen.getByRole("button", { name: /Import 1 tool/ }));
+    await waitFor(() => expect(mocks.confirmCalls).toHaveLength(1));
+    expect(
+      (mocks.confirmCalls[0] as { optimization?: unknown }).optimization,
+    ).toBeDefined();
+    // The source changed while stale: re-preview a new fingerprint.
+    await screen.findByRole("button", { name: enOpenApi.repreview });
+    mocks.preview = preview([contactsOperation], {
+      document: {
+        version: "3.1",
+        title: "Contacts API",
+        fingerprint: "fp_document_2",
+        operationCount: 1,
+        selectableCount: 1,
+      },
+    });
+    await user.click(screen.getByRole("button", { name: enOpenApi.repreview }));
+    await screen.findByText("OpenAPI 3.1");
+    await user.click(screen.getByRole("button", { name: /Import 1 tool/ }));
+    await waitFor(() => expect(mocks.confirmCalls.length).toBe(2));
+    expect(
+      (mocks.confirmCalls[1] as { optimization?: unknown }).optimization,
+    ).toBeUndefined();
+  });
+
+  it("keeps the optimize action unavailable with no selection", async () => {
+    mocks.preview = preview([contactsOperation]);
+    const user = userEvent.setup();
+    renderDialog();
+    await previewPaste(user);
+    expect(screen.getByRole("button", { name: aiCopy.action })).toBeDisabled();
+  });
+});
+
+describe("OpenApiImportDialog optimization invalidation", () => {
+  it("drops the optimization bundle when the candidate selection changes", async () => {
+    mocks.preview = preview([contactsOperation, invoicesOperation]);
+    mocks.optimizationReport = {
+      runId: "aor_1",
+      operations: [{ operationKey: "listContacts", operationIds: ["op_a"] }],
+    };
+    const user = userEvent.setup();
+    renderDialog();
+    await previewPaste(user);
+    await selectOperation(user, "GET /contacts");
+    await user.click(
+      screen.getByRole("button", { name: en.servers.aiOptimizer.action }),
+    );
+    await waitFor(() => expect(mocks.optimizeDialogProps).toHaveLength(1));
+    await user.click(
+      screen.getByRole("button", { name: "Report recommendations" }),
+    );
+    // Owner changes the selection after review: the bound bundle is dropped.
+    await selectOperation(user, "GET /invoices");
+    await user.click(screen.getByRole("button", { name: /Import 2 tools/ }));
+    await waitFor(() => expect(mocks.confirmCalls.length).toBeGreaterThan(0));
+    const input = mocks.confirmCalls.at(-1) as { optimization?: unknown };
+    expect(input.optimization).toBeUndefined();
   });
 });

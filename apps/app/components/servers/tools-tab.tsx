@@ -1,4 +1,8 @@
 import { AdminListPagination } from "@/components/admin-list";
+import {
+  AiOptimizeDialog,
+  type AiOptimizeScope,
+} from "@/components/servers/ai-optimize-dialog";
 import { TableRowsSkeleton } from "@/components/loading";
 import { CurlImportDialog } from "@/components/servers/curl-import-dialog";
 import { DeleteToolDialog } from "@/components/servers/delete-tool-dialog";
@@ -23,6 +27,10 @@ import {
   useUpdateMcpTool,
   type McpToolGroupSummary,
 } from "@/hooks/use-mcp";
+import {
+  AiSettingsCta,
+  useAiFeatureReadiness,
+} from "@/hooks/use-ai-readiness-guard";
 import { useTranslations } from "@/i18n/use-translations";
 import { resolveErrorMessage } from "@/lib/errors";
 import {
@@ -55,6 +63,7 @@ import {
   Pencil,
   Plus,
   Search,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 import { useEffect, useRef, useState, type DragEvent } from "react";
@@ -147,6 +156,10 @@ export function ServerToolsTab({
   } | null>(null);
   const [curlOpen, setCurlOpen] = useState(false);
   const [openApiOpen, setOpenApiOpen] = useState(false);
+  const [optimizeScope, setOptimizeScope] = useState<AiOptimizeScope | null>(
+    null,
+  );
+  const aiReadiness = useAiFeatureReadiness("structured-text-v1");
   const [groupDialog, setGroupDialog] = useState<GroupDialogState>(null);
   const [moveToolIds, setMoveToolIds] = useState<string[] | null>(null);
   const [searchDraft, setSearchDraft] = useState(q ?? "");
@@ -338,6 +351,9 @@ export function ServerToolsTab({
           />
         </div>
       </div>
+      {aiReadiness.ready || aiReadiness.isLoading ? null : (
+        <AiSettingsCta capabilityProfile="structured-text-v1" />
+      )}
 
       <div className="grid items-start gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
         <div className="hidden md:block">
@@ -432,6 +448,21 @@ export function ServerToolsTab({
                 onClick={() => setMoveToolIds(selectedIds)}
               >
                 {t.servers.groups.moveTitle}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!aiReadiness.ready}
+                onClick={() =>
+                  setOptimizeScope({
+                    kind: "selected",
+                    toolIds: [...selectedIds],
+                  })
+                }
+              >
+                <Sparkles className="h-4 w-4" />
+                {t.servers.aiOptimizer.actionSelected}
               </Button>
             </div>
           ) : null}
@@ -590,6 +621,18 @@ export function ServerToolsTab({
                             {t.servers.groups.moveTitle}
                           </DropdownMenuItem>
                           <DropdownMenuItem
+                            disabled={!aiReadiness.ready}
+                            onSelect={() =>
+                              setOptimizeScope({
+                                kind: "single",
+                                toolIds: [tool.id],
+                              })
+                            }
+                          >
+                            <Sparkles className="h-4 w-4" />
+                            {t.servers.aiOptimizer.action}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
                             className="text-destructive"
                             onSelect={() =>
                               setDeleteTarget({ id: tool.id, name: tool.name })
@@ -681,6 +724,23 @@ export function ServerToolsTab({
           onReviewTools={() => {
             setOpenApiOpen(false);
             onGroupChange(undefined);
+          }}
+        />
+      ) : null}
+      {optimizeScope ? (
+        <AiOptimizeDialog
+          serverId={serverId}
+          serverState={
+            serverQuery.data
+              ? {
+                  configRevision: serverQuery.data.configRevision,
+                  draftRevision: serverQuery.data.draftRevision,
+                }
+              : null
+          }
+          scope={optimizeScope}
+          onOpenChange={(open) => {
+            if (!open) setOptimizeScope(null);
           }}
         />
       ) : null}
