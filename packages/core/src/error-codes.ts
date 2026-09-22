@@ -161,6 +161,31 @@ export const APP_ERROR_CODES = {
   /** AI credential key material is unavailable or cannot open the stored envelope. */
   AI_CREDENTIAL_UNAVAILABLE: "AI_CREDENTIAL_UNAVAILABLE",
 
+  /** The addressed optimization run does not exist for the calling owner. */
+  AI_OPTIMIZATION_RUN_NOT_FOUND: "AI_OPTIMIZATION_RUN_NOT_FOUND",
+  /** The addressed optimization item does not exist for the run. */
+  AI_OPTIMIZATION_ITEM_NOT_FOUND: "AI_OPTIMIZATION_ITEM_NOT_FOUND",
+  /** The optimization plan expired before authorization; request a new preflight. */
+  AI_OPTIMIZATION_PLAN_EXPIRED: "AI_OPTIMIZATION_PLAN_EXPIRED",
+  /** A referenced server, tool, source, or model fingerprint changed after preflight. */
+  AI_OPTIMIZATION_PLAN_STALE: "AI_OPTIMIZATION_PLAN_STALE",
+  /** The run is not in the state required by the requested transition. */
+  AI_OPTIMIZATION_STATE_INVALID: "AI_OPTIMIZATION_STATE_INVALID",
+  /** The stored run references a policy or prompt version this build cannot evaluate. */
+  AI_OPTIMIZATION_POLICY_UNSUPPORTED: "AI_OPTIMIZATION_POLICY_UNSUPPORTED",
+  /** A tool or candidate cannot be safely snapshotted for optimization. */
+  AI_OPTIMIZATION_INELIGIBLE: "AI_OPTIMIZATION_INELIGIBLE",
+  /** The OpenAPI source no longer matches the fingerprint bound to the run. */
+  AI_OPTIMIZATION_SOURCE_STALE: "AI_OPTIMIZATION_SOURCE_STALE",
+  /** The verified model readiness fingerprint changed after authorization. */
+  AI_OPTIMIZATION_MODEL_DRIFT: "AI_OPTIMIZATION_MODEL_DRIFT",
+  /** Selected recommendations cannot apply because a tool or revision drifted. */
+  AI_OPTIMIZATION_APPLY_STALE: "AI_OPTIMIZATION_APPLY_STALE",
+  /** Selected recommendations failed current policy, compile, security, or uniqueness checks. */
+  AI_OPTIMIZATION_APPLY_INVALID: "AI_OPTIMIZATION_APPLY_INVALID",
+  /** The apply idempotency key was already committed with different operations. */
+  AI_OPTIMIZATION_IDEMPOTENCY_CONFLICT: "AI_OPTIMIZATION_IDEMPOTENCY_CONFLICT",
+
   ROUTE_NOT_FOUND: "ROUTE_NOT_FOUND",
   INTERNAL_ERROR: "INTERNAL_ERROR",
 } as const;
@@ -226,6 +251,12 @@ export type AppErrorDetails = {
   modelId?: string;
   /** Why a catalog entry does not satisfy a capability profile. */
   unsupportedReason?: string;
+  /** Optimization run involved in the failure, when known and owner-scoped. */
+  runId?: string;
+  /** Optimization item involved in the failure, when known and owner-scoped. */
+  itemId?: string;
+  /** Why an optimization plan, source, model, or apply target is stale. */
+  staleReason?: string;
 };
 
 const appErrorCodeValues = Object.values(APP_ERROR_CODES);
