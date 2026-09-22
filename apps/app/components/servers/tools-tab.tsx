@@ -150,10 +150,9 @@ export function ServerToolsTab({
   const updateTool = useUpdateMcpTool();
   const assignGroup = useAssignMcpToolGroup();
   const [formState, setFormState] = useState<FormState>(null);
-  const [deleteTarget, setDeleteTarget] = useState<{
-    id: string;
-    name: string;
-  } | null>(null);
+  const [deleteTargets, setDeleteTargets] = useState<
+    { id: string; name: string }[] | null
+  >(null);
   const [curlOpen, setCurlOpen] = useState(false);
   const [openApiOpen, setOpenApiOpen] = useState(false);
   const [optimizeScope, setOptimizeScope] = useState<AiOptimizeScope | null>(
@@ -443,6 +442,24 @@ export function ServerToolsTab({
                   </DropdownMenu>
                   <Button
                     type="button"
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => {
+                      if (!data) {
+                        return;
+                      }
+                      setDeleteTargets(
+                        data.items
+                          .filter((tool) => selectedIds.includes(tool.id))
+                          .map((tool) => ({ id: tool.id, name: tool.name })),
+                      );
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    {t.servers.deleteTool}
+                  </Button>
+                  <Button
+                    type="button"
                     variant="outline"
                     size="sm"
                     disabled={!aiReadiness.ready}
@@ -614,7 +631,9 @@ export function ServerToolsTab({
                           <DropdownMenuItem
                             className="text-destructive"
                             onSelect={() =>
-                              setDeleteTarget({ id: tool.id, name: tool.name })
+                              setDeleteTargets([
+                                { id: tool.id, name: tool.name },
+                              ])
                             }
                           >
                             <Trash2 className="h-4 w-4" />
@@ -654,12 +673,12 @@ export function ServerToolsTab({
           onClose={() => setFormState(null)}
         />
       ) : null}
-      {deleteTarget ? (
+      {deleteTargets ? (
         <DeleteToolDialog
           serverId={serverId}
           configRevision={configRevision}
-          tool={deleteTarget}
-          onClose={() => setDeleteTarget(null)}
+          tools={deleteTargets}
+          onClose={() => setDeleteTargets(null)}
         />
       ) : null}
       {curlOpen ? (

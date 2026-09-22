@@ -292,8 +292,11 @@ export const enServers = {
     editToolTitle: "Edit tool",
     duplicateTool: "Duplicate",
     deleteTool: "Delete",
-    deleteToolTitle: "Delete tool",
-    deleteToolDescription: "This deletes {name}. Past call logs are kept.",
+    deleteToolTitle: "Delete tools",
+    deleteToolTitleOne: "Delete tool",
+    deleteToolDescription:
+      "This deletes {count} tools. Past call logs are kept.",
+    deleteToolDescriptionOne: "This deletes {name}. Past call logs are kept.",
     toolDescription: "Description",
     toolDescriptionPlaceholder: "What does this tool do? Shown to the agent.",
     queryParams: "Query params",

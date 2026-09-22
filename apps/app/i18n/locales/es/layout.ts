@@ -56,6 +56,7 @@ export const esLayout = {
       toolCreated: "Herramienta añadida al borrador.",
       toolUpdated: "Herramienta actualizada en el borrador.",
       toolDeleted: "Herramienta eliminada del borrador.",
+      toolsDeleted: "{count} herramientas eliminadas del borrador.",
       variableSaved: "Variable guardada en el borrador.",
       variableDeleted: "Variable eliminada del borrador.",
       tokenCreated: "Token de agente creado.",

@@ -105,7 +105,7 @@ const createGroupMutate = vi.fn();
 const renameGroupMutate = vi.fn();
 const deleteGroupMutate = vi.fn();
 const assignGroupMutate = vi.fn();
-const deleteToolMutate = vi.fn();
+const deleteToolsMutate = vi.fn();
 
 vi.mock("@/components/admin-list", () => ({
   AdminListPagination: () => null,
@@ -226,8 +226,8 @@ vi.mock("@/hooks/use-mcp", () => ({
     isPending: false,
     error: null,
   }),
-  useDeleteMcpTool: () => ({
-    mutate: deleteToolMutate,
+  useDeleteMcpTools: () => ({
+    mutate: deleteToolsMutate,
     isPending: false,
   }),
 }));
@@ -322,7 +322,7 @@ beforeEach(() => {
   renameGroupMutate.mockReset();
   deleteGroupMutate.mockReset();
   assignGroupMutate.mockReset();
-  deleteToolMutate.mockReset();
+  deleteToolsMutate.mockReset();
 });
 
 describe("ServerToolsTab group rail", () => {
@@ -632,6 +632,46 @@ describe("ServerToolsTab selection bar", () => {
     expect(
       screen.queryByRole("button", { name: "Move to…" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("deletes every selected row after the plural confirmation", async () => {
+    const user = userEvent.setup();
+    renderTab();
+
+    await user.click(screen.getByRole("checkbox", { name: "get_contact" }));
+    await user.click(screen.getByRole("checkbox", { name: "list_contacts" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    const dialog = screen.getByRole("dialog");
+    expect(
+      within(dialog).getByRole("heading", { name: "Delete tools" }),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(/this deletes 2 tools/i),
+    ).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    expect(deleteToolsMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ toolIds: ["mct_1", "mct_2"] }),
+      expect.anything(),
+    );
+  });
+
+  it("keeps the singular confirmation copy for a single selected row", async () => {
+    const user = userEvent.setup();
+    renderTab();
+
+    await user.click(screen.getByRole("checkbox", { name: "get_contact" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    const dialog = screen.getByRole("dialog");
+    expect(
+      within(dialog).getByRole("heading", { name: "Delete tool" }),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(/this deletes get_contact/i),
+    ).toBeInTheDocument();
   });
 
   it("keeps the narrow fallback count server-wide while search filters", () => {

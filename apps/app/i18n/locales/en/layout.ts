@@ -56,6 +56,7 @@ export const enLayout = {
       toolCreated: "Tool added to draft.",
       toolUpdated: "Tool updated in draft.",
       toolDeleted: "Tool deleted from draft.",
+      toolsDeleted: "{count} tools deleted from draft.",
       variableSaved: "Variable saved to draft.",
       variableDeleted: "Variable deleted from draft.",
       tokenCreated: "Agent token created.",

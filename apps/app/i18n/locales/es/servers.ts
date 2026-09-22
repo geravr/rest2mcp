@@ -296,8 +296,11 @@ export const esServers = {
     editToolTitle: "Editar herramienta",
     duplicateTool: "Duplicar",
     deleteTool: "Eliminar",
-    deleteToolTitle: "Eliminar herramienta",
+    deleteToolTitle: "Eliminar herramientas",
+    deleteToolTitleOne: "Eliminar herramienta",
     deleteToolDescription:
+      "Esto elimina {count} herramientas. Los registros de llamadas anteriores se conservan.",
+    deleteToolDescriptionOne:
       "Esto elimina {name}. Los registros de llamadas anteriores se conservan.",
     toolDescription: "Descripción",
     toolDescriptionPlaceholder:

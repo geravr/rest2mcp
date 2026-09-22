@@ -10,7 +10,7 @@ const deleteServerMutate = vi.fn(
     options?.onSuccess?.();
   },
 );
-const deleteToolMutate = vi.fn(
+const deleteToolsMutate = vi.fn(
   (_input: unknown, options?: { onSuccess?: () => void }) => {
     options?.onSuccess?.();
   },
@@ -25,8 +25,8 @@ vi.mock("@/hooks/use-mcp", () => ({
     mutate: deleteServerMutate,
     isPending: false,
   }),
-  useDeleteMcpTool: () => ({
-    mutate: deleteToolMutate,
+  useDeleteMcpTools: () => ({
+    mutate: deleteToolsMutate,
     isPending: false,
   }),
 }));
@@ -68,7 +68,7 @@ describe("DeleteServerDialog", () => {
 
 describe("DeleteToolDialog", () => {
   beforeEach(() => {
-    deleteToolMutate.mockClear();
+    deleteToolsMutate.mockClear();
   });
 
   it("confirms deletion with a single click", async () => {
@@ -77,7 +77,7 @@ describe("DeleteToolDialog", () => {
     render(
       <DeleteToolDialog
         serverId="mcs_1"
-        tool={{ id: "mct_1", name: "get_contact" }}
+        tools={[{ id: "mct_1", name: "get_contact" }]}
         onClose={onClose}
       />,
     );
@@ -85,10 +85,32 @@ describe("DeleteToolDialog", () => {
     expect(screen.getByText(/get_contact/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^delete$/i }));
-    expect(deleteToolMutate).toHaveBeenCalledWith(
-      { serverId: "mcs_1", toolId: "mct_1", expectedRevision: 1 },
+    expect(deleteToolsMutate).toHaveBeenCalledWith(
+      { serverId: "mcs_1", toolIds: ["mct_1"], expectedRevision: 1 },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("names the count and sends every selected tool in one command", async () => {
+    const user = userEvent.setup();
+    render(
+      <DeleteToolDialog
+        serverId="mcs_1"
+        tools={[
+          { id: "mct_1", name: "get_contact" },
+          { id: "mct_2", name: "list_contacts" },
+        ]}
+        onClose={() => {}}
+      />,
+    );
+
+    expect(screen.getByText(/this deletes 2 tools/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^delete$/i }));
+    expect(deleteToolsMutate).toHaveBeenCalledWith(
+      { serverId: "mcs_1", toolIds: ["mct_1", "mct_2"], expectedRevision: 1 },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
   });
 });

@@ -560,17 +560,22 @@ export function useUpdateMcpTool() {
   });
 }
 
-export function useDeleteMcpTool() {
+export function useDeleteMcpTools() {
   const { t } = useTranslations();
   const handleError = useMcpMutationError();
   const invalidate = useInvalidateMcp();
-  const baseOptions = api.mcp.deleteTool.mutationOptions();
+  const baseOptions = api.mcp.deleteTools.mutationOptions();
   return useMutation({
     ...baseOptions,
     onSuccess: async (...args) => {
       baseOptions.onSuccess?.(...args);
       await invalidate();
-      toast.success(t.toasts.servers.toolDeleted);
+      const count = args[1].toolIds.length;
+      toast.success(
+        count === 1
+          ? t.toasts.servers.toolDeleted
+          : t.toasts.servers.toolsDeleted.replace("{count}", String(count)),
+      );
     },
     onError: (error, ...rest) => {
       baseOptions.onError?.(error, ...rest);
