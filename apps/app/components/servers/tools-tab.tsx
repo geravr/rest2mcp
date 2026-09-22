@@ -6,6 +6,7 @@ import {
 import { TableRowsSkeleton } from "@/components/loading";
 import { CurlImportDialog } from "@/components/servers/curl-import-dialog";
 import { DeleteToolDialog } from "@/components/servers/delete-tool-dialog";
+import { MethodBadge } from "@/components/servers/method-badge";
 import { OpenApiImportDialog } from "@/components/servers/openapi-import-dialog";
 import {
   ToolFormDialog,
@@ -41,7 +42,6 @@ import { MCP_TOOL_GROUP_LIMITS, type PageSize } from "@repo/core";
 import {
   Alert,
   AlertDescription,
-  Badge,
   Button,
   DropdownMenu,
   DropdownMenuContent,
@@ -161,7 +161,7 @@ export function ServerToolsTab({
   );
   const aiReadiness = useAiFeatureReadiness("structured-text-v1");
   const [groupDialog, setGroupDialog] = useState<GroupDialogState>(null);
-  const [moveToolIds, setMoveToolIds] = useState<string[] | null>(null);
+  const [moveToolId, setMoveToolId] = useState<string | null>(null);
   const [searchDraft, setSearchDraft] = useState(q ?? "");
   const [syncedQ, setSyncedQ] = useState(q);
   // The URL owns the committed query; the draft follows it when navigation
@@ -242,7 +242,6 @@ export function ServerToolsTab({
     name: variable.name,
     kind: variable.kind,
   }));
-  const groupNameById = new Map(groups.map((group) => [group.id, group.name]));
   // A dead group id renders no header instead of guessing a wrong label.
   const headerGroupLabel =
     group === UNGROUPED_FILTER
@@ -258,6 +257,7 @@ export function ServerToolsTab({
         : filteredGroup
           ? t.servers.groups.emptyGroup
           : t.servers.noTools;
+  const hasSelection = selectedIds.length > 0;
   const selectedCountLabel =
     selectedIds.length === 1
       ? t.servers.groups.toolCountOne
@@ -376,96 +376,90 @@ export function ServerToolsTab({
         </div>
 
         <div className="min-w-0 space-y-4">
-          <div className="flex flex-wrap items-center gap-2">
-            {headerGroupLabel ? (
-              <h3 className="text-sm font-medium">
-                {t.servers.groups.inGroupHeader.replace(
-                  "{group}",
-                  headerGroupLabel,
-                )}
-              </h3>
-            ) : null}
-            <div className="relative ml-auto w-full max-w-64">
-              <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                type="search"
-                value={searchDraft}
-                placeholder={t.servers.groups.searchPlaceholder}
-                aria-label={t.servers.groups.searchLabel}
-                className="pl-8"
-                onChange={(event) => setSearchDraft(event.target.value)}
-              />
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              {headerGroupLabel ? (
+                <h3 className="text-sm font-medium">
+                  {t.servers.groups.inGroupHeader.replace(
+                    "{group}",
+                    headerGroupLabel,
+                  )}
+                </h3>
+              ) : null}
+              <div className="relative ml-auto w-full max-w-64">
+                <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  type="search"
+                  value={searchDraft}
+                  placeholder={t.servers.groups.searchPlaceholder}
+                  aria-label={t.servers.groups.searchLabel}
+                  className="pl-8"
+                  onChange={(event) => setSearchDraft(event.target.value)}
+                />
+              </div>
             </div>
-          </div>
 
-          {selectedIds.length > 0 ? (
-            <div className="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2">
-              <span className="text-sm text-muted-foreground">
-                {selectedCountLabel}
-              </span>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
+            <div
+              className={`grid transition-[grid-template-rows,margin-top] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none ${
+                hasSelection ? "mt-4 grid-rows-[1fr]" : "mt-0 grid-rows-[0fr]"
+              }`}
+            >
+              <div
+                aria-hidden={hasSelection ? undefined : true}
+                className={`min-h-0 overflow-hidden transition-[visibility] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none ${
+                  hasSelection ? "visible" : "invisible"
+                }`}
+              >
+                <div className="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2">
+                  <span className="text-sm text-muted-foreground">
+                    {selectedCountLabel}
+                  </span>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="ml-auto"
+                        disabled={assignGroup.isPending}
+                      >
+                        <FolderInput className="h-4 w-4" />
+                        {t.servers.groups.moveTo}
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onSelect={() => moveSelectionTo(null)}>
+                        {t.servers.groups.ungrouped}
+                      </DropdownMenuItem>
+                      {groups.map((groupOption) => (
+                        <DropdownMenuItem
+                          key={groupOption.id}
+                          onSelect={() => moveSelectionTo(groupOption.id)}
+                        >
+                          {groupOption.name}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="ml-auto"
-                    disabled={assignGroup.isPending}
+                    disabled={!aiReadiness.ready}
+                    onClick={() =>
+                      setOptimizeScope({
+                        kind: "selected",
+                        toolIds: [...selectedIds],
+                      })
+                    }
                   >
-                    <FolderInput className="h-4 w-4" />
-                    {t.servers.groups.moveTo}
+                    <Sparkles className="h-4 w-4" />
+                    {t.servers.aiOptimizer.actionSelected}
                   </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onSelect={() => moveSelectionTo(null)}>
-                    {t.servers.groups.ungrouped}
-                  </DropdownMenuItem>
-                  {groups.map((groupOption) => (
-                    <DropdownMenuItem
-                      key={groupOption.id}
-                      onSelect={() => moveSelectionTo(groupOption.id)}
-                    >
-                      {groupOption.name}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-              {filterActive ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={assignGroup.isPending}
-                  onClick={() => moveSelectionTo(null)}
-                >
-                  {t.servers.groups.removeFromGroup}
-                </Button>
-              ) : null}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setMoveToolIds(selectedIds)}
-              >
-                {t.servers.groups.moveTitle}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={!aiReadiness.ready}
-                onClick={() =>
-                  setOptimizeScope({
-                    kind: "selected",
-                    toolIds: [...selectedIds],
-                  })
-                }
-              >
-                <Sparkles className="h-4 w-4" />
-                {t.servers.aiOptimizer.actionSelected}
-              </Button>
+                </div>
+              </div>
             </div>
-          ) : null}
+          </div>
 
           {isLoading && !data ? (
             <TableRowsSkeleton />
@@ -481,13 +475,28 @@ export function ServerToolsTab({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-10" />
+                  <TableHead className="w-10">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-primary"
+                      checked={
+                        data.items.length > 0 &&
+                        selectedIds.length === data.items.length
+                      }
+                      aria-label={t.servers.selectAllTools}
+                      onChange={(event) =>
+                        setScopedSelection(
+                          event.target.checked
+                            ? data.items.map((tool) => tool.id)
+                            : [],
+                        )
+                      }
+                    />
+                  </TableHead>
                   <TableHead>{t.servers.toolName}</TableHead>
                   <TableHead>{t.servers.method}</TableHead>
                   <TableHead>{t.servers.toolPathSummary}</TableHead>
-                  <TableHead>{t.servers.groups.groupColumn}</TableHead>
                   <TableHead>{t.servers.enabled}</TableHead>
-                  <TableHead>{t.servers.allowMutation}</TableHead>
                   <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
@@ -517,22 +526,17 @@ export function ServerToolsTab({
                     </TableCell>
                     <TableCell className="font-medium">{tool.name}</TableCell>
                     <TableCell>
-                      <Badge variant="outline">{tool.method}</Badge>
+                      <MethodBadge method={tool.method} />
                     </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {isClientRequestDefinition(tool.requestDefinition)
-                        ? summarizeDefinitionPath(
-                            tool.requestDefinition,
-                            serverValueNameById,
-                          )
-                        : ""}
-                    </TableCell>
-                    <TableCell>
-                      {tool.groupId && groupNameById.has(tool.groupId) ? (
-                        <Badge variant="secondary">
-                          {groupNameById.get(tool.groupId)}
-                        </Badge>
-                      ) : null}
+                    <TableCell className="max-w-[26rem] font-mono text-xs">
+                      <span className="block truncate">
+                        {isClientRequestDefinition(tool.requestDefinition)
+                          ? summarizeDefinitionPath(
+                              tool.requestDefinition,
+                              serverValueNameById,
+                            )
+                          : ""}
+                      </span>
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-col gap-1">
@@ -558,31 +562,6 @@ export function ServerToolsTab({
                           </span>
                         ) : null}
                       </div>
-                    </TableCell>
-                    <TableCell>
-                      <Switch
-                        checked={tool.allowMutation}
-                        disabled={updateTool.isPending}
-                        onCheckedChange={(allowMutation) => {
-                          if (
-                            !allowMutation &&
-                            tool.allowMutation &&
-                            tool.enabled &&
-                            !window.confirm(
-                              t.servers.mutationConfirmDescription,
-                            )
-                          ) {
-                            return;
-                          }
-                          updateTool.mutate({
-                            serverId,
-                            toolId: tool.id,
-                            expectedRevision: configRevision,
-                            allowMutation,
-                            enabled: allowMutation ? tool.enabled : false,
-                          });
-                        }}
-                      />
                     </TableCell>
                     <TableCell>
                       <DropdownMenu>
@@ -615,7 +594,7 @@ export function ServerToolsTab({
                             {t.servers.duplicateTool}
                           </DropdownMenuItem>
                           <DropdownMenuItem
-                            onSelect={() => setMoveToolIds([tool.id])}
+                            onSelect={() => setMoveToolId(tool.id)}
                           >
                             <FolderInput className="h-4 w-4" />
                             {t.servers.groups.moveTitle}
@@ -702,16 +681,13 @@ export function ServerToolsTab({
           onClose={() => setGroupDialog(null)}
         />
       ) : null}
-      {moveToolIds ? (
+      {moveToolId ? (
         <ToolGroupMoveDialog
           serverId={serverId}
           configRevision={configRevision}
           groups={groups}
-          toolIds={moveToolIds}
-          onClose={() => {
-            setMoveToolIds(null);
-            setScopedSelection([]);
-          }}
+          toolId={moveToolId}
+          onClose={() => setMoveToolId(null)}
         />
       ) : null}
       {openApiOpen ? (

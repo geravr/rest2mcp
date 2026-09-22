@@ -31,33 +31,27 @@ export function ToolGroupMoveDialog({
   serverId,
   configRevision = 1,
   groups,
-  toolIds,
+  toolId,
   onClose,
 }: {
   serverId: string;
   configRevision?: number;
   groups: McpToolGroupSummary[];
-  toolIds: string[];
+  toolId: string;
   onClose: () => void;
 }) {
   const { t } = useTranslations();
   const assignGroup = useAssignMcpToolGroup();
   const [target, setTarget] = useState<string>(UNGROUPED_TARGET);
 
-  const description =
-    toolIds.length === 1
-      ? t.servers.groups.moveDescriptionOne
-      : t.servers.groups.moveDescription.replace(
-          "{count}",
-          String(toolIds.length),
-        );
-
   return (
     <Dialog open onOpenChange={(next) => (!next ? onClose() : undefined)}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{t.servers.groups.moveTitle}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
+          <DialogDescription>
+            {t.servers.groups.moveDescription}
+          </DialogDescription>
         </DialogHeader>
 
         <Field>
@@ -91,13 +85,13 @@ export function ToolGroupMoveDialog({
           </Button>
           <Button
             type="button"
-            disabled={assignGroup.isPending || toolIds.length === 0}
+            disabled={assignGroup.isPending}
             onClick={() =>
               assignGroup.mutate(
                 {
                   serverId,
                   expectedRevision: configRevision,
-                  toolIds,
+                  toolIds: [toolId],
                   groupId: target === UNGROUPED_TARGET ? null : target,
                 },
                 { onSuccess: () => onClose() },

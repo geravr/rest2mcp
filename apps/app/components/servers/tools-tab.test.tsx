@@ -105,6 +105,7 @@ const createGroupMutate = vi.fn();
 const renameGroupMutate = vi.fn();
 const deleteGroupMutate = vi.fn();
 const assignGroupMutate = vi.fn();
+const deleteToolMutate = vi.fn();
 
 vi.mock("@/components/admin-list", () => ({
   AdminListPagination: () => null,
@@ -225,6 +226,10 @@ vi.mock("@/hooks/use-mcp", () => ({
     isPending: false,
     error: null,
   }),
+  useDeleteMcpTool: () => ({
+    mutate: deleteToolMutate,
+    isPending: false,
+  }),
 }));
 
 function renderTab(
@@ -317,6 +322,7 @@ beforeEach(() => {
   renameGroupMutate.mockReset();
   deleteGroupMutate.mockReset();
   assignGroupMutate.mockReset();
+  deleteToolMutate.mockReset();
 });
 
 describe("ServerToolsTab group rail", () => {
@@ -337,20 +343,6 @@ describe("ServerToolsTab group rail", () => {
     expect(toolsInputs.at(-1)).toMatchObject({ group: "all" });
     expect(railEntryButton(/^All/)).toHaveAttribute("aria-current", "true");
     expect(railEntryButton(/^Bills/)).not.toHaveAttribute("aria-current");
-  });
-
-  it("shows each row's group membership in the group column", () => {
-    renderTab();
-
-    const invoiceRow = screen.getByText("send_invoice").closest("tr");
-    expect(
-      within(invoiceRow as HTMLElement).getByText("Invoices"),
-    ).toBeInTheDocument();
-
-    const contactRow = screen.getByText("get_contact").closest("tr");
-    expect(
-      within(contactRow as HTMLElement).queryByText("Invoices"),
-    ).not.toBeInTheDocument();
   });
 
   it("selects a group from the rail and reports All as unfiltered", async () => {
@@ -611,6 +603,37 @@ describe("ServerToolsTab selection bar", () => {
     );
   });
 
+  it("selects and clears every visible row from the header checkbox", async () => {
+    const user = userEvent.setup();
+    renderTab();
+
+    await user.click(
+      screen.getByRole("checkbox", { name: "Select all tools on this page" }),
+    );
+
+    expect(screen.getByRole("checkbox", { name: "get_contact" })).toBeChecked();
+    expect(
+      screen.getByRole("checkbox", { name: "list_contacts" }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole("checkbox", { name: "send_invoice" }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole("button", { name: "Move to…" }),
+    ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("checkbox", { name: "Select all tools on this page" }),
+    );
+
+    expect(
+      screen.getByRole("checkbox", { name: "get_contact" }),
+    ).not.toBeChecked();
+    expect(
+      screen.queryByRole("button", { name: "Move to…" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("keeps the narrow fallback count server-wide while search filters", () => {
     renderTab({ initialQ: "invo" });
 
@@ -622,27 +645,15 @@ describe("ServerToolsTab selection bar", () => {
     renderTab({ initialGroup: "mtg_1" });
 
     await user.click(screen.getByRole("checkbox", { name: "send_invoice" }));
-    await user.click(screen.getByRole("button", { name: "Remove from group" }));
+    await user.click(screen.getByRole("button", { name: "Move to…" }));
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Ungrouped" }),
+    );
 
     expect(assignGroupMutate).toHaveBeenCalledWith(
       expect.objectContaining({ toolIds: ["mct_3"], groupId: null }),
       expect.anything(),
     );
-  });
-
-  it("still opens the move dialog from the bulk bar", async () => {
-    const user = userEvent.setup();
-    renderTab();
-
-    await user.click(screen.getByRole("checkbox", { name: "get_contact" }));
-    await user.click(screen.getByRole("checkbox", { name: "list_contacts" }));
-
-    await user.click(screen.getByRole("button", { name: "Move tools" }));
-
-    const dialog = screen.getByRole("dialog");
-    expect(
-      within(dialog).getByText(/move the 2 selected tools to a group/i),
-    ).toBeInTheDocument();
   });
 
   it("clears the selection when the group filter changes", async () => {
@@ -659,7 +670,7 @@ describe("ServerToolsTab selection bar", () => {
       screen.getByRole("checkbox", { name: "get_contact" }),
     ).not.toBeChecked();
     expect(
-      screen.queryByRole("button", { name: "Move tools" }),
+      screen.queryByRole("button", { name: "Move to…" }),
     ).not.toBeInTheDocument();
   });
 
@@ -678,7 +689,7 @@ describe("ServerToolsTab selection bar", () => {
       screen.getByRole("checkbox", { name: "get_contact" }),
     ).not.toBeChecked();
     expect(
-      screen.queryByRole("button", { name: "Move tools" }),
+      screen.queryByRole("button", { name: "Move to…" }),
     ).not.toBeInTheDocument();
   });
 });
@@ -934,9 +945,8 @@ describe("ServerToolsTab AI optimization entry points", () => {
     optimizeMocks.dialogProps.length = 0;
     const user = userEvent.setup();
     renderTab();
-    const checkboxes = await screen.findAllByRole("checkbox");
-    await user.click(checkboxes[0]!);
-    await user.click(checkboxes[1]!);
+    await user.click(screen.getByRole("checkbox", { name: "get_contact" }));
+    await user.click(screen.getByRole("checkbox", { name: "list_contacts" }));
     await user.click(
       screen.getByRole("button", { name: /optimize selected with ai/i }),
     );

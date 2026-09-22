@@ -29,20 +29,20 @@ describe("ToolGroupMoveDialog", () => {
     assignMutate.mockClear();
   });
 
-  it("moves to Ungrouped by default with every selected tool id", async () => {
+  it("moves to Ungrouped by default and explains the single-tool scope", async () => {
     const user = userEvent.setup();
     render(
       <ToolGroupMoveDialog
         serverId="mcs_1"
         configRevision={3}
         groups={[group()]}
-        toolIds={["tool_1", "tool_2"]}
+        toolId="tool_1"
         onClose={() => {}}
       />,
     );
 
     expect(
-      screen.getByText(/does not change tool configuration or published/i),
+      screen.getByText(/move the selected tool to a group/i),
     ).toBeInTheDocument();
     expect(screen.getByRole("combobox")).toHaveTextContent("Ungrouped");
 
@@ -52,7 +52,7 @@ describe("ToolGroupMoveDialog", () => {
       {
         serverId: "mcs_1",
         expectedRevision: 3,
-        toolIds: ["tool_1", "tool_2"],
+        toolIds: ["tool_1"],
         groupId: null,
       },
       expect.anything(),
@@ -66,7 +66,7 @@ describe("ToolGroupMoveDialog", () => {
         serverId="mcs_1"
         configRevision={3}
         groups={[group()]}
-        toolIds={["tool_1", "tool_2"]}
+        toolId="tool_1"
         onClose={() => {}}
       />,
     );
@@ -80,21 +80,6 @@ describe("ToolGroupMoveDialog", () => {
       unknown,
     ];
     expect(payload.groupId).toBe("mtg_1");
-    expect(payload.toolIds).toEqual(["tool_1", "tool_2"]);
-  });
-
-  it("uses the singular copy for a single tool", () => {
-    render(
-      <ToolGroupMoveDialog
-        serverId="mcs_1"
-        groups={[group()]}
-        toolIds={["tool_1"]}
-        onClose={() => {}}
-      />,
-    );
-
-    expect(
-      screen.getByText(/move the selected tool to a group/i),
-    ).toBeInTheDocument();
+    expect(payload.toolIds).toEqual(["tool_1"]);
   });
 });

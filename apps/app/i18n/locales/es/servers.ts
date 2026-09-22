@@ -52,6 +52,7 @@ export const esServers = {
     pathPlaceholder: "/contacts/",
     allowMutation: "Permitir mutación",
     enabled: "Activa",
+    selectAllTools: "Seleccionar todas las herramientas de esta página",
     toolCap:
       "Este servidor ya tiene {count} herramientas; el límite es {limit}.",
     curlLabel: "Comando curl",
@@ -88,8 +89,6 @@ export const esServers = {
       deleting: "Eliminando…",
       moveTitle: "Mover herramientas",
       moveDescription:
-        "Mueve las {count} herramientas seleccionadas a un grupo. Mover solo cambia la organización en Studio — no cambia la configuración de las herramientas ni el comportamiento publicado del agente.",
-      moveDescriptionOne:
         "Mueve la herramienta seleccionada a un grupo. Mover solo cambia la organización en Studio — no cambia la configuración de la herramienta ni el comportamiento publicado del agente.",
       moveTarget: "Grupo",
       moveSubmit: "Mover herramientas",
@@ -99,12 +98,10 @@ export const esServers = {
       deleted: "Grupo eliminado. Sus herramientas ahora están sin grupo.",
       toolsMoved: "Organización de herramientas actualizada.",
       railLabel: "Grupos",
-      groupColumn: "Grupo",
       groupActions: "Acciones de {group}",
       searchLabel: "Buscar herramientas",
       searchPlaceholder: "Buscar herramientas…",
       moveTo: "Mover a…",
-      removeFromGroup: "Quitar del grupo",
       inGroupHeader: "Herramientas en {group}",
       emptyGroup:
         "Este grupo aún no tiene herramientas. Selecciona herramientas y muévelas aquí.",

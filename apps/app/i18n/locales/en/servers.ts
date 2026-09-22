@@ -52,6 +52,7 @@ export const enServers = {
     pathPlaceholder: "/contacts/",
     allowMutation: "Allow mutation",
     enabled: "Enabled",
+    selectAllTools: "Select all tools on this page",
     toolCap: "This server already has {count} tools; the limit is {limit}.",
     curlLabel: "curl command",
     curlPlaceholder: "curl https://api.example.com/v1/items",
@@ -88,8 +89,6 @@ export const enServers = {
       deleting: "Deleting…",
       moveTitle: "Move tools",
       moveDescription:
-        "Move the {count} selected tools to a group. Moving changes only Studio organization — it does not change tool configuration or published agent behavior.",
-      moveDescriptionOne:
         "Move the selected tool to a group. Moving changes only Studio organization — it does not change tool configuration or published agent behavior.",
       moveTarget: "Group",
       moveSubmit: "Move tools",
@@ -99,12 +98,10 @@ export const enServers = {
       deleted: "Group deleted. Its tools are now ungrouped.",
       toolsMoved: "Tool organization updated.",
       railLabel: "Groups",
-      groupColumn: "Group",
       groupActions: "Actions for {group}",
       searchLabel: "Search tools",
       searchPlaceholder: "Search tools…",
       moveTo: "Move to…",
-      removeFromGroup: "Remove from group",
       inGroupHeader: "Tools in {group}",
       emptyGroup:
         "This group has no tools yet. Select tools and move them here.",
